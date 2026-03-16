@@ -1,36 +1,6 @@
-let Baileys;
-let makeWASocket;
-let useMultiFileAuthState, DisconnectReason, jidDecode, fetchLatestBaileysVersion, downloadMediaMessage;
-
-async function loadBaileys() {
-    if (Baileys) return;
-    const mod = await import('@whiskeysockets/baileys');
-    
-    // Check all possible places
-    console.log('[WA-Debug] Root keys count:', Object.keys(mod).length);
-    if (mod.default) console.log('[WA-Debug] Default keys count:', Object.keys(mod.default).length);
-    
-    // Find where the exported functions are
-    let target = null;
-    if (mod.useMultiFileAuthState) {
-        target = mod;
-    } else if (mod.default && mod.default.useMultiFileAuthState) {
-        target = mod.default;
-    } else {
-        // Fallback to searching in all keys if necessary or using the root
-        target = mod;
-    }
-    
-    Baileys = target;
-    makeWASocket = target.default || target;
-    useMultiFileAuthState = target.useMultiFileAuthState;
-    DisconnectReason = target.DisconnectReason;
-    jidDecode = target.jidDecode;
-    fetchLatestBaileysVersion = target.fetchLatestBaileysVersion;
-    downloadMediaMessage = target.downloadMediaMessage;
-    
-    console.log('[WA-Debug] useMultiFileAuthState type:', typeof useMultiFileAuthState);
-}
+const Baileys = require('@whiskeysockets/baileys');
+const makeWASocket = Baileys.default || Baileys;
+const { useMultiFileAuthState, DisconnectReason, jidDecode, fetchLatestBaileysVersion } = Baileys;
 
 
 const { Channel } = require('./Channel');
@@ -50,32 +20,14 @@ class WhatsAppSessionChannel extends Channel {
         this.authFolder = path.resolve(process.cwd(), 'sessions', this.sessionId);
         this.sock = null;
         this.messageHandler = null;
-        this.store = null; 
+        this.store = null;
     }
 
     async initialize() {
-        await loadBaileys();
-        const sessionsDir = path.join(process.cwd(), 'sessions');
-        if (!fs.existsSync(sessionsDir)) {
-            fs.mkdirSync(sessionsDir, { recursive: true });
+        if (!fs.existsSync(path.join(process.cwd(), 'sessions'))) {
+            fs.mkdirSync(path.join(process.cwd(), 'sessions'));
         }
-        // Nettoyer les sessions corrompues (creds sans registered = échec précédent)
-        const credsPath = path.join(this.authFolder, 'creds.json');
-        if (fs.existsSync(credsPath)) {
-            try {
-                const creds = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
-                if (!creds.registered) {
-                    console.log('[WA] Session non enregistrée détectée, nettoyage...');
-                    fs.rmSync(this.authFolder, { recursive: true, force: true });
-                    fs.mkdirSync(this.authFolder, { recursive: true });
-                }
-            } catch (e) {
-                console.log('[WA] Session corrompue, nettoyage...');
-                fs.rmSync(this.authFolder, { recursive: true, force: true });
-                fs.mkdirSync(this.authFolder, { recursive: true });
-            }
-        }
-        console.log(`[WA-Session] QR mode for: ${this.sessionId}`);
+        console.log(`[WA-Session] ${this.pairingNumber ? 'Pairing mode' : 'QR mode'} for: ${this.sessionId}`);
         console.log(`[WA-Session] 📱 QR code sera disponible sur: /whatsapp-qr`);
     }
 
@@ -88,8 +40,7 @@ class WhatsAppSessionChannel extends Channel {
             version,
             auth: state,
             logger: pino({ level: 'silent' }),
-            browser: ['TIM', 'Chrome', '121.0.6167.85'], // Plus moderne
-            printQRInTerminal: false
+            browser: ['Ubuntu', 'Chrome', '20.0.04']
         });
 
         // Request pairing code if requested and not registered
@@ -100,13 +51,13 @@ class WhatsAppSessionChannel extends Channel {
                 try {
                     const code = await this.sock.requestPairingCode(cleanNumber);
                     console.log('\n--------------------------------------------------');
-                    console.log('🔑 VOTRE NOUVEAU CODE DE CONNEXION WHATSAPP :');
+                    console.log('🔑 VOTRE CODE DE CONNEXION WHATSAPP :');
                     console.log(`👉 ${code}`);
                     console.log('--------------------------------------------------\n');
                 } catch (err) {
                     console.error('❌ Erreur lors de la requête du code:', err.message);
                 }
-            }, 5000); // Augmenté un peu pour laisser la connexion se stabiliser
+            }, 3000);
         }
 
 
@@ -117,69 +68,32 @@ class WhatsAppSessionChannel extends Channel {
         this.sock.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect, qr } = update;
             console.log('[WA] Connection Update:', { connection, hasQr: !!qr });
-            
+
             if (qr) {
                 console.log('--------------------------------------------------');
                 console.log('👉 SCANNEZ CE QR CODE POUR CONNECTER WHATSAPP :');
                 qrcodeTerminal.generate(qr, { small: true });
                 console.log('--------------------------------------------------');
-                
-                // Sauvegarder en image pour l'utilisateur
+
+                // Sauvegarder en image pour accès via /whatsapp-qr
                 try {
-                    // Utiliser le dossier actuel pour éviter les erreurs de chemin absolu
                     const artifactPath = path.join(process.cwd(), 'whatsapp_qr.png');
                     await qrcodeImage.toFile(artifactPath, qr, {
                         color: { dark: '#000000', light: '#ffffff' },
                         width: 512
                     });
-                    console.log(`✅ QR Image générée localement: ${artifactPath}`);
-                    
-                    // Tentative de copie vers l'endroit où Gemini l'attend si on est en local
-                    const brainId = '177236d7-8641-49f3-863f-68b583062a32';
-                    const geminiPath = `/Users/dikenson/.gemini/antigravity/brain/${brainId}/whatsapp_qr.png`;
-                    if (fs.existsSync(path.dirname(geminiPath))) {
-                        fs.copyFileSync(artifactPath, geminiPath);
-                        console.log(`✅ QR Image copiée pour l'interface: ${geminiPath}`);
-                    }
+                    console.log(`✅ QR Image générée: ${artifactPath}`);
                 } catch (err) {
-                    console.error('❌ Erreur génération image QR:', err.message);
+                    console.error('❌ Erreur génération image QR:', err);
                 }
             }
 
             if (connection === 'close') {
                 const error = lastDisconnect?.error;
-                const statusCode = error?.output?.statusCode;
-                const errorMsg = error?.message || error?.output?.payload?.message || '';
-                console.log('[WA] Connexion fermée. Erreur:', errorMsg, 'Code:', statusCode);
-
-                const isLoggedOut = statusCode === DisconnectReason.loggedOut;
-                const isQrTimeout = errorMsg.includes('QR refs attempts ended') || statusCode === 408;
-
-                // Nettoyer la session si non enregistrée ou loggedOut
-                const credsPath = path.join(this.authFolder, 'creds.json');
-                let isRegistered = false;
-                if (fs.existsSync(credsPath)) {
-                    try {
-                        const creds = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
-                        isRegistered = !!creds.registered;
-                    } catch (e) { /* session corrompue */ }
-                }
-
-                if (isLoggedOut || !isRegistered) {
-                    console.log('[WA] Session non enregistrée ou loggedOut. Nettoyage...');
-                    fs.rmSync(this.authFolder, { recursive: true, force: true });
-                    fs.mkdirSync(this.authFolder, { recursive: true });
-                }
-
-                // Toujours redémarrer sauf si loggedOut avec session enregistrée (= déconnexion volontaire)
-                const wasReallyLoggedOut = isLoggedOut && isRegistered;
-                if (!wasReallyLoggedOut) {
-                    const delay = isQrTimeout ? 5000 : 3000;
-                    console.log(`[WA] Nouvelle tentative dans ${delay/1000}s...`);
-                    setTimeout(() => this.start(), delay);
-                } else {
-                    console.log('[WA] Déconnexion volontaire. Pas de reconnexion.');
-                }
+                console.log('[WA] Connexion fermée. Erreur:', error);
+                const shouldReconnect = error?.output?.statusCode !== DisconnectReason.loggedOut;
+                console.log('[WA] Reconnexion tentative:', shouldReconnect);
+                if (shouldReconnect) this.start();
             } else if (connection === 'open') {
                 console.log('✅ [WA] WhatsApp connecté avec succès !');
                 this.isActive = true;
@@ -195,17 +109,17 @@ class WhatsAppSessionChannel extends Channel {
             for (const msg of m.messages) {
                 const remoteJid = msg.key.remoteJid;
                 const isMe = msg.key.fromMe;
-                
+
                 // Ignorer les messages de protocole sans contenu utile
                 if (!msg.message || msg.message?.protocolMessage || msg.message?.senderKeyDistributionMessage) continue;
 
                 const selfJidClean = selfJid?.split(':')[0];
                 const remoteJidClean = remoteJid?.split('@')[0].split(':')[0];
                 const isMessageToSelf = remoteJidClean === selfJidClean || remoteJid?.endsWith('@lid');
-                
+
                 // Détecter si le message vient d'un BOT (Baileys ou autre bot instance)
                 const isBotId = msg.key.id.startsWith('BAE5') || msg.key.id.startsWith('3EB0') || msg.key.id.length > 20;
-                
+
                 console.log(`[WA-Debug] MSG: fromMe=${isMe}, isBotId=${isBotId}, remoteJid=${remoteJid}, toSelf=${isMessageToSelf}`);
 
                 // Empêcher les boucles : on ignore tout ce qui est marqué fromMe SAUF si c'est nous qui écrivons manuellement (pas un ID de bot)
@@ -215,18 +129,18 @@ class WhatsAppSessionChannel extends Channel {
                     // C'est l'utilisateur humain qui écrit à son propre bot, on continue
                 } else if (isMe) {
                     // C'est un message envoyé par le bot vers quelqu'un d'autre ou par nous manuellement vers quelqu'un d'autre
-                    continue; 
+                    continue;
                 }
 
                 const name = msg.pushName || 'User';
                 const text = this._extractText(msg);
                 const isAction = !!(msg.message?.listResponseMessage || msg.message?.buttonsResponseMessage);
-                
+
                 // Extraction média (Image)
                 let photo = null;
                 const msgContent = msg.message;
                 if (msgContent?.imageMessage) {
-                    photo = [{ file_id: msg.key.id, isWa: true, msg: msg }]; 
+                    photo = [{ file_id: msg.key.id, isWa: true, msg: msg }];
                 }
 
                 if (this.messageHandler && (text || photo)) {
@@ -258,11 +172,11 @@ class WhatsAppSessionChannel extends Channel {
 
     async sendMessage(userId, text, options = {}) {
         if (!this.sock || !this.isActive) return { success: false, error: 'Not connected' };
-        
+
         // Sécurité JID: on s'assure que l'ID a le bon suffixe si c'est un pur numéro
         const jid = (userId.includes('@')) ? userId : `${userId}@s.whatsapp.net`;
         const cleanText = this._stripHTML(text);
-        
+
         try {
             let result;
             if (options.media_url) {
@@ -284,13 +198,13 @@ class WhatsAppSessionChannel extends Channel {
     async deleteMessage(jid, messageId) {
         if (!this.sock || !this.isActive || !messageId) return;
         try {
-            await this.sock.sendMessage(jid, { 
-                delete: { 
-                    remoteJid: jid, 
-                    fromMe: true, 
-                    id: messageId, 
-                    participant: undefined 
-                } 
+            await this.sock.sendMessage(jid, {
+                delete: {
+                    remoteJid: jid,
+                    fromMe: true,
+                    id: messageId,
+                    participant: undefined
+                }
             });
             return true;
         } catch (e) {
@@ -301,7 +215,7 @@ class WhatsAppSessionChannel extends Channel {
 
     async sendInteractive(userId, text, buttons = [], options = {}) {
         if (!this.sock || !this.isActive) return;
-        
+
         const jid = (userId.includes('@')) ? userId : `${userId}@s.whatsapp.net`;
         const sentIds = [];
         console.log(`[WA-Interactive] To: ${jid}, Buttons: ${buttons.length}, HasMedia: ${!!options.media_url}`);
@@ -314,8 +228,8 @@ class WhatsAppSessionChannel extends Channel {
             if (buttons.length > 0) {
                 if (textMenu) textMenu += "\n\n";
                 textMenu += "*📋 OPTIONS DISPONIBLES :*\n";
-                buttons.forEach((b, i) => { 
-                    textMenu += `*${i+1}* — ${b.title}\n`; 
+                buttons.forEach((b, i) => {
+                    textMenu += `*${i+1}* — ${b.title}\n`;
                 });
                 textMenu += "\n_Répondez avec le chiffre correspondant._";
             }
@@ -333,7 +247,7 @@ class WhatsAppSessionChannel extends Channel {
                 const result = await this.sock.sendMessage(jid, { text: textMenu || "Choisissez une option :" });
                 if (result?.key?.id) sentIds.push(result.key.id);
             }
-            
+
             return { success: true, sentIds };
         } catch (e) {
             console.error('[WA-Interactive] Multi-send failed:', e);
@@ -343,10 +257,10 @@ class WhatsAppSessionChannel extends Channel {
 
     _extractText(msg) {
         const m = msg.message;
-        const text = m?.listResponseMessage?.singleSelectReply?.selectedRowId || 
-                     m?.buttonsResponseMessage?.selectedButtonId || 
-                     m?.conversation || 
-                     m?.extendedTextMessage?.text || 
+        const text = m?.listResponseMessage?.singleSelectReply?.selectedRowId ||
+                     m?.buttonsResponseMessage?.selectedButtonId ||
+                     m?.conversation ||
+                     m?.extendedTextMessage?.text ||
                      m?.imageMessage?.caption ||
                      m?.videoMessage?.caption ||
                      "";
@@ -355,11 +269,12 @@ class WhatsAppSessionChannel extends Channel {
 
     async downloadMedia(msg) {
         try {
+            const { downloadMediaMessage } = require('@whiskeysockets/baileys');
             const buffer = await downloadMediaMessage(
                 msg,
                 'buffer',
                 {},
-                { 
+                {
                     logger: pino({ level: 'silent' }),
                     reuploadRequest: this.sock.updateMediaMessage
                 }
@@ -381,7 +296,7 @@ class WhatsAppSessionChannel extends Channel {
             .replace(/<em[^>]*>(.*?)<\/em>/gi, '_$1_')
             .replace(/<br\s*\/?>/gi, '\n')
             .replace(/&nbsp;/g, ' ');
-            
+
         // Supprimer toutes les autres balises
         return t.replace(/<[^>]*>/g, '').trim();
     }

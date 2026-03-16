@@ -29,12 +29,11 @@ async function initChannels() {
         registry.register(wa);
     }
 
-    // 3. WhatsApp (Session / Baileys - Pairing Code)
+    // 3. WhatsApp (Session / TCT style)
     const waSessionId = process.env.WHATSAPPD_SESSION_ID || process.env.WHATSAPP_SESSION_ID;
     if (waSessionId || process.env.SESSION_ID) {
         const sid = waSessionId || process.env.SESSION_ID || process.env.WHATSAPPD_SESSION_ID;
-        const pairingNumber = process.env.WHATSAPP_PAIRING_NUMBER || null;
-        const was = new WhatsAppSessionChannel({ sessionId: sid, pairingNumber });
+        const was = new WhatsAppSessionChannel({ sessionId: sid });
         await was.initialize();
         registry.register(was);
     }
