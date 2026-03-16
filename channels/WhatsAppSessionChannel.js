@@ -148,10 +148,42 @@ class WhatsAppSessionChannel extends Channel {
 
             if (connection === 'close') {
                 const error = lastDisconnect?.error;
-                console.log('[WA] Connexion fermée. Erreur:', error);
-                const shouldReconnect = error?.output?.statusCode !== DisconnectReason.loggedOut;
-                console.log('[WA] Reconnexion tentative:', shouldReconnect);
-                if (shouldReconnect) this.start();
+                const statusCode = error?.output?.statusCode;
+                const errorMsg = error?.message || error?.output?.payload?.message || '';
+                console.log('[WA] Connexion fermée. Erreur:', errorMsg, 'Code:', statusCode);
+
+                const isLoggedOut = statusCode === DisconnectReason.loggedOut;
+                const isQrTimeout = errorMsg.includes('QR refs attempts ended') || statusCode === 408;
+
+                if (isLoggedOut) {
+                    console.log('[WA] Déconnecté (loggedOut). Nettoyage session...');
+                    fs.rmSync(this.authFolder, { recursive: true, force: true });
+                    fs.mkdirSync(this.authFolder, { recursive: true });
+                }
+
+                if (!isLoggedOut) {
+                    // Si QR timeout, nettoyer la session non-enregistrée avant de réessayer
+                    if (isQrTimeout) {
+                        console.log('[WA] QR expiré. Nettoyage et nouvelle tentative dans 5s...');
+                        const credsPath = path.join(this.authFolder, 'creds.json');
+                        if (fs.existsSync(credsPath)) {
+                            try {
+                                const creds = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
+                                if (!creds.registered) {
+                                    fs.rmSync(this.authFolder, { recursive: true, force: true });
+                                    fs.mkdirSync(this.authFolder, { recursive: true });
+                                }
+                            } catch (e) {
+                                fs.rmSync(this.authFolder, { recursive: true, force: true });
+                                fs.mkdirSync(this.authFolder, { recursive: true });
+                            }
+                        }
+                        setTimeout(() => this.start(), 5000);
+                    } else {
+                        console.log('[WA] Reconnexion dans 3s...');
+                        setTimeout(() => this.start(), 3000);
+                    }
+                }
             } else if (connection === 'open') {
                 console.log('✅ [WA] WhatsApp connecté avec succès !');
                 this.isActive = true;
@@ -196,8 +228,8 @@ class WhatsAppSessionChannel extends Channel {
                 
                 // Extraction média (Image)
                 let photo = null;
-                const m = msg.message;
-                if (m?.imageMessage) {
+                const msgContent = msg.message;
+                if (msgContent?.imageMessage) {
                     photo = [{ file_id: msg.key.id, isWa: true, msg: msg }]; 
                 }
 
