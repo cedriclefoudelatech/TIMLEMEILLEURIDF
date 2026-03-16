@@ -1,4 +1,6 @@
 const { getLastMenuId, addMessageToTrack, getUser } = require('./database');
+const path = require('path');
+const fs = require('fs');
 
 /**
  * L'Unique porte de sortie pour les menus du bot.
@@ -58,7 +60,16 @@ async function safeEdit(ctx, text, opts = {}) {
         const isFileId = photo && typeof photo === 'string' && !photo.includes('/') && !photo.includes('.');
 
         if (photo && typeof photo === 'string' && !photo.startsWith('http') && !photo.startsWith('data:') && !isFileId) {
-            photo = baseUrl + (photo.startsWith('/') ? '' : '/') + photo;
+            // Résolution chemin local absolu pour upload direct (plus fiable que URL si local)
+            const relativePath = photo.startsWith('/public/') ? photo.replace('/public/', 'web/public/') : photo;
+            const absolutePath = path.resolve(process.cwd(), relativePath.startsWith('/') ? relativePath.substring(1) : relativePath);
+            
+            if (fs.existsSync(absolutePath)) {
+                console.log('[SAFE-EDIT] Local file detected, using absolute path:', absolutePath);
+                photo = absolutePath;
+            } else {
+                photo = baseUrl + (photo.startsWith('/') ? '' : '/') + photo;
+            }
         }
 
         // Auto-detection: Si l'URL de la photo est en réalité une vidéo
@@ -76,7 +87,15 @@ async function safeEdit(ctx, text, opts = {}) {
          const baseUrl = (settings.dashboard_url || '').replace(/\/$/, '');
          if (!video.includes('/') && !video.includes('.')) { /* file_id, do nothing */ }
          else {
-             video = baseUrl + (video.startsWith('/') ? '' : '/') + video;
+             const relativePath = video.startsWith('/public/') ? video.replace('/public/', 'web/public/') : video;
+             const absolutePath = path.resolve(process.cwd(), relativePath.startsWith('/') ? relativePath.substring(1) : relativePath);
+             
+             if (fs.existsSync(absolutePath)) {
+                 console.log('[SAFE-EDIT] Local video detected, using absolute path:', absolutePath);
+                 video = absolutePath;
+             } else {
+                 video = baseUrl + (video.startsWith('/') ? '' : '/') + video;
+             }
          }
     }
     let reply_markup = opts.reply_markup || (opts.inline_keyboard ? opts : (Array.isArray(opts) ? { inline_keyboard: opts } : null));
