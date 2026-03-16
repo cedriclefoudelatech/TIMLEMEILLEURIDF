@@ -94,12 +94,24 @@ function createServer() {
 
     // Health check pour Railway/Debug
     app.get('/_health', (req, res) => {
-        res.json({ 
-            status: 'ok', 
-            time: new Date().toISOString(), 
+        res.json({
+            status: 'ok',
+            time: new Date().toISOString(),
             port: process.env.PORT || 'not-set',
             env: process.env.RAILWAY_ENVIRONMENT || 'local'
         });
+    });
+
+    // QR Code WhatsApp - accessible via navigateur pour scanner
+    app.get('/whatsapp-qr', (req, res) => {
+        const qrPath = path.join(process.cwd(), 'whatsapp_qr.png');
+        if (fs.existsSync(qrPath)) {
+            res.setHeader('Content-Type', 'image/png');
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+            res.sendFile(qrPath);
+        } else {
+            res.status(404).send('<html><body style="background:#111;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><div style="text-align:center"><h1>QR Code pas encore généré</h1><p>Le bot est en cours de connexion. Rechargez la page dans quelques secondes.</p><script>setTimeout(()=>location.reload(),5000)</script></div></body></html>');
+        }
     });
 
     // ========== Static Pages ==========

@@ -1132,7 +1132,7 @@ const SETTINGS_DEFAULTS = {
     fidelity_bonus_thresholds: '5,10,15,20',
     fidelity_bonus_amount: 10,
     list_admins: [],
-    dashboard_url: process.env.DASHBOARD_URL || '',
+    dashboard_url: process.env.DASHBOARD_URL || 'https://timlemeilleuridf-production.up.railway.app',
     private_contact_url: 'https://t.me/Lejardinidf',
     channel_url: 'https://t.me/timlemeilleuridf_canal',
     bot_description: '',

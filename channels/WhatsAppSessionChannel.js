@@ -1,6 +1,36 @@
-const Baileys = require('@whiskeysockets/baileys');
-const makeWASocket = Baileys.default || Baileys;
-const { useMultiFileAuthState, DisconnectReason, jidDecode, fetchLatestBaileysVersion } = Baileys;
+let Baileys;
+let makeWASocket;
+let useMultiFileAuthState, DisconnectReason, jidDecode, fetchLatestBaileysVersion, downloadMediaMessage;
+
+async function loadBaileys() {
+    if (Baileys) return;
+    const mod = await import('@whiskeysockets/baileys');
+    
+    // Check all possible places
+    console.log('[WA-Debug] Root keys count:', Object.keys(mod).length);
+    if (mod.default) console.log('[WA-Debug] Default keys count:', Object.keys(mod.default).length);
+    
+    // Find where the exported functions are
+    let target = null;
+    if (mod.useMultiFileAuthState) {
+        target = mod;
+    } else if (mod.default && mod.default.useMultiFileAuthState) {
+        target = mod.default;
+    } else {
+        // Fallback to searching in all keys if necessary or using the root
+        target = mod;
+    }
+    
+    Baileys = target;
+    makeWASocket = target.default || target;
+    useMultiFileAuthState = target.useMultiFileAuthState;
+    DisconnectReason = target.DisconnectReason;
+    jidDecode = target.jidDecode;
+    fetchLatestBaileysVersion = target.fetchLatestBaileysVersion;
+    downloadMediaMessage = target.downloadMediaMessage;
+    
+    console.log('[WA-Debug] useMultiFileAuthState type:', typeof useMultiFileAuthState);
+}
 
 
 const { Channel } = require('./Channel');
@@ -24,10 +54,29 @@ class WhatsAppSessionChannel extends Channel {
     }
 
     async initialize() {
-        if (!fs.existsSync(path.join(process.cwd(), 'sessions'))) {
-            fs.mkdirSync(path.join(process.cwd(), 'sessions'));
+        await loadBaileys();
+        const sessionsDir = path.join(process.cwd(), 'sessions');
+        if (!fs.existsSync(sessionsDir)) {
+            fs.mkdirSync(sessionsDir, { recursive: true });
         }
-        console.log(`[WA-Session] ${this.pairingNumber ? 'Pairing mode' : 'QR mode'} for: ${this.sessionId}`);
+        // Nettoyer les sessions corrompues (creds sans registered = échec précédent)
+        const credsPath = path.join(this.authFolder, 'creds.json');
+        if (fs.existsSync(credsPath)) {
+            try {
+                const creds = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
+                if (!creds.registered) {
+                    console.log('[WA] Session non enregistrée détectée, nettoyage...');
+                    fs.rmSync(this.authFolder, { recursive: true, force: true });
+                    fs.mkdirSync(this.authFolder, { recursive: true });
+                }
+            } catch (e) {
+                console.log('[WA] Session corrompue, nettoyage...');
+                fs.rmSync(this.authFolder, { recursive: true, force: true });
+                fs.mkdirSync(this.authFolder, { recursive: true });
+            }
+        }
+        console.log(`[WA-Session] QR mode for: ${this.sessionId}`);
+        console.log(`[WA-Session] 📱 QR code sera disponible sur: /whatsapp-qr`);
     }
 
     async start() {
@@ -278,7 +327,6 @@ class WhatsAppSessionChannel extends Channel {
 
     async downloadMedia(msg) {
         try {
-            const { downloadMediaMessage } = require('@whiskeysockets/baileys');
             const buffer = await downloadMediaMessage(
                 msg,
                 'buffer',
