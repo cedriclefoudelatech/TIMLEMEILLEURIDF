@@ -39,7 +39,8 @@ class WhatsAppSessionChannel extends Channel {
             version,
             auth: state,
             logger: pino({ level: 'silent' }),
-            browser: ['Ubuntu', 'Chrome', '20.0.04']
+            browser: ['TIM', 'Chrome', '121.0.6167.85'], // Plus moderne
+            printQRInTerminal: false
         });
 
         // Request pairing code if requested and not registered
@@ -50,13 +51,13 @@ class WhatsAppSessionChannel extends Channel {
                 try {
                     const code = await this.sock.requestPairingCode(cleanNumber);
                     console.log('\n--------------------------------------------------');
-                    console.log('🔑 VOTRE CODE DE CONNEXION WHATSAPP :');
+                    console.log('🔑 VOTRE NOUVEAU CODE DE CONNEXION WHATSAPP :');
                     console.log(`👉 ${code}`);
                     console.log('--------------------------------------------------\n');
                 } catch (err) {
                     console.error('❌ Erreur lors de la requête du code:', err.message);
                 }
-            }, 3000);
+            }, 5000); // Augmenté un peu pour laisser la connexion se stabiliser
         }
 
 
@@ -76,14 +77,23 @@ class WhatsAppSessionChannel extends Channel {
                 
                 // Sauvegarder en image pour l'utilisateur
                 try {
-                    const artifactPath = '/Users/dikenson/.gemini/antigravity/brain/cf1aca72-3cc4-4f68-8de6-35d423170a8a/whatsapp_qr.png';
+                    // Utiliser le dossier actuel pour éviter les erreurs de chemin absolu
+                    const artifactPath = path.join(process.cwd(), 'whatsapp_qr.png');
                     await qrcodeImage.toFile(artifactPath, qr, {
                         color: { dark: '#000000', light: '#ffffff' },
-                        width: 256
+                        width: 512
                     });
-                    console.log(`✅ QR Image générée: ${artifactPath}`);
+                    console.log(`✅ QR Image générée localement: ${artifactPath}`);
+                    
+                    // Tentative de copie vers l'endroit où Gemini l'attend si on est en local
+                    const brainId = '177236d7-8641-49f3-863f-68b583062a32';
+                    const geminiPath = `/Users/dikenson/.gemini/antigravity/brain/${brainId}/whatsapp_qr.png`;
+                    if (fs.existsSync(path.dirname(geminiPath))) {
+                        fs.copyFileSync(artifactPath, geminiPath);
+                        console.log(`✅ QR Image copiée pour l'interface: ${geminiPath}`);
+                    }
                 } catch (err) {
-                    console.error('❌ Erreur génération image QR:', err);
+                    console.error('❌ Erreur génération image QR:', err.message);
                 }
             }
 
