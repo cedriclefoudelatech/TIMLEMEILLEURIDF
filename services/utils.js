@@ -16,9 +16,10 @@ async function safeEdit(ctx, text, opts = {}) {
 
     // 1. Médias & Clavier
     let photo = opts.photo || null;
-    const video = opts.video || null;
     if (photo === '') photo = null;
     console.log('[SAFE-EDIT] Received opts.photo:', opts.photo ? JSON.stringify(opts.photo).substring(0, 120) : null);
+
+    let isDetectedVideo = false;
 
     // Résolution Photo (Base URL si path relatif + Extraction Liste)
     if (photo) {
@@ -29,6 +30,7 @@ async function safeEdit(ctx, text, opts = {}) {
         if (Array.isArray(photo)) {
             if (photo.length > 0) {
                 const p0 = photo[0];
+                if (p0.type === 'video') isDetectedVideo = true;
                 photo = typeof p0 === 'string' ? p0 : (p0.url || p0.path || '');
             } else photo = null;
         }
@@ -40,6 +42,7 @@ async function safeEdit(ctx, text, opts = {}) {
                     const arr = JSON.parse(cp);
                     if (arr && arr.length > 0) {
                         const p0 = arr[0];
+                        if (p0.type === 'video') isDetectedVideo = true;
                         photo = typeof p0 === 'string' ? p0 : (p0.url || p0.path || '');
                     } else photo = null;
                 } catch (e) {
@@ -57,8 +60,25 @@ async function safeEdit(ctx, text, opts = {}) {
         if (photo && typeof photo === 'string' && !photo.startsWith('http') && !photo.startsWith('data:') && !isFileId) {
             photo = baseUrl + (photo.startsWith('/') ? '' : '/') + photo;
         }
+
+        // Auto-detection: Si l'URL de la photo est en réalité une vidéo
+        const videoExts = ['.mp4', '.mov', '.avi', '.mkv', '.webm'];
+        if (isDetectedVideo || (photo && typeof photo === 'string' && videoExts.some(ext => photo.toLowerCase().endsWith(ext)))) {
+            if (!opts.video) opts.video = photo;
+            photo = null;
+        }
     }
 
+    let video = opts.video || null;
+    if (video === '') video = null;
+    if (video && typeof video === 'string' && !video.startsWith('http') && !video.startsWith('data:')) {
+         const settings = ctx.state?.settings || {};
+         const baseUrl = (settings.dashboard_url || '').replace(/\/$/, '');
+         if (!video.includes('/') && !video.includes('.')) { /* file_id, do nothing */ }
+         else {
+             video = baseUrl + (video.startsWith('/') ? '' : '/') + video;
+         }
+    }
     let reply_markup = opts.reply_markup || (opts.inline_keyboard ? opts : (Array.isArray(opts) ? { inline_keyboard: opts } : null));
     if (reply_markup && reply_markup.reply_markup) reply_markup = reply_markup.reply_markup;
     const extra = { parse_mode: 'HTML', disable_web_page_preview: true, reply_markup };
