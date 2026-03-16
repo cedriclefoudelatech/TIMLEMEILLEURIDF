@@ -1,0 +1,318 @@
+const fs = require('fs');
+const envPath = fs.existsSync('.env.railway') ? '.env.railway' : '.env';
+require('dotenv').config({ path: envPath });
+
+console.log(`[System] Loading environment from: ${envPath}`);
+if (process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID) {
+    console.log('[System] Detected Railway Environment');
+    console.log('[System] Deployment ID:', process.env.RAILWAY_DEPLOYMENT_ID || 'Unknown');
+    console.log('[System] Replica Index:', process.env.RAILWAY_REPLICA_INDEX || '0');
+}
+
+const { createServer, setBotInstance } = require('./server');
+const { dispatcher } = require('./services/dispatcher');
+const { registry } = require('./channels/ChannelRegistry');
+const { initChannels } = require('./services/channel_init');
+const { registerUser, getAppSettings, markUserBlocked, markUserUnblocked, getAllUsersForBroadcast, getAllActiveUsers, updateUserData } = require('./services/database');
+const { setBroadcastBot, broadcastMessage } = require('./services/broadcast');
+const { safeEdit } = require('./services/utils');
+const { notifyAdmins } = require('./services/notifications');
+
+// Handlers
+const { setupStartHandler, initStartState, getMainMenuKeyboard, getLivreurMenuKeyboard } = require('./handlers/start');
+const { setupAdminHandlers } = require('./handlers/admin');
+const { setupOrderSystem, initOrderState, checkAbandonedCarts } = require('./handlers/order_system');
+
+const PORT = process.env.PORT || 3000;
+console.log(`[System] Final PORT determined: ${PORT}`);
+const awaitingPollResponse = new Map();
+
+let isStarting = false;
+
+async function main() {
+    if (isStarting) return;
+    isStarting = true;
+
+    console.log('🚀 DÉMARRAGE VERSION RAILWAY STABLE...');
+    
+    const finalPort = process.env.PORT || 3000;
+
+    // 1. Démarrage du serveur Web IMMEDIAT
+    const server = createServer();
+    server.listen(finalPort, '0.0.0.0', () => {
+        console.log(`\n✅ SERVEUR WEB ACTIF SUR LE PORT ${finalPort}`);
+        console.log(`🔗 TEST HEALTH : https://timlemeilleuridf-production.up.railway.app/_health\n`);
+    });
+
+    // 2. Initialisation du Dispatcher (Simule Telegraf)
+    console.log('📦 Initialisation du Dispatcher...');
+    await dispatcher.init();
+
+    // Middleware de maintenance et tracking
+    dispatcher.use(async (ctx, next) => {
+        try {
+            const settings = ctx.state.settings;
+
+            // Check if maintenance mode is enabled
+            if (settings && (settings.maintenance_mode === true || settings.maintenance_mode === 'true')) {
+                const adminContact = settings.maintenance_contact || 'https://t.me/Lejardinidf';
+                const maintenanceMessage = settings.maintenance_message || '🔧 <b>Le bot est actuellement en maintenance.</b>\n\nNous revenons bientôt !\n\nContactez l\'admin : @Lejardinidf';
+
+                if (ctx.callbackQuery) {
+                    await ctx.answerCbQuery(maintenanceMessage, { show_alert: true }).catch(() => { });
+                    return;
+                }
+
+                if (ctx.message) {
+                    await ctx.reply(maintenanceMessage + `\n\n📱 Contact : ${adminContact}`, { parse_mode: 'HTML' }).catch(() => { });
+                    if (ctx.platform === 'telegram') await ctx.deleteMessage().catch(() => { });
+                    return;
+                }
+                return;
+            }
+
+            // Tracking activité pour paniers abandonnés
+            const { userLastActivity } = require('./handlers/order_system');
+            if (userLastActivity && ctx.from?.id) {
+                userLastActivity.set(ctx.from.id, Date.now());
+            }
+
+            // Gestion des bannissements
+            const registeredUser = ctx.state.user;
+            if (registeredUser && registeredUser.is_blocked) {
+                if (!registeredUser.data || registeredUser.data.blocked_by_admin !== true) {
+                    await markUserUnblocked(registeredUser.id);
+                    registeredUser.is_blocked = false;
+                } else {
+                    if (ctx.callbackQuery) {
+                        return ctx.answerCbQuery("⛔️ Votre compte est suspendu.", { show_alert: true }).catch(() => { });
+                    }
+                    return ctx.reply("⛔️ <b>ACCÈS REFUSÉ</b>\n\nVotre compte a été suspendu par l'administration. Contactez le support pour plus d'informations.", { parse_mode: 'HTML' }).catch(() => { });
+                }
+            }
+
+            await next();
+
+            // Nettoyage messages telegram
+            if (ctx.platform === 'telegram' && ctx.message && ctx.chat?.type === 'private') {
+                await ctx.deleteMessage().catch(() => { });
+            }
+        } catch (e) {
+            console.error('❌ Middleware Fatal Error:', e.message);
+            throw e;
+        }
+    });
+
+    // Liaison des Handlers existants au dispatcher
+    setupStartHandler(dispatcher);
+    setupAdminHandlers(dispatcher);
+    setupOrderSystem(dispatcher);
+
+    // Sondages (Actions & Messages)
+    dispatcher.action(/^poll_free_([\w-]+)(?:_(\d+))?$/, async (ctx) => {
+        const bcId = ctx.match[1];
+        const bcIndex = ctx.match[2];
+        const userId = ctx.from.id;
+        awaitingPollResponse.set(userId, { bcId, bcIndex });
+        await ctx.answerCbQuery();
+        await ctx.reply("🖋 <b>Veuillez écrire votre réponse ci-dessous :</b>", { parse_mode: 'HTML' });
+    });
+
+    dispatcher.action(/^poll_vote_([\w-]+)_(\d+)(?:_(\d+))?$/, async (ctx) => {
+        const bcId = ctx.match[1];
+        const optIdx = parseInt(ctx.match[2]);
+        const bcIndex = ctx.match[3];
+        const userId = ctx.from.id;
+        const { recordPollVote } = require('./services/database');
+
+        try {
+            const userName = ctx.from.first_name || 'Utilisateur';
+            const result = await recordPollVote(bcId, optIdx, userId, userName, ctx.platform);
+            
+            if (result === 'already_voted') {
+                await ctx.answerCbQuery("⚠️ Vous avez déjà voté pour ce sondage !", { show_alert: true });
+                return;
+            }
+
+            await ctx.answerCbQuery("✅ Vote enregistré, merci !");
+
+            if (bcIndex !== undefined) {
+                await ctx.reply("✅ Vote enregistré !");
+                return;
+            }
+
+            const settings = ctx.state.settings;
+            const user = ctx.state.user;
+
+            let text = `✅ <b>Merci pour votre participation !</b>\n\nQue souhaitez-vous faire maintenant ?`;
+            let keyboard = user.is_livreur ? await getLivreurMenuKeyboard(ctx, settings, user) : await getMainMenuKeyboard(ctx, settings, user);
+            
+            await ctx.reply(text, keyboard);
+        } catch (e) {
+            console.error('[POLL-VOTE] Error:', e);
+            await ctx.answerCbQuery("⚠️ Erreur lors du vote.", { show_alert: true });
+        }
+    });
+
+    dispatcher.on('text', async (ctx, next) => {
+        const userId = ctx.from.id;
+        if (awaitingPollResponse.has(userId)) {
+            const { bcId, bcIndex } = awaitingPollResponse.get(userId);
+            awaitingPollResponse.delete(userId);
+            const text = (ctx.message.text || '').trim();
+            if (text) {
+                const { recordPollFreeResponse } = require('./services/database');
+                try {
+                    const userName = ctx.from.first_name || 'Utilisateur';
+                    await recordPollFreeResponse(bcId, userId, userName, text);
+                    const replyText = `✅ <b>Votre réponse a été enregistrée :</b>\n\n<i>"${text}"</i>\n\nMerci pour votre participation !`;
+                    
+                    if (bcIndex !== undefined) {
+                        await ctx.reply(replyText);
+                        return ctx.reply("🔄 Menu Principal", await getMainMenuKeyboard(ctx, ctx.state.settings, ctx.state.user));
+                    }
+                    await ctx.reply(replyText, await getMainMenuKeyboard(ctx, ctx.state.settings, ctx.state.user));
+                    return;
+                } catch (e) {
+                    console.error('[POLL-FREE] Error:', e);
+                    await ctx.reply("⚠️ Une erreur est survenue.");
+                }
+            }
+        }
+        await next();
+    });
+
+
+    // 2. Initialisation des Canaux
+    await initChannels();
+
+    // 3. Liaison Canaux -> Dispatcher
+    const channels = registry.query();
+    for (const channel of channels) {
+        channel.onMessage(async (msg) => {
+            await dispatcher.handleUpdate(channel, msg);
+        });
+        if (channel.type === 'telegram') {
+            const bot = channel.getBotInstance ? channel.getBotInstance() : null;
+            if (bot) {
+                setBotInstance(bot);
+                setBroadcastBot(bot);
+
+                // Config Telegram (Description, Commandes)
+                getAppSettings().then(settings => {
+                    if (settings.bot_description) bot.telegram.setMyDescription(settings.bot_description).catch(() => { });
+                    if (settings.bot_short_description) bot.telegram.setMyShortDescription(settings.bot_short_description).catch(() => { });
+                    bot.telegram.setMyCommands([
+                        { command: 'start', description: '🏠 Lancer le bot / Accueil' },
+                        { command: 'menu', description: '🛒 Voir le catalogue' },
+                        { command: 'orders', description: '📦 Mes commandes' },
+                        { command: 'help', description: '❓ Aide et support' }
+                    ]).catch(() => { });
+                }).catch(() => { });
+            }
+        }
+    }
+
+    // 5. États persistants & Timers
+    await Promise.all([initOrderState(), initStartState(), require('./handlers/admin').initAdminState()]);
+
+    const runAutomatedTasks = () => {
+        const tgChannel = registry.query('telegram');
+        const bot = tgChannel?.getBotInstance();
+        if (bot) {
+            startAutomatedTimer(bot);
+            setInterval(() => checkPlannedOrders(bot), 60000);
+            setInterval(() => checkAbandonedCarts(bot), 1800000);
+            setInterval(() => runAutomatedSync(bot), 900000);
+        }
+        setInterval(() => checkScheduledBroadcasts(), 60000);
+    };
+    runAutomatedTasks();
+
+    console.log('\n🚀 Environnement Multi-Canaux prêt !');
+}
+
+// Fonctionnalités héritées de l'ancien index.js
+async function checkPlannedOrders(bot) {
+    try {
+        const { getUpcomingPlannedOrders, markNotifSent } = require('./services/database');
+        const orders = await getUpcomingPlannedOrders();
+        if (orders.length === 0) return;
+        const nowParis = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Paris" }));
+        for (const order of orders) {
+            if (!order.scheduled_at) continue;
+            const [datePart, timePart] = order.scheduled_at.split(' ');
+            const [h, m] = timePart.replace('h', ':').split(':');
+            const schedDate = new Date(`${datePart}T${h}:${m}:00`);
+            const diffMin = Math.round((schedDate - nowParis) / 60000);
+            if (diffMin <= 60 && diffMin > 30 && !order.notif_1h_sent) {
+                await sendPlannedAlert(bot, order, '1h');
+                await markNotifSent(order.id, '1h');
+            }
+            if (diffMin <= 30 && diffMin > 0 && !order.notif_30m_sent) {
+                await sendPlannedAlert(bot, order, '30m');
+                await markNotifSent(order.id, '30m');
+            }
+        }
+    } catch (e) {
+        console.error('❌ Error checkPlannedOrders:', e.message);
+    }
+}
+
+async function sendPlannedAlert(bot, order, type) {
+    const text = `⏰ <b>RAPPEL COMMANDE PLANIFIÉE (${type})</b>\n\n...`;
+    if (order.livreur_id) {
+        const livreurTgId = order.livreur_id.replace('telegram_', '');
+        await bot.telegram.sendMessage(livreurTgId, text, { parse_mode: 'HTML' }).catch(() => { });
+    }
+    notifyAdmins(bot, `📢 [INFO ADMIN] ${text}`);
+}
+
+async function checkScheduledBroadcasts() {
+    try {
+        const { supabase, COL_BROADCASTS } = require('./services/database');
+        const { broadcastMessage } = require('./services/broadcast');
+        const now = new Date().toISOString();
+        const { data: pending } = await supabase.from(COL_BROADCASTS).select('*').eq('status', 'pending').lte('start_at', now);
+        if (!pending || pending.length === 0) return;
+        for (const bc of pending) {
+            let finalMsg = bc.message || '';
+            let mediaUrls = [];
+            if (finalMsg.includes('|||MEDIA_URLS|||')) {
+                const parts = finalMsg.split('|||MEDIA_URLS|||');
+                finalMsg = parts[0];
+                try { mediaUrls = JSON.parse(parts[1]); } catch (e) { }
+            }
+            await broadcastMessage(bc.target_platform, finalMsg, { id: bc.id, mediaUrls: mediaUrls, start_at: bc.start_at, end_at: bc.end_at, badge: bc.badge });
+        }
+    } catch (e) { console.error('❌ Error checkScheduledBroadcasts:', e.message); }
+}
+
+function startAutomatedTimer(bot) {
+    setInterval(async () => {
+        try {
+            const settings = await getAppSettings();
+            if (settings.msg_auto_timer && settings.msg_auto_timer.length > 5) {
+                await broadcastMessage('all', settings.msg_auto_timer);
+            }
+        } catch (e) { }
+    }, 6 * 60 * 60 * 1000);
+}
+
+async function runAutomatedSync(bot) {
+    try {
+        const users = await getAllUsersForBroadcast('telegram', 'user');
+        if (!users) return;
+        for (const u of users) {
+             try {
+                const chatId = String(u.platform_id || '').replace('telegram_', '');
+                if (chatId) await bot.telegram.sendChatAction(chatId, 'typing');
+                if (u.is_blocked && (!u.data || u.data.blocked_by_admin !== true)) await markUserUnblocked(u.id);
+            } catch (err) {
+                if (err.code === 403) await markUserBlocked(u.id, false);
+            }
+        }
+    } catch (e) { }
+}
+
+main().catch(console.error);
