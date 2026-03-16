@@ -155,34 +155,30 @@ class WhatsAppSessionChannel extends Channel {
                 const isLoggedOut = statusCode === DisconnectReason.loggedOut;
                 const isQrTimeout = errorMsg.includes('QR refs attempts ended') || statusCode === 408;
 
-                if (isLoggedOut) {
-                    console.log('[WA] Déconnecté (loggedOut). Nettoyage session...');
+                // Nettoyer la session si non enregistrée ou loggedOut
+                const credsPath = path.join(this.authFolder, 'creds.json');
+                let isRegistered = false;
+                if (fs.existsSync(credsPath)) {
+                    try {
+                        const creds = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
+                        isRegistered = !!creds.registered;
+                    } catch (e) { /* session corrompue */ }
+                }
+
+                if (isLoggedOut || !isRegistered) {
+                    console.log('[WA] Session non enregistrée ou loggedOut. Nettoyage...');
                     fs.rmSync(this.authFolder, { recursive: true, force: true });
                     fs.mkdirSync(this.authFolder, { recursive: true });
                 }
 
-                if (!isLoggedOut) {
-                    // Si QR timeout, nettoyer la session non-enregistrée avant de réessayer
-                    if (isQrTimeout) {
-                        console.log('[WA] QR expiré. Nettoyage et nouvelle tentative dans 5s...');
-                        const credsPath = path.join(this.authFolder, 'creds.json');
-                        if (fs.existsSync(credsPath)) {
-                            try {
-                                const creds = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
-                                if (!creds.registered) {
-                                    fs.rmSync(this.authFolder, { recursive: true, force: true });
-                                    fs.mkdirSync(this.authFolder, { recursive: true });
-                                }
-                            } catch (e) {
-                                fs.rmSync(this.authFolder, { recursive: true, force: true });
-                                fs.mkdirSync(this.authFolder, { recursive: true });
-                            }
-                        }
-                        setTimeout(() => this.start(), 5000);
-                    } else {
-                        console.log('[WA] Reconnexion dans 3s...');
-                        setTimeout(() => this.start(), 3000);
-                    }
+                // Toujours redémarrer sauf si loggedOut avec session enregistrée (= déconnexion volontaire)
+                const wasReallyLoggedOut = isLoggedOut && isRegistered;
+                if (!wasReallyLoggedOut) {
+                    const delay = isQrTimeout ? 5000 : 3000;
+                    console.log(`[WA] Nouvelle tentative dans ${delay/1000}s...`);
+                    setTimeout(() => this.start(), delay);
+                } else {
+                    console.log('[WA] Déconnexion volontaire. Pas de reconnexion.');
                 }
             } else if (connection === 'open') {
                 console.log('✅ [WA] WhatsApp connecté avec succès !');
