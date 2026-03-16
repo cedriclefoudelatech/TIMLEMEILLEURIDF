@@ -1151,11 +1151,11 @@ async function getAppSettings() {
         return _settingsCache;
     }
 
-    const { data } = await supabase.from(COL_SETTINGS).select('*').eq('id', 'config').limit(1);
+    const { data } = await supabase.from(COL_SETTINGS).select('*').eq('id', 'default').limit(1);
     let settings = { ...SETTINGS_DEFAULTS };
 
     if (!data || data.length === 0) {
-        await supabase.from(COL_SETTINGS).insert([{ id: 'config', ...SETTINGS_DEFAULTS }]);
+        await supabase.from(COL_SETTINGS).insert([{ id: 'default', ...SETTINGS_DEFAULTS }]);
     } else {
         // Robust merging: Only use DB values if they are NOT null or undefined
         const dbSettings = data[0];
@@ -1196,7 +1196,7 @@ async function getAppSettings() {
 
     if (Object.keys(repairs).length > 0) {
         console.log(`🔧 [DB] Auto-réparation de ${Object.keys(repairs).length} champs :`, Object.keys(repairs).join(', '));
-        supabase.from(COL_SETTINGS).update(repairs).eq('id', 'config').then(() => { }, () => { });
+        supabase.from(COL_SETTINGS).update(repairs).eq('id', 'default').then(() => { }, () => { });
     }
 
 
@@ -1214,7 +1214,7 @@ async function updateAppSettings(settings) {
         }
     }
 
-    const { error } = await supabase.from(COL_SETTINGS).update(filtered).eq('id', 'config');
+    const { error } = await supabase.from(COL_SETTINGS).update(filtered).eq('id', 'default');
     if (error) {
         console.error('❌ Error updating settings:', error);
         throw error;

@@ -44,6 +44,7 @@
             color: var(--text-main);
             display: flex;
             height: 100vh;
+            height: 100dvh; /* Dynamic viewport height - gère la barre d'adresse mobile */
             overflow: hidden;
         }
 
@@ -1004,6 +1005,50 @@
                 opacity: 0.7;
                 margin-bottom: 8px;
                 display: block;
+            }
+
+            /* Settings form grids: forcer 1 colonne sur mobile */
+            .settings-grid, [style*="grid-template-columns: 1fr 1fr"] {
+                grid-template-columns: 1fr !important;
+            }
+
+            /* Tables: meilleur scroll horizontal */
+            .table-container {
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            /* Boutons d'action: empiler en colonne */
+            .action-buttons, .btn-group {
+                flex-direction: column;
+                gap: 8px;
+            }
+
+            /* Main content: scroll fluide */
+            .main {
+                overflow-y: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            /* Inputs plus grands pour tactile */
+            input, select, textarea {
+                min-height: 44px;
+                font-size: 16px !important; /* Empêche le zoom auto iOS */
+            }
+        }
+
+        @media (max-width: 480px) {
+            .main {
+                padding: 12px;
+                padding-bottom: 100px;
+            }
+
+            .stat-value {
+                font-size: 28px;
+            }
+
+            h1, .page-title {
+                font-size: 20px;
             }
         }
 
@@ -2898,10 +2943,9 @@
             }
             const section = document.getElementById('section-' + id) || document.getElementById('section-logistique');
             try {
-                if (!window.appSettings) {
-                    window.appSettings = await api('/settings', 'GET', null, silent);
-                    updateNavbarIcons();
-                }
+                // Toujours recharger les settings pour éviter les données stales
+                window.appSettings = await api('/settings', 'GET', null, silent);
+                updateNavbarIcons();
 
                 if (id === 'overview' || id === 'insights' || !window.appStats) {
                     const statsTask = api('/stats', 'GET', null, silent).then(data => {
@@ -4500,7 +4544,8 @@
                 };
                 await api('/settings', 'POST', s);
                 showToast('Paramètres mis à jour !');
-                window.appSettings = s;
+                // Recharger les settings depuis le serveur pour confirmation
+                window.appSettings = await api('/settings', 'GET', null, true);
                 updateNavbarIcons();
             } catch (err) { showToast(err.message, 'error'); }
         }

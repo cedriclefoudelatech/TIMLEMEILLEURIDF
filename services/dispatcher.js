@@ -79,8 +79,9 @@ class Dispatcher {
                 username: '',
                 type: 'user'
             }, channel.type);
-            
+
             msg.user = registeredUser;
+            msg._isNewUser = isNew;
         } catch (e) {
             console.error(`[Dispatcher] Auto-reg failed:`, e.message);
         }
@@ -330,8 +331,14 @@ class Dispatcher {
             }
         }
 
-        // 3. Fallback WhatsApp: "menu", "start", etc. ou CHIFFRE si menu fallback affiché
-        if (['menu', 'hi', 'bonjour', 'start', 'boutique', 'catalogue'].includes(lowerText)) {
+        // 3. Fallback: mots-clés courants → menu principal
+        if (['menu', 'hi', 'bonjour', 'salut', 'hello', 'hey', 'yo', 'coucou', 'start', 'boutique', 'catalogue', 'commander', 'commande', 'aide', 'help'].includes(lowerText)) {
+            if (this.commands.has('start')) return await this.commands.get('start')(ctx);
+        }
+
+        // 3b. WhatsApp: auto-accueil si premier message (pas besoin de /start)
+        if (ctx.platform === 'whatsapp' && !this.userLastButtons.has(ctx.from.id)) {
+            console.log(`[Dispatcher] WhatsApp auto-welcome pour ${ctx.from.id}`);
             if (this.commands.has('start')) return await this.commands.get('start')(ctx);
         }
 
