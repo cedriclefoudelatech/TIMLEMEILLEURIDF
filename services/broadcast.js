@@ -57,7 +57,13 @@ async function broadcastMessage(platform, message, options = {}) {
     }
 
     // 1. Upload des nouveaux médias vers Supabase Storage
-    const normalizedExistingUrls = existingUrls.map(u => typeof u === 'string' ? { url: u, type: (u.match(/\.(mp4|mov|avi|wmv)$/) ? 'video' : 'photo') } : u);
+    const normalizedExistingUrls = existingUrls.map(u => {
+        if (typeof u === 'string') {
+            const isVideo = u.match(/\.(mp4|mov|avi|wmv|webm|mkv)(\?.*)?$/i);
+            return { url: u, type: isVideo ? 'video' : 'photo' };
+        }
+        return u;
+    });
     const unifiedMediaList = [...normalizedExistingUrls];
     const { uploadMediaBuffer } = require('./database');
     
@@ -79,7 +85,11 @@ async function broadcastMessage(platform, message, options = {}) {
 
             const publicUrl = await uploadMediaBuffer(fileBuffer, finalPath, f.mimetype);
             if (publicUrl) {
-                unifiedMediaList.push({ url: publicUrl, type: f.mimetype.includes('video') ? 'video' : 'photo' });
+                unifiedMediaList.push({ 
+                    url: publicUrl, 
+                    source: !publicUrl ? fileBuffer : null,
+                    type: f.mimetype.includes('video') ? 'video' : 'photo' 
+                });
             } else {
                 debugLog(`[BC-UPLOAD-WARN] Pas d'URL retournée pour ${f.name}. Fallback to buffer.`);
                 unifiedMediaList.push({ source: fileBuffer, filename: f.name, type: f.mimetype.includes('video') ? 'video' : 'photo' });
@@ -249,24 +259,51 @@ async function sendToUser(user, message, unifiedMediaList = [], options = {}) {
 
         try {
             if (buttons.length > 0) {
+                const m0 = unifiedMediaList[0] || {};
+                let mediaUrl = m0.url || null;
+                // Résolution chemin local si relatif
+                if (mediaUrl && !mediaUrl.startsWith('http') && mediaUrl.includes('/')) {
+                    const abs = path.resolve(process.cwd(), mediaUrl.startsWith('/') ? mediaUrl.substring(1) : mediaUrl);
+                    if (fs.existsSync(abs)) mediaUrl = abs;
+                }
+
                 await channel.sendInteractive(cleanPid, message, buttons, {
-                    media_url: unifiedMediaList[0]?.url || null,
-                    media_type: unifiedMediaList[0]?.type || 'photo'
+                    media_url: mediaUrl,
+                    media_type: m0.type || 'photo'
                 });
             } else {
-                // WhatsApp: On envoie chaque média s'il y en a plusieurs
+                // WhatsApp: Chaque média s'il y en a plusieurs
                 if (unifiedMediaList.length > 1) {
                     for (let i = 0; i < unifiedMediaList.length; i++) {
                         const m = unifiedMediaList[i];
-                        const cap = (i === 0) ? message : ""; // Caption seulement sur le premier
-                        await channel.sendMessage(cleanPid, cap, { media_url: m.url, media_type: m.type });
+                        const cap = (i === 0) ? message : "";
+                        let mediaUrl = m.url || null;
+                        
+                        if (mediaUrl && !mediaUrl.startsWith('http') && mediaUrl.includes('/')) {
+                            const abs = path.resolve(process.cwd(), mediaUrl.startsWith('/') ? mediaUrl.substring(1) : mediaUrl);
+                            if (fs.existsSync(abs)) mediaUrl = abs;
+                        }
+
+                        await channel.sendMessage(cleanPid, cap, { 
+                            media_url: mediaUrl, 
+                            media_type: m.type,
+                            source: m.source || null 
+                        });
                         await new Promise(r => setTimeout(r, 500));
                     }
                 } else {
                     const m = unifiedMediaList[0];
+                    let mediaUrl = m?.url || null;
+
+                    if (mediaUrl && !mediaUrl.startsWith('http') && mediaUrl.includes('/')) {
+                        const abs = path.resolve(process.cwd(), mediaUrl.startsWith('/') ? mediaUrl.substring(1) : mediaUrl);
+                        if (fs.existsSync(abs)) mediaUrl = abs;
+                    }
+
                     await channel.sendMessage(cleanPid, message, { 
-                        media_url: m?.url || null, 
-                        media_type: m?.type || 'photo' 
+                        media_url: mediaUrl, 
+                        media_type: m?.type || 'photo',
+                        source: m?.source || null
                     });
                 }
             }

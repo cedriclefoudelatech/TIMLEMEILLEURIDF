@@ -199,6 +199,10 @@ class Dispatcher {
                 }
                 
                 if (channel.type === 'whatsapp') {
+                    if (!res) {
+                        console.error(`[WA-Reply] sendInteractive/sendMessage a retourné undefined pour ${userId} — socket probablement déconnecté.`);
+                        return { success: false };
+                    }
                     const sentIds = res.sentIds || (res.messageId ? [res.messageId] : []);
                     if (sentIds.length > 0) {
                         this.userLastMessageIds.set(userId, sentIds);
@@ -372,6 +376,9 @@ class Dispatcher {
         }
 
         // 5. WhatsApp: Fallback numérique seulement si non traité par le reste
+        if (ctx.channel.type === 'whatsapp' && /^\d+$/.test(lowerText)) {
+            console.log(`[${platform}] 🔢 PRÉ-FALLBACK: _handled=${ctx._handled}, texte="${lowerText}"`);
+        }
         if (ctx.channel.type === 'whatsapp' && /^\d+$/.test(lowerText) && !ctx._handled) {
             const index = parseInt(lowerText) - 1;
             const lastButtons = this.userLastButtons.get(ctx.from.id);

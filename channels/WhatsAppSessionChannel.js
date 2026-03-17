@@ -215,12 +215,13 @@ class WhatsAppSessionChannel extends Channel {
 
         try {
             let result;
-            if (options.media_url) {
+            if (options.source || options.media_url) {
                 const mediaType = options.media_type === 'video' ? 'video' : 'image';
-                result = await this.sock.sendMessage(jid, {
-                    [mediaType]: { url: options.media_url },
+                const msgPayload = {
+                    [mediaType]: options.source ? options.source : { url: options.media_url },
                     caption: cleanText
-                });
+                };
+                result = await this.sock.sendMessage(jid, msgPayload);
             } else {
                 result = await this.sock.sendMessage(jid, { text: cleanText });
             }
@@ -250,7 +251,10 @@ class WhatsAppSessionChannel extends Channel {
     }
 
     async sendInteractive(userId, text, buttons = [], options = {}) {
-        if (!this.sock || !this.isActive) return;
+        if (!this.sock || !this.isActive) {
+            console.warn(`[WA-Interactive] Socket non disponible (isActive=${this.isActive}, sockNull=${!this.sock}) — message non envoyé à ${userId}`);
+            return { success: false, sentIds: [], error: 'Not connected' };
+        }
 
         const jid = (userId.includes('@')) ? userId : `${userId}@s.whatsapp.net`;
         const sentIds = [];
@@ -271,12 +275,13 @@ class WhatsAppSessionChannel extends Channel {
             }
 
             // 1. Envoi combiné (Média + Texte/Menu)
-            if (options.media_url) {
+            if (options.source || options.media_url) {
                 const mediaType = options.media_type === 'video' ? 'video' : 'image';
-                const result = await this.sock.sendMessage(jid, {
-                    [mediaType]: { url: options.media_url },
+                const msgPayload = {
+                    [mediaType]: options.source ? options.source : { url: options.media_url },
                     caption: textMenu || ""
-                });
+                };
+                const result = await this.sock.sendMessage(jid, msgPayload);
                 if (result?.key?.id) sentIds.push(result.key.id);
             } else {
                 // 2. Envoi Texte seul (Menu inclus)

@@ -111,7 +111,8 @@ function setupOrderSystem(bot) {
         if (product.has_discounts && product.discounts_config && product.discounts_config.length > 0) {
             promoText += `\n📉 <b>PRIX DÉGRESSIFS :</b>\n`;
             product.discounts_config.forEach(d => {
-                promoText += `• ${d.qty} unités : <b>${d.total_price}€</b> (au lieu de ${(product.price * d.qty).toFixed(2)}€)\n`;
+                const discountTotal = d.total || d.total_price;
+                promoText += `• ${d.qty} unités : <b>${discountTotal}€</b> (au lieu de ${(product.price * d.qty).toFixed(2)}€)\n`;
             });
         }
 
@@ -445,8 +446,8 @@ function setupOrderSystem(bot) {
         if (addrState && addrState.step === 1) {
             const addr = ctx.message.text.trim();
 
-            // Sur WhatsApp, un chiffre seul = raccourci menu numérique → laisser passer
-            if (/^\d$/.test(addr)) return next();
+            // Sur WhatsApp, un nombre (1, 2, 10, etc.) = raccourci menu numérique → laisser passer
+            if (/^\d+$/.test(addr)) return next();
 
             const hasNumber = addr.match(/\d/);
             const hasPostalCode = addr.match(/\d{5}/);
@@ -736,19 +737,26 @@ function setupOrderSystem(bot) {
             `💵 <b>NET À RÉGLER : ${finalPrice.toFixed(2)}€</b>\n\n` +
             `Confirmez-vous la commande ?`;
 
+        const settings = ctx.state.settings;
+        const netToPay = finalPrice.toFixed(2);
+        
+        const keyboard = [
+            [Markup.button.callback(`💵 Espèces (${netToPay}€)`, `create_order_CASH_${discount > 0 ? 'discount' : 'normal'}`)],
+            [Markup.button.callback(`💳 Carte Bancaire (${netToPay}€)`, `create_order_CARD_${discount > 0 ? 'discount' : 'normal'}`)],
+            [Markup.button.callback('◀️ Modifier livraison', 'back_to_scheduling')],
+            [Markup.button.callback('❌ Annuler', 'view_catalog')]
+        ];
+
         await safeEdit(ctx, text, {
-            ...Markup.inlineKeyboard([
-                [Markup.button.callback('✅ CONFIRMER LA COMMANDE', `create_order_${discount > 0 ? 'discount' : 'normal'}`)],
-                [Markup.button.callback('◀️ Modifier livraison', 'back_to_scheduling')],
-                [Markup.button.callback('❌ Annuler', 'view_catalog')]
-            ])
+            ...Markup.inlineKeyboard(keyboard)
         });
     }
 
-    bot.action(/^create_order_(.+)$/, async (ctx) => {
+    bot.action(/^create_order_([^_]+)_(.+)$/, async (ctx) => {
         await ctx.answerCbQuery();
         const userId = ctx.from.id;
-        const useDiscount = ctx.match[1] === 'discount';
+        const paymentMethod = ctx.match[1]; // CASH or CARD
+        const useDiscount = ctx.match[2] === 'discount';
         const pending = useDiscount ? pendingOrderConfirmation.get(userId) : pendingOrders.get(userId);
         if (!pending) return safeEdit(ctx, '❌ Session expirée.', Markup.inlineKeyboard([[Markup.button.callback('◀️ Menu', 'main_menu')]]));
 
@@ -776,6 +784,7 @@ function setupOrderSystem(bot) {
             product_name: productList,
             quantity: totalQty,
             total_price: finalPrice,
+            payment_method: paymentMethod.toLowerCase(),
             address: pending.address,
             city: city, // Ajout de la ville pour le filtrage livreur
             platform: ctx.platform,
@@ -822,11 +831,12 @@ function setupOrderSystem(bot) {
         );
 
         // Notify Admin / Livreurs
+        const payIcon = paymentMethod === 'CARD' ? '💳' : '💵';
         const notificationText = `🆕 <b>NOUVELLE COMMANDE !</b>\n\n` +
             `📦 ${productList}\n` +
             `📍 ${pending.address}\n` +
             (pending.scheduled_at ? `🕒 <b>Prévu pour : ${pending.scheduled_at}</b>\n` : `🕒 Dès que possible\n`) +
-            `💰 <b>${finalPrice.toFixed(2)}€</b>\n\n` +
+            `💰 <b>${finalPrice.toFixed(2)}€ (${payIcon} ${paymentMethod})</b>\n\n` +
             `<i>Ouvrez votre espace livreur pour la prendre.</i>`;
         // Alerte aux admins via service central
         const adminAlert = `🚨 <b>NOUVELLE COMMANDE !</b>\n\n` +
@@ -2057,6 +2067,30 @@ function setupOrderSystem(bot) {
         if (userCarts.has(ctx.from.id)) {
             userLastActivity.set(ctx.from.id, Date.now());
         }
+    });
+ 
+    bot.action('set_dispo_true', async (ctx) => {
+        await ctx.answerCbQuery("✅ Vous êtes maintenant DISPONIBLE !");
+        const docId = `${ctx.platform}_${ctx.from.id}`;
+        const { setLivreurAvailability, getUser, getAppSettings } = require('../services/database');
+        await setLivreurAvailability(docId, true);
+        const { getMainMenuKeyboard } = require('./start');
+        const settings = await getAppSettings();
+        const user = await getUser(docId);
+        const keyboard = await getMainMenuKeyboard(ctx, settings, user);
+        await safeEdit(ctx, `🔘 Statut mis à jour : <b>DISPONIBLE ✅</b>`, { parse_mode: 'HTML', ...keyboard });
+    });
+
+    bot.action('set_dispo_false', async (ctx) => {
+        await ctx.answerCbQuery("❌ Vous êtes maintenant INDISPONIBLE.");
+        const docId = `${ctx.platform}_${ctx.from.id}`;
+        const { setLivreurAvailability, getUser, getAppSettings } = require('../services/database');
+        await setLivreurAvailability(docId, false);
+        const { getMainMenuKeyboard } = require('./start');
+        const settings = await getAppSettings();
+        const user = await getUser(docId);
+        const keyboard = await getMainMenuKeyboard(ctx, settings, user);
+        await safeEdit(ctx, `🔘 Statut mis à jour : <b>INDISPONIBLE ❌</b>`, { parse_mode: 'HTML', ...keyboard });
     });
 }
 
