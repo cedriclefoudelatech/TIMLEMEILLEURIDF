@@ -906,9 +906,21 @@ async function getStatsOverview() {
         .select('*', { count: 'exact', head: true })
         .eq('is_livreur', true);
 
-    // Get CA from Sum of delivered orders (more reliable than just global_stats)
-    const { data: caData } = await supabase.from(COL_ORDERS).select('total_price').eq('status', 'delivered');
-    const calculatedCA = (caData || []).reduce((acc, curr) => acc + (parseFloat(curr.total_price) || 0), 0);
+    // Get CA from Sum of delivered orders (fallback to global stats if too many/error)
+    let calculatedCA = 0;
+    try {
+        const { data: caData, error: caError } = await supabase.from(COL_ORDERS)
+            .select('total_price')
+            .eq('status', 'delivered')
+            .order('created_at', { ascending: false })
+            .limit(4000); // 4000 should be enough for a quick snappy sum
+
+        if (!caError && caData) {
+            calculatedCA = caData.reduce((acc, curr) => acc + (parseFloat(curr.total_price) || 0), 0);
+        }
+    } catch (e) {
+        console.error('[STATS] CA calculation error:', e.message);
+    }
 
     const totalCA = calculatedCA || parseFloat(stats.total_ca || stats.global?.total_ca || 0);
 
@@ -1011,7 +1023,7 @@ async function getOrderAnalytics() {
             analytics.byPlatform[platform].products[productName] = 0;
         }
         analytics.byPlatform[platform].products[productName] += (parseInt(order.quantity) || 1);
-        analytics.byProduct[productName].ca += price;
+        // analytics.byProduct[productName].ca += price; // Already added above — do not duplicate
 
         if (order.created_at) {
             const date = new Date(order.created_at);
