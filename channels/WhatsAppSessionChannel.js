@@ -29,6 +29,7 @@ class WhatsAppSessionChannel extends Channel {
         this.sock = null;
         this.messageHandler = null;
         this.store = null;
+        this._restarting = false;
     }
 
     static getLogs() { return waLogs; }
@@ -83,6 +84,11 @@ class WhatsAppSessionChannel extends Channel {
             if (connection === 'close') {
                 const error = lastDisconnect?.error;
                 waLog(`[WA] Connexion fermée. Code: ${error?.output?.statusCode}, Msg: ${error?.message}, Payload: ${JSON.stringify(error?.output?.payload)}`);
+                // Si on est en restart, ne pas reconnecter (restart() s'en charge)
+                if (this._restarting) {
+                    waLog('[WA] Restart en cours, pas de reconnexion auto.');
+                    return;
+                }
                 const shouldReconnect = error?.output?.statusCode !== DisconnectReason.loggedOut;
                 waLog(`[WA] Reconnexion tentative: ${shouldReconnect}`);
                 if (shouldReconnect) this.start();
@@ -162,6 +168,7 @@ class WhatsAppSessionChannel extends Channel {
 
     async restart() {
         waLog('[WA] Restart demandé — nettoyage session et reconnexion...');
+        this._restarting = true;
         // 1. Fermer la connexion existante
         if (this.sock) {
             try { this.sock.end(); } catch (e) {}
@@ -177,6 +184,7 @@ class WhatsAppSessionChannel extends Channel {
         const qrPath = path.join(process.cwd(), 'whatsapp_qr.png');
         if (fs.existsSync(qrPath)) fs.unlinkSync(qrPath);
         // 4. Redémarrer
+        this._restarting = false;
         await this.start();
     }
 
