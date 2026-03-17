@@ -338,20 +338,6 @@ function setupStartHandler(bot) {
     });
 
     // ========== GESTION CODE PARRAIN MANUEL ==========
-    bot.action('tracking_info', async (ctx) => {
-        await ctx.answerCbQuery();
-        await safeEdit(ctx,
-            `📡 <b>Comment activer le tracking ?</b>\n\n` +
-            `Pour que le client puisse recevoir vos estimations d'arrivée :\n\n` +
-            `1. Cliquez sur le trombonne (📎) ou (+) en bas.\n` +
-            `2. Choisissez <b>Position</b> (ou Localisation).\n` +
-            `3. Sélectionnez <b>Partager ma position en direct</b>.\n` +
-            `4. Choisissez la durée (ex: 8 heures).\n\n` +
-            `✅ Une fois activé, le bot enverra automatiquement des alertes (10 min / 5 min) à vos clients en fonction de vos déplacements !`,
-            Markup.inlineKeyboard([[Markup.button.callback('◀️ Retour', 'livreur_menu')]])
-        );
-    });
-
     bot.on('text', async (ctx, next) => {
         const docId = `${ctx.platform}_${ctx.from.id}`;
         const inputText = ctx.message.text.trim();

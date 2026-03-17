@@ -81,15 +81,33 @@ class WhatsAppSessionChannel extends Channel {
 
             if (connection === 'close') {
                 const error = lastDisconnect?.error;
-                waLog(`[WA] Connexion fermée. Code: ${error?.output?.statusCode}, Msg: ${error?.message}, Payload: ${JSON.stringify(error?.output?.payload)}`);
+                const statusCode = error?.output?.statusCode;
+                waLog(`[WA] Connexion fermée. Code: ${statusCode}, Msg: ${error?.message}, Payload: ${JSON.stringify(error?.output?.payload)}`);
+
                 // Si on est en restart, ne pas reconnecter (restart() s'en charge)
                 if (this._restarting) {
                     waLog('[WA] Restart en cours, pas de reconnexion auto.');
                     return;
                 }
-                const shouldReconnect = error?.output?.statusCode !== DisconnectReason.loggedOut;
-                waLog(`[WA] Reconnexion tentative: ${shouldReconnect}`);
-                if (shouldReconnect) this.start();
+
+                // Codes qui nécessitent une session fraîche (nouveau QR)
+                const needsFreshSession = [
+                    DisconnectReason.loggedOut,   // 401 - déconnecté par l'utilisateur
+                    DisconnectReason.forbidden,    // 403 - compte banni/bloqué
+                    DisconnectReason.badSession,   // 500 - session corrompue
+                    DisconnectReason.multideviceMismatch, // 411 - conflit appareils
+                ].includes(statusCode);
+
+                if (needsFreshSession) {
+                    waLog(`[WA] Session invalide (code ${statusCode}) — effacement Supabase et nouveau QR.`);
+                    if (this._clearSession) await this._clearSession();
+                    this.isActive = false;
+                    await this.start(); // Repart avec credentials vides → génère un QR
+                } else {
+                    // Reconnexion simple (timeout, perte réseau, etc.)
+                    waLog(`[WA] Reconnexion simple (code ${statusCode})...`);
+                    this.start();
+                }
             } else if (connection === 'open') {
                 waLog('✅ [WA] WhatsApp connecté avec succès !');
                 this.isActive = true;

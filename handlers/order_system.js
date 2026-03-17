@@ -444,10 +444,14 @@ function setupOrderSystem(bot) {
         // Step 1: Address Validation -> Suite vers SCHEDULING
         if (addrState && addrState.step === 1) {
             const addr = ctx.message.text.trim();
-            const hasNumber = addr.match(/\d/);
-            const hasPostalCode = addr.match(/\b\d{5}\b/);
 
-            if (addr.length < 8 || !hasNumber || !hasPostalCode) {
+            // Sur WhatsApp, un chiffre seul = raccourci menu numérique → laisser passer
+            if (/^\d$/.test(addr)) return next();
+
+            const hasNumber = addr.match(/\d/);
+            const hasPostalCode = addr.match(/\d{5}/);
+
+            if (addr.length < 4 || !hasNumber || !hasPostalCode) {
                 let errorMsg = "❌ <b>Adresse incomplète.</b>\n\n";
                 if (!hasPostalCode) errorMsg += "📍 Veuillez inclure un <b>code postal à 5 chiffres</b>.\n";
                 errorMsg += "\nVeuillez renvoyer l'adresse complète (Numéro + Rue + CP + Ville).";
@@ -458,6 +462,8 @@ function setupOrderSystem(bot) {
 
             // On sauve l'adresse et on passe au Scheduling
             addrState.address = addr;
+            addrState.step = 1.5; // État transitoire — empêche double-traitement pendant scheduling
+            awaitingAddressDetails.set(userId, addrState); // Persister le changement
 
             // On prépare le pending order pour le scheduling
             const cart = userCarts.get(userId) || [];
