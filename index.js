@@ -1,6 +1,7 @@
 const fs = require('fs');
 const envPath = fs.existsSync('.env.railway') ? '.env.railway' : '.env';
 require('dotenv').config({ path: envPath });
+// [TEST RECONNECT] Supabase session persistence — push sans déconnexion WA
 
 console.log(`[System] Loading environment from: ${envPath}`);
 if (process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID) {
