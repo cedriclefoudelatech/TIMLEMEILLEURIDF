@@ -1,36 +1,6 @@
-let Baileys;
-let makeWASocket;
-let useMultiFileAuthState, DisconnectReason, jidDecode, fetchLatestBaileysVersion, downloadMediaMessage;
-
-async function loadBaileys() {
-    if (Baileys) return;
-    const mod = await import('@whiskeysockets/baileys');
-    
-    // Check all possible places
-    console.log('[WA-Debug] Root keys count:', Object.keys(mod).length);
-    if (mod.default) console.log('[WA-Debug] Default keys count:', Object.keys(mod.default).length);
-    
-    // Find where the exported functions are
-    let target = null;
-    if (mod.useMultiFileAuthState) {
-        target = mod;
-    } else if (mod.default && mod.default.useMultiFileAuthState) {
-        target = mod.default;
-    } else {
-        // Fallback to searching in all keys if necessary or using the root
-        target = mod;
-    }
-    
-    Baileys = target;
-    makeWASocket = target.default || target;
-    useMultiFileAuthState = target.useMultiFileAuthState;
-    DisconnectReason = target.DisconnectReason;
-    jidDecode = target.jidDecode;
-    fetchLatestBaileysVersion = target.fetchLatestBaileysVersion;
-    downloadMediaMessage = target.downloadMediaMessage;
-    
-    console.log('[WA-Debug] useMultiFileAuthState type:', typeof useMultiFileAuthState);
-}
+const Baileys = require('@whiskeysockets/baileys');
+const makeWASocket = Baileys.default || Baileys;
+const { useMultiFileAuthState, DisconnectReason, jidDecode, fetchLatestBaileysVersion, downloadMediaMessage } = Baileys;
 
 
 const { Channel } = require('./Channel');
@@ -46,7 +16,6 @@ class WhatsAppSessionChannel extends Channel {
     constructor(config) {
         super('whatsapp', 'WhatsApp (Session)');
         this.sessionId = config.sessionId || 'default';
-        this.pairingNumber = config.pairingNumber || null;
         this.authFolder = path.resolve(process.cwd(), 'sessions', this.sessionId);
         this.sock = null;
         this.messageHandler = null;
@@ -54,7 +23,6 @@ class WhatsAppSessionChannel extends Channel {
     }
 
     async initialize() {
-        await loadBaileys();
         const sessionsDir = path.join(process.cwd(), 'sessions');
         if (!fs.existsSync(sessionsDir)) {
             fs.mkdirSync(sessionsDir, { recursive: true });
@@ -88,26 +56,11 @@ class WhatsAppSessionChannel extends Channel {
             version,
             auth: state,
             logger: pino({ level: 'silent' }),
-            browser: ['TIM', 'Chrome', '121.0.6167.85'], // Plus moderne
+            browser: ['Ubuntu', 'Chrome', '20.0.04'],
             printQRInTerminal: false
         });
 
-        // Request pairing code if requested and not registered
-        if (this.pairingNumber && !this.sock.authState.creds.registered) {
-            const cleanNumber = this.pairingNumber.replace(/\D/g, '');
-            console.log(`[WA] Requesting pairing code for ${cleanNumber}...`);
-            setTimeout(async () => {
-                try {
-                    const code = await this.sock.requestPairingCode(cleanNumber);
-                    console.log('\n--------------------------------------------------');
-                    console.log('🔑 VOTRE NOUVEAU CODE DE CONNEXION WHATSAPP :');
-                    console.log(`👉 ${code}`);
-                    console.log('--------------------------------------------------\n');
-                } catch (err) {
-                    console.error('❌ Erreur lors de la requête du code:', err.message);
-                }
-            }, 5000); // Augmenté un peu pour laisser la connexion se stabiliser
-        }
+        // No pairing code requested anymore to prioritize QR
 
 
         // this.store.bind(this.sock.ev); // Removed store bind

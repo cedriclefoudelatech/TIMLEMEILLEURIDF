@@ -1140,7 +1140,12 @@ const SETTINGS_DEFAULTS = {
     payment_modes: '💵 Espèces',
     maintenance_mode: false,
     maintenance_message: '🔧 <b>Le bot est actuellement en maintenance.</b>\n\nNous revenons bientôt !\n\nContactez l\'admin : @Lejardinidf',
-    maintenance_contact: 'https://t.me/Lejardinidf'
+    maintenance_contact: 'https://t.me/Lejardinidf',
+    btn_back_menu: '◀️ Retour Menu',
+    btn_back_menu_nav: '◀️ Retour Menu',
+    msg_order_confirmed_client: '',
+    enable_abandoned_cart_notifications: false,
+    msg_abandoned_cart: ''
 };
 
 let _settingsCache = null;
@@ -1454,7 +1459,7 @@ module.exports = {
     getGlobalStats, getDailyStats, getStatsOverview, getAppSettings, updateAppSettings, getClientActiveOrders,
     getProducts, saveProduct, deleteProduct, setLivreurAvailability,
     getAvailableLivreurs, getAllLivreurs, getOrderAnalytics, saveUserLocation, addMessageToTrack, getLastMenuId, getLivreurOrders, getLivreurHistory, getOrdersByUser, getDetailedLivreurActivity, saveFeedback, setPendingFeedback, getAndClearPendingFeedback, nukeDatabase,
-    saveReview, getReviews, getPublicReviews, deleteReview, uploadMediaFromUrl,
+    saveReview, getReviews, getPublicReviews, deleteReview, uploadMediaFromUrl, uploadMediaBuffer,
     incrementChatCount, saveClientReply, logHelpRequest,
     getUpcomingPlannedOrders, markNotifSent, registerUser, addToStat,
     _userCache

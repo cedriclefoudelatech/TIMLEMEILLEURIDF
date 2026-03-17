@@ -59,7 +59,8 @@ async function broadcastMessage(platform, message, options = {}) {
     // 1. Upload des nouveaux médias vers Supabase Storage
     const normalizedExistingUrls = existingUrls.map(u => typeof u === 'string' ? { url: u, type: (u.match(/\.(mp4|mov|avi|wmv)$/) ? 'video' : 'photo') } : u);
     const unifiedMediaList = [...normalizedExistingUrls];
-    const { supabase } = require('../config/supabase');
+    const { uploadMediaBuffer } = require('./database');
+    
     for (let f of mediaFiles) {
         try {
             const extension = f.mimetype.includes('video') ? 'mp4' : (f.mimetype.includes('png') ? 'png' : 'jpg');
@@ -71,15 +72,16 @@ async function broadcastMessage(platform, message, options = {}) {
                 fileBuffer = fs.readFileSync(f.tempFilePath);
             }
 
-            const { error } = await supabase.storage.from('uploads').upload(finalPath, fileBuffer, {
-                contentType: f.mimetype,
-                upsert: true
-            });
-            if (!error) {
-                const { data: publicData } = supabase.storage.from('uploads').getPublicUrl(finalPath);
-                unifiedMediaList.push({ url: publicData.publicUrl, type: f.mimetype.includes('video') ? 'video' : 'photo' });
+            if (!fileBuffer || fileBuffer.length === 0) {
+                debugLog(`[BC-UPLOAD-SKIP] Buffer vide pour ${f.name}`);
+                continue;
+            }
+
+            const publicUrl = await uploadMediaBuffer(fileBuffer, finalPath, f.mimetype);
+            if (publicUrl) {
+                unifiedMediaList.push({ url: publicUrl, type: f.mimetype.includes('video') ? 'video' : 'photo' });
             } else {
-                debugLog(`[BC-UPLOAD-WARN] Supabase error: ${error.message}. Fallback to buffer.`);
+                debugLog(`[BC-UPLOAD-WARN] Pas d'URL retournée pour ${f.name}. Fallback to buffer.`);
                 unifiedMediaList.push({ source: fileBuffer, filename: f.name, type: f.mimetype.includes('video') ? 'video' : 'photo' });
             }
         } catch (e) {
