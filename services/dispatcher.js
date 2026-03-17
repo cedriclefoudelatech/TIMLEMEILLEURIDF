@@ -320,34 +320,47 @@ class Dispatcher {
     async _route(ctx) {
         const text = ctx.message.text || '';
         const lowerText = text.toLowerCase().trim();
-        console.log(`[Dispatcher] Incoming: "${text}" from ${ctx.from.id} (Action: ${!!ctx.callbackQuery})`);
-        
+        const platform = ctx.platform.toUpperCase();
+        console.log(`\n====== [${platform}] NOUVEAU MESSAGE ======`);
+        console.log(`[${platform}] De: ${ctx.from.id} | Texte: "${text}" | Est un bouton: ${!!ctx.callbackQuery}`);
+
         // 1. Gestion des CALLBACKS (Boutons Telegram & Actions WhatsApp)
         if (ctx.callbackQuery) {
             const data = ctx.callbackQuery.data;
-            if (await this._routeAction(ctx, data)) return;
+            console.log(`[${platform}] 🔘 BOUTON pressé: "${data}"`);
+            const found = await this._routeAction(ctx, data);
+            if (found) {
+                console.log(`[${platform}] ✅ Handler trouvé et exécuté pour: "${data}"`);
+            } else {
+                console.log(`[${platform}] ❌ AUCUN handler pour le bouton: "${data}" — bouton non enregistré!`);
+            }
+            return;
         }
 
         // 2. Commande explicite /cmd
         if (text.startsWith('/')) {
             const cmd = text.split(' ')[0].substring(1);
             if (this.commands.has(cmd)) {
+                console.log(`[${platform}] 📟 Commande /${cmd} trouvée`);
                 return await this.commands.get(cmd)(ctx);
             }
+            console.log(`[${platform}] ⚠️ Commande /${cmd} inconnue`);
         }
 
         // 3. Fallback: mots-clés courants → menu principal
         if (['menu', 'hi', 'bonjour', 'salut', 'hello', 'hey', 'yo', 'coucou', 'start', 'boutique', 'catalogue', 'commander', 'commande', 'aide', 'help'].includes(lowerText)) {
+            console.log(`[${platform}] 🏠 Mot-clé menu → /start`);
             if (this.commands.has('start')) return await this.commands.get('start')(ctx);
         }
 
         // 3b. WhatsApp: auto-accueil si premier message (pas besoin de /start)
         if (ctx.platform === 'whatsapp' && !this.userLastButtons.has(ctx.from.id)) {
-            console.log(`[Dispatcher] WhatsApp auto-welcome pour ${ctx.from.id}`);
+            console.log(`[${platform}] 🤝 Auto-welcome (premier message)`);
             if (this.commands.has('start')) return await this.commands.get('start')(ctx);
         }
 
         // 4. Handlers globaux (on text, message, etc.)
+        console.log(`[${platform}] 📝 Passage dans ${this.onHandlers.filter(h=>h.type==='text').length} handlers texte...`);
         for (const h of this.onHandlers) {
             if (h.type === 'text' && ctx.message.text) {
                 await h.fn(ctx, () => {});
@@ -362,26 +375,41 @@ class Dispatcher {
         if (ctx.channel.type === 'whatsapp' && /^\d+$/.test(lowerText) && !ctx._handled) {
             const index = parseInt(lowerText) - 1;
             const lastButtons = this.userLastButtons.get(ctx.from.id);
+            console.log(`[${platform}] 🔢 Raccourci numérique "${lowerText}" → index ${index}`);
+            console.log(`[${platform}] 🗂️ Boutons mémorisés: ${lastButtons ? lastButtons.map(b=>b.id).join(', ') : 'AUCUN'}`);
 
             if (lastButtons && lastButtons[index]) {
                 const btn = lastButtons[index];
                 const trigger = btn.id || btn.callback_data;
-                console.log(`[Dispatcher] Numerical fallback: ${lowerText} -> ${trigger}`);
+                console.log(`[${platform}] ✅ Déclenchement: "${trigger}"`);
                 if (trigger) await this._routeAction(ctx, trigger);
+            } else if (!lastButtons) {
+                console.log(`[${platform}] ❌ Pas de boutons mémorisés pour ${ctx.from.id} — envoyer /start d'abord`);
+            } else {
+                console.log(`[${platform}] ❌ Index ${index} hors limite (${lastButtons.length} boutons disponibles)`);
             }
         }
+        console.log(`[${platform}] _handled: ${ctx._handled}`);
     }
 
     async _routeAction(ctx, data) {
         for (const [trigger, fn] of this.actions.entries()) {
             if (typeof trigger === 'string' && data === trigger) {
-                await fn(ctx);
+                try {
+                    await fn(ctx);
+                } catch(e) {
+                    console.error(`[ROUTE-ERROR] Handler "${data}" a planté:`, e.message, e.stack?.split('\n')[1]);
+                }
                 return true;
             } else if (trigger instanceof RegExp) {
                 const match = data.match(trigger);
                 if (match) {
                     ctx.match = match;
-                    await fn(ctx);
+                    try {
+                        await fn(ctx);
+                    } catch(e) {
+                        console.error(`[ROUTE-ERROR] Handler regex "${trigger}" a planté:`, e.message, e.stack?.split('\n')[1]);
+                    }
                     return true;
                 }
             }
