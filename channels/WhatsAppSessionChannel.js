@@ -1,6 +1,28 @@
-const Baileys = require('@whiskeysockets/baileys');
-const makeWASocket = Baileys.default || Baileys;
-const { useMultiFileAuthState, DisconnectReason, jidDecode, fetchLatestBaileysVersion, downloadMediaMessage } = Baileys;
+let Baileys;
+let makeWASocket;
+let useMultiFileAuthState, DisconnectReason, jidDecode, fetchLatestBaileysVersion, downloadMediaMessage;
+
+async function loadBaileys() {
+    if (Baileys) return;
+    const mod = await import('@whiskeysockets/baileys');
+    const target = mod.useMultiFileAuthState ? mod : (mod.default?.useMultiFileAuthState ? mod.default : mod.default || mod);
+    
+    Baileys = target;
+    makeWASocket = target.default || target;
+    useMultiFileAuthState = target.useMultiFileAuthState;
+    DisconnectReason = target.DisconnectReason;
+    jidDecode = target.jidDecode;
+    fetchLatestBaileysVersion = target.fetchLatestBaileysVersion;
+    downloadMediaMessage = target.downloadMediaMessage;
+    
+    // Safety check
+    if (!useMultiFileAuthState) {
+        // One last fallback for some specific RC versions
+        const root = mod.default || mod;
+        useMultiFileAuthState = root.useMultiFileAuthState;
+        DisconnectReason = root.DisconnectReason;
+    }
+}
 
 
 const { Channel } = require('./Channel');
@@ -23,6 +45,7 @@ class WhatsAppSessionChannel extends Channel {
     }
 
     async initialize() {
+        await loadBaileys();
         const sessionsDir = path.join(process.cwd(), 'sessions');
         if (!fs.existsSync(sessionsDir)) {
             fs.mkdirSync(sessionsDir, { recursive: true });
