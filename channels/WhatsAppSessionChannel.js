@@ -12,6 +12,15 @@ const qrcodeImage = require('qrcode');
 
 
 
+// Logs circulaires pour debug en live via /wa-logs
+const waLogs = [];
+function waLog(msg) {
+    const line = `[${new Date().toISOString()}] ${msg}`;
+    waLogs.push(line);
+    if (waLogs.length > 200) waLogs.shift();
+    console.log(line);
+}
+
 class WhatsAppSessionChannel extends Channel {
     constructor(config) {
         super('whatsapp', 'WhatsApp (Session)');
@@ -21,6 +30,8 @@ class WhatsAppSessionChannel extends Channel {
         this.messageHandler = null;
         this.store = null;
     }
+
+    static getLogs() { return waLogs; }
 
     async initialize() {
         if (!fs.existsSync(path.join(process.cwd(), 'sessions'))) {
@@ -48,7 +59,7 @@ class WhatsAppSessionChannel extends Channel {
 
         this.sock.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect, qr } = update;
-            console.log('[WA] Connection Update:', { connection, hasQr: !!qr });
+            waLog(`[WA] Connection Update: ${JSON.stringify(update, null, 2)}`);
 
             if (qr) {
                 console.log('--------------------------------------------------');
@@ -71,12 +82,12 @@ class WhatsAppSessionChannel extends Channel {
 
             if (connection === 'close') {
                 const error = lastDisconnect?.error;
-                console.log('[WA] Connexion fermée. Erreur:', error);
+                waLog(`[WA] Connexion fermée. Code: ${error?.output?.statusCode}, Msg: ${error?.message}, Payload: ${JSON.stringify(error?.output?.payload)}`);
                 const shouldReconnect = error?.output?.statusCode !== DisconnectReason.loggedOut;
-                console.log('[WA] Reconnexion tentative:', shouldReconnect);
+                waLog(`[WA] Reconnexion tentative: ${shouldReconnect}`);
                 if (shouldReconnect) this.start();
             } else if (connection === 'open') {
-                console.log('✅ [WA] WhatsApp connecté avec succès !');
+                waLog('✅ [WA] WhatsApp connecté avec succès !');
                 this.isActive = true;
             }
         });

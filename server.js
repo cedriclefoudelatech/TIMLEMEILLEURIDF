@@ -114,6 +114,15 @@ function createServer() {
         }
     });
 
+    // WhatsApp connection logs - debug en live
+    app.get('/wa-logs', (req, res) => {
+        const { WhatsAppSessionChannel } = require('./channels/WhatsAppSessionChannel');
+        const logs = WhatsAppSessionChannel.getLogs ? WhatsAppSessionChannel.getLogs() : [];
+        res.setHeader('Content-Type', 'text/html');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.send(`<html><head><meta http-equiv="refresh" content="3"><style>body{background:#111;color:#0f0;font-family:monospace;padding:20px;font-size:13px}pre{white-space:pre-wrap}</style></head><body><h2 style="color:#fff">WhatsApp Logs (auto-refresh 3s)</h2><pre>${logs.join('\n') || 'Aucun log encore...'}</pre></body></html>`);
+    });
+
     // ========== Static Pages ==========
 
     app.get('/', (req, res) => {
