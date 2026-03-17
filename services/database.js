@@ -1447,6 +1447,107 @@ async function deleteOrder(id) {
     await supabase.from(COL_ORDERS).delete().eq('id', id);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  WhatsApp Session Persistence — stocke les credentials Baileys dans bot_state
+//  (table existante), ce qui survit aux redéploiements Railway
+// ─────────────────────────────────────────────────────────────────────────────
+async function useSupabaseAuthState(sessionId) {
+    const TABLE = 'bot_state';
+    const NAMESPACE = 'wa_session';
+    const { BufferJSON, initAuthCreds } = require('@whiskeysockets/baileys');
+
+    // Construit un ID unique pour bot_state : "wa_session::{sessionId}::{key}"
+    function makeId(key) {
+        return `${NAMESPACE}::${sessionId}::${key}`;
+    }
+
+    async function readData(key) {
+        try {
+            const { data, error } = await supabase
+                .from(TABLE)
+                .select('value')
+                .eq('id', makeId(key))
+                .single();
+            if (error || !data) return null;
+            return JSON.parse(JSON.stringify(data.value), BufferJSON.reviver);
+        } catch (e) {
+            return null;
+        }
+    }
+
+    async function writeData(key, value) {
+        try {
+            const serialized = JSON.parse(JSON.stringify(value, BufferJSON.replacer));
+            await supabase.from(TABLE).upsert({
+                id: makeId(key),
+                namespace: NAMESPACE,
+                user_key: key,
+                value: serialized,
+                updated_at: new Date().toISOString()
+            }, { onConflict: 'id' });
+        } catch (e) {
+            console.error(`[WA-DB] writeData error for key ${key}:`, e.message);
+        }
+    }
+
+    async function removeData(key) {
+        try {
+            await supabase.from(TABLE).delete().eq('id', makeId(key));
+        } catch (e) { }
+    }
+
+    async function clearAllData() {
+        try {
+            // Supprimer toutes les entrées de cette session
+            await supabase.from(TABLE).delete()
+                .eq('namespace', NAMESPACE)
+                .like('id', `${NAMESPACE}::${sessionId}::%`);
+            console.log(`[WA-DB] Session ${sessionId} cleared from Supabase`);
+        } catch (e) {
+            console.error('[WA-DB] clearAllData error:', e.message);
+        }
+    }
+
+    // Chargement initial des credentials depuis Supabase
+    const credsRaw = await readData('creds');
+    const creds = credsRaw || initAuthCreds();
+    console.log(`[WA-DB] Auth state loaded from Supabase bot_state (session: ${sessionId}, fresh: ${!credsRaw})`);
+
+    return {
+        state: {
+            creds,
+            keys: {
+                get: async (type, ids) => {
+                    const data = {};
+                    await Promise.all(ids.map(async (id) => {
+                        const value = await readData(`${type}-${id}`);
+                        if (value !== null && value !== undefined) {
+                            data[id] = value;
+                        }
+                    }));
+                    return data;
+                },
+                set: async (data) => {
+                    const tasks = [];
+                    for (const category in data) {
+                        for (const id in data[category]) {
+                            const value = data[category][id];
+                            if (value) {
+                                tasks.push(writeData(`${category}-${id}`, value));
+                            } else {
+                                tasks.push(removeData(`${category}-${id}`));
+                            }
+                        }
+                    }
+                    await Promise.all(tasks);
+                }
+            }
+        },
+        saveCreds: () => writeData('creds', creds),
+        clearSession: clearAllData
+    };
+}
+
 module.exports = {
     supabase, COL_USERS, COL_PRODUCTS, COL_ORDERS, COL_SETTINGS, COL_BROADCASTS, COL_REFERRALS,
     incr, ts, makeDocId, decryptUser,
@@ -1462,5 +1563,6 @@ module.exports = {
     saveReview, getReviews, getPublicReviews, deleteReview, uploadMediaFromUrl, uploadMediaBuffer,
     incrementChatCount, saveClientReply, logHelpRequest,
     getUpcomingPlannedOrders, markNotifSent, registerUser, addToStat,
-    _userCache
+    _userCache,
+    useSupabaseAuthState
 };

@@ -1,9 +1,9 @@
 const Baileys = require('@whiskeysockets/baileys');
 const makeWASocket = Baileys.default || Baileys;
-const { useMultiFileAuthState, DisconnectReason, jidDecode, fetchLatestBaileysVersion } = Baileys;
-
+const { DisconnectReason, jidDecode, fetchLatestBaileysVersion } = Baileys;
 
 const { Channel } = require('./Channel');
+const { useSupabaseAuthState } = require('../services/database');
 const pino = require('pino');
 const path = require('path');
 const fs = require('fs');
@@ -25,24 +25,22 @@ class WhatsAppSessionChannel extends Channel {
     constructor(config) {
         super('whatsapp', 'WhatsApp (Session)');
         this.sessionId = config.sessionId || 'default';
-        this.authFolder = path.resolve(process.cwd(), 'sessions', this.sessionId);
         this.sock = null;
         this.messageHandler = null;
         this.store = null;
         this._restarting = false;
+        this._clearSession = null; // Sera défini dans start()
     }
 
     static getLogs() { return waLogs; }
 
     async initialize() {
-        if (!fs.existsSync(path.join(process.cwd(), 'sessions'))) {
-            fs.mkdirSync(path.join(process.cwd(), 'sessions'));
-        }
-        console.log(`[WA-Session] QR mode for: ${this.sessionId}`);
+        console.log(`[WA-Session] Supabase mode for: ${this.sessionId}`);
     }
 
     async start() {
-        const { state, saveCreds } = await useMultiFileAuthState(this.authFolder);
+        const { state, saveCreds, clearSession } = await useSupabaseAuthState(this.sessionId);
+        this._clearSession = clearSession;
         const { version, isLatest } = await fetchLatestBaileysVersion();
         console.log(`[WA] Using version v${version.join('.')}, isLatest: ${isLatest}`);
 
@@ -167,7 +165,7 @@ class WhatsAppSessionChannel extends Channel {
     }
 
     async restart() {
-        waLog('[WA] Restart demandé — nettoyage session et reconnexion...');
+        waLog('[WA] Restart demandé — nettoyage session Supabase et reconnexion...');
         this._restarting = true;
         // 1. Fermer la connexion existante
         if (this.sock) {
@@ -175,12 +173,12 @@ class WhatsAppSessionChannel extends Channel {
             this.sock = null;
         }
         this.isActive = false;
-        // 2. Supprimer la session pour forcer un nouveau QR
-        if (fs.existsSync(this.authFolder)) {
-            fs.rmSync(this.authFolder, { recursive: true, force: true });
-            waLog('[WA] Session supprimée.');
+        // 2. Supprimer la session Supabase pour forcer un nouveau QR
+        if (this._clearSession) {
+            await this._clearSession();
+            waLog('[WA] Session Supabase supprimée.');
         }
-        // 3. Supprimer l'ancien QR
+        // 3. Supprimer l'ancien QR image
         const qrPath = path.join(process.cwd(), 'whatsapp_qr.png');
         if (fs.existsSync(qrPath)) fs.unlinkSync(qrPath);
         // 4. Redémarrer
