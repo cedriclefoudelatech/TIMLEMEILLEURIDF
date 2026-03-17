@@ -114,6 +114,21 @@ function createServer() {
         }
     });
 
+    // WhatsApp restart - nettoie la session et relance le QR
+    app.get('/wa-restart', async (req, res) => {
+        try {
+            const waSession = registry.query('whatsapp');
+            if (waSession && waSession.restart) {
+                await waSession.restart();
+                res.send('<html><body style="background:#111;color:#0f0;font-family:sans-serif;text-align:center;padding:50px"><h1>WhatsApp redémarré</h1><p>Nouveau QR en cours de génération...</p><script>setTimeout(()=>window.location="/whatsapp-qr",3000)</script></body></html>');
+            } else {
+                res.status(404).send('WhatsApp Session channel not found');
+            }
+        } catch (e) {
+            res.status(500).send('Error: ' + e.message);
+        }
+    });
+
     // WhatsApp connection logs - debug en live
     app.get('/wa-logs', (req, res) => {
         const { WhatsAppSessionChannel } = require('./channels/WhatsAppSessionChannel');

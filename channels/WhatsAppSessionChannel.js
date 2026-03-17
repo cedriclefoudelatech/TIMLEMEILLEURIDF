@@ -160,6 +160,26 @@ class WhatsAppSessionChannel extends Channel {
         this.isActive = false;
     }
 
+    async restart() {
+        waLog('[WA] Restart demandé — nettoyage session et reconnexion...');
+        // 1. Fermer la connexion existante
+        if (this.sock) {
+            try { this.sock.end(); } catch (e) {}
+            this.sock = null;
+        }
+        this.isActive = false;
+        // 2. Supprimer la session pour forcer un nouveau QR
+        if (fs.existsSync(this.authFolder)) {
+            fs.rmSync(this.authFolder, { recursive: true, force: true });
+            waLog('[WA] Session supprimée.');
+        }
+        // 3. Supprimer l'ancien QR
+        const qrPath = path.join(process.cwd(), 'whatsapp_qr.png');
+        if (fs.existsSync(qrPath)) fs.unlinkSync(qrPath);
+        // 4. Redémarrer
+        await this.start();
+    }
+
     onMessage(handler) { this.messageHandler = handler; }
 
     async sendMessage(userId, text, options = {}) {
