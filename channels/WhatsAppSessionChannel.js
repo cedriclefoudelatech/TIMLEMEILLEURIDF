@@ -30,6 +30,7 @@ class WhatsAppSessionChannel extends Channel {
         this.store = null;
         this._restarting = false;
         this._clearSession = null; // Sera défini dans start()
+        this._conflictBackoff = 5000; // Backoff initial pour code 440 (ms)
     }
 
     static getLogs() { return waLogs; }
@@ -103,14 +104,24 @@ class WhatsAppSessionChannel extends Channel {
                     if (this._clearSession) await this._clearSession();
                     this.isActive = false;
                     await this.start(); // Repart avec credentials vides → génère un QR
+                } else if (statusCode === 440) {
+                    // Conflit : une autre instance a pris la session.
+                    // Backoff exponentiel pour éviter la boucle infinie de conflits.
+                    const delay = this._conflictBackoff;
+                    this._conflictBackoff = Math.min(this._conflictBackoff * 2, 60000); // max 60s
+                    waLog(`[WA] Conflit 440 (replaced) — attente ${delay}ms avant reconnexion (backoff=${this._conflictBackoff}ms)...`);
+                    this.isActive = false;
+                    setTimeout(() => this.start(), delay);
                 } else {
                     // Reconnexion simple (timeout, perte réseau, etc.)
+                    this._conflictBackoff = 5000; // reset backoff sur reconnexion normale
                     waLog(`[WA] Reconnexion simple (code ${statusCode})...`);
                     this.start();
                 }
             } else if (connection === 'open') {
                 waLog('✅ [WA] WhatsApp connecté avec succès !');
                 this.isActive = true;
+                this._conflictBackoff = 5000; // reset backoff sur connexion réussie
             }
         });
 
@@ -150,21 +161,25 @@ class WhatsAppSessionChannel extends Channel {
                 const text = this._extractText(msg);
                 const isAction = !!(msg.message?.listResponseMessage || msg.message?.buttonsResponseMessage);
 
-                // Extraction média (Image)
+                // Extraction média (Image/Vidéo)
                 let photo = null;
+                let video = null;
                 const m2 = msg.message;
                 if (m2?.imageMessage) {
                     photo = [{ file_id: msg.key.id, isWa: true, msg: msg }];
+                } else if (m2?.videoMessage) {
+                    video = [{ file_id: msg.key.id, isWa: true, msg: msg }];
                 }
 
-                if (this.messageHandler && (text || photo)) {
-                    console.log(`[WA-In] Text: "${text}" | Photo: ${!!photo} | Action: ${isAction} | From: ${remoteJid}`);
+                if (this.messageHandler && (text || photo || video)) {
+                    console.log(`[WA-In] Text: "${text}" | Photo: ${!!photo} | Video: ${!!video} | Action: ${isAction} | From: ${remoteJid}`);
                     await this.messageHandler({
                         from: remoteJid,
                         name: name,
                         text: text,
                         photo: photo,
-                        type: photo ? 'photo' : 'text',
+                        video: video,
+                        type: video ? 'video' : (photo ? 'photo' : 'text'),
                         isAction: isAction,
                         raw: msg
                     });
