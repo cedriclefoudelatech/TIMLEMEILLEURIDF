@@ -116,7 +116,8 @@ class Dispatcher {
             platform: channel.type, // 'telegram' ou 'whatsapp'
             from: { id: userId, first_name: msg.name, is_bot: false },
             chat: { id: userId, type: 'private' },
-            state: { settings: settings, user: msg.user }, 
+            state: { user: msg.user, settings: settings },
+            _handled: false,
             message: { text: msg.text, photo: msg.photo, message_id: msg.message_id || msg.rawId },
             updateType: msg.type || 'message',
             match: null,
@@ -172,6 +173,7 @@ class Dispatcher {
             },
 
             reply: async (text, extra = {}) => {
+                ctx._handled = true;
                 const options = this._convertExtra(extra);
                 if (options.buttons) this.userLastButtons.set(userId, options.buttons);
                 
@@ -207,6 +209,7 @@ class Dispatcher {
             },
             replyWithHTML: async (text, extra = {}) => ctx.reply(text, { ...extra, parse_mode: 'HTML' }),
             replyWithPhoto: async (photo, extra = {}) => {
+                ctx._handled = true;
                 const options = this._convertExtra(extra);
                 if (options.buttons) this.userLastButtons.set(userId, options.buttons);
                 
@@ -227,6 +230,7 @@ class Dispatcher {
                 return res;
             },
             replyWithVideo: async (video, extra = {}) => {
+                ctx._handled = true;
                 const options = this._convertExtra(extra);
                 if (options.buttons) this.userLastButtons.set(userId, options.buttons);
                 
@@ -267,6 +271,7 @@ class Dispatcher {
                 return true;
             },
             editMessageText: async (text, extra = {}) => {
+                ctx._handled = true;
                 if (channel.type === 'telegram' && ctx.callbackQuery?.message) {
                     const tgCh = registry.query('telegram');
                     const tgBot = tgCh?.getBotInstance?.();
@@ -342,30 +347,28 @@ class Dispatcher {
             if (this.commands.has('start')) return await this.commands.get('start')(ctx);
         }
 
-        // Si le texte est un chiffre (ex: "2"), on regarde dans les DERNIERS BOUTONS envoyés
-        if (ctx.channel.type === 'whatsapp' && /^\d+$/.test(lowerText)) {
+        // 4. Handlers globaux (on text, message, etc.)
+        for (const h of this.onHandlers) {
+            if (h.type === 'text' && ctx.message.text) {
+                await h.fn(ctx, () => {});
+            } else if (h.type === 'message') {
+                await h.fn(ctx, () => {});
+            } else if (h.type === 'location' && ctx.message.location) {
+                await h.fn(ctx, () => {});
+            }
+        }
+
+        // 5. WhatsApp: Fallback numérique seulement si non traité par le reste
+        if (ctx.channel.type === 'whatsapp' && /^\d+$/.test(lowerText) && !ctx._handled) {
             const index = parseInt(lowerText) - 1;
             const lastButtons = this.userLastButtons.get(ctx.from.id);
-            console.log(`[Dispatcher] Chiffre "${lowerText}" reçu de ${ctx.from.id}, boutons stockés: ${lastButtons ? lastButtons.length : 'AUCUN'}`);
-            
+
             if (lastButtons && lastButtons[index]) {
                 const btn = lastButtons[index];
                 const trigger = btn.id || btn.callback_data;
                 console.log(`[Dispatcher] Numerical fallback: ${lowerText} -> ${trigger}`);
-                if (trigger && await this._routeAction(ctx, trigger)) return;
-            } else {
-                // Si on reçoit un chiffre mais qu'on n'a pas de boutons en mémoire
-                console.warn(`[Dispatcher] Chiffre reçu sans boutons correspondants pour ${ctx.from.id}`);
-                await ctx.reply("⚠️ *Session expirée ou commande inconnue.*\n\nTapez *menu* pour afficher les options disponibles.");
-                return;
+                if (trigger) await this._routeAction(ctx, trigger);
             }
-        }
-
-        // 4. Handlers globaux (on text, message, etc.)
-        for (const h of this.onHandlers) {
-            if (h.type === 'text' && ctx.message.text) await h.fn(ctx, () => {});
-            else if (h.type === 'message') await h.fn(ctx, () => {});
-            else if (h.type === 'location' && ctx.message.location) await h.fn(ctx, () => {});
         }
     }
 
