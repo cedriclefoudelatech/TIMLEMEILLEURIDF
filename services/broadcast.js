@@ -402,7 +402,7 @@ async function sendToUser(user, message, unifiedMediaList = [], options = {}) {
             if (msgs && Array.isArray(msgs)) {
                 const { addMessageToTrack } = require('./database');
                 for (const msg of msgs) {
-                    await addMessageToTrack(user.id || user.doc_id, msg.message_id).catch(() => { });
+                    await addMessageToTrack(user.id || user.doc_id, msg.message_id, false).catch(() => { });
                 }
 
                 msgs.forEach((msg, i) => {
@@ -433,7 +433,7 @@ async function sendToUser(user, message, unifiedMediaList = [], options = {}) {
             }
             if (msg && (user.id || user.doc_id)) {
                 const { addMessageToTrack } = require('./database');
-                await addMessageToTrack(user.id || user.doc_id, msg.message_id).catch(() => { });
+                await addMessageToTrack(user.id || user.doc_id, msg.message_id, false).catch(() => { });
             }
         } else {
             // Texte uniquement
@@ -446,7 +446,7 @@ async function sendToUser(user, message, unifiedMediaList = [], options = {}) {
                 const msg = await _bot.telegram.sendMessage(chatId, message, { parse_mode: 'HTML', ...(_protect ? { protect_content: true } : {}), ...(keyboard ? keyboard : {}) });
                 if (msg && (user.id || user.doc_id)) {
                     const { addMessageToTrack } = require('./database');
-                    await addMessageToTrack(user.id || user.doc_id, msg.message_id).catch(() => { });
+                    await addMessageToTrack(user.id || user.doc_id, msg.message_id, false).catch(() => { });
                 }
             } catch (err) {
                 if (err.description?.includes('can\'t parse entities')) {
@@ -454,7 +454,7 @@ async function sendToUser(user, message, unifiedMediaList = [], options = {}) {
                     const msg = await _bot.telegram.sendMessage(chatId, message, { ...(_protect ? { protect_content: true } : {}), ...(keyboard ? keyboard : {}) });
                     if (msg && (user.id || user.doc_id)) {
                         const { addMessageToTrack } = require('./database');
-                        await addMessageToTrack(user.id || user.doc_id, msg.message_id).catch(() => { });
+                        await addMessageToTrack(user.id || user.doc_id, msg.message_id, false).catch(() => { });
                     }
                 } else throw err;
             }

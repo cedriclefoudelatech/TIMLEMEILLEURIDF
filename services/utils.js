@@ -177,7 +177,15 @@ async function safeEdit(ctx, text, opts = {}) {
                     return;
                 } catch (e) {
                     if (String(e.description || '').includes('not modified')) return;
-                    console.warn('[SAFE-EDIT] Edit failed, fallback to send:', e.message);
+                    // Si l'erreur est liée au média (URL invalide, 0 bytes, etc.), fallback texte pur
+                    const errMsg = String(e.description || e.message || '');
+                    if (errMsg.includes('wrong type') || errMsg.includes('wrong file') || errMsg.includes('WEBPAGE_MEDIA_EMPTY') || errMsg.includes('failed to get HTTP URL content')) {
+                        console.warn('[SAFE-EDIT] Media URL invalide, fallback texte pur:', errMsg);
+                        photo = null; video = null;
+                        // On est dans un message media, on ne peut pas edit en texte → delete + send texte
+                    } else {
+                        console.warn('[SAFE-EDIT] Edit failed, fallback to send:', e.message);
+                    }
                 }
             }
 

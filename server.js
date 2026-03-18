@@ -48,7 +48,13 @@ const loginLimiter = rateLimit({
     message: { error: 'Trop de tentatives. Réessayez dans 15 minutes.' },
     standardHeaders: true,
     legacyHeaders: false,
-    validate: { xForwardedForHeader: false, default: true },
+    keyGenerator: (req) => {
+        // Gestion IPv6 : normaliser l'IP pour éviter le bypass
+        const ip = req.ip || req.socket?.remoteAddress || 'unknown';
+        // Supprimer le préfixe ::ffff: pour normaliser IPv4-mapped IPv6
+        return ip.replace(/^::ffff:/, '');
+    },
+    validate: { xForwardedForHeader: false, default: true, keyGeneratorIpFallback: false },
     handler: (req, res, next, options) => {
         console.warn(`[AUTH] Rate limit atteint pour IP: ${req.ip}`);
         res.status(429).json(options.message);
