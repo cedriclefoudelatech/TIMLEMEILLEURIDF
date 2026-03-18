@@ -97,7 +97,7 @@ function setupOrderSystem(bot) {
         const productId = ctx.match[1];
         const products = await getProducts();
         const product = products.find(p => p.id === productId);
-        const settings = ctx.state.settings || await getAppSettings();
+        const settings = (ctx.state?.settings || await getAppSettings()) || await getAppSettings();
 
         if (!product) return safeEdit(ctx, settings.msg_product_not_found || '❌ Produit non trouvé.', [Markup.button.callback(settings.btn_back_menu || '◀️ Retour Menu', 'view_catalog')]);
 
@@ -127,20 +127,32 @@ function setupOrderSystem(bot) {
             Markup.button.callback(`${qty}`, `qty_${productId}_${qty}`)
         );
 
+        // Détermination du média à afficher (support multiple)
+        let mediaUrl = product.image_url || null;
+        if (mediaUrl && typeof mediaUrl === 'string' && mediaUrl.startsWith('[') && mediaUrl.endsWith(']')) {
+            try {
+                const arr = JSON.parse(mediaUrl);
+                if (arr && arr.length > 0) {
+                    const firstItem = arr[0];
+                    mediaUrl = typeof firstItem === 'string' ? firstItem : firstItem.url;
+                }
+            } catch (e) { }
+        }
+
         await safeEdit(ctx, text, {
             ...Markup.inlineKeyboard([buttons, [Markup.button.callback(settings.btn_back_generic || '◀️ Retour', 'view_catalog')]]),
-            photo: product.image_url || null
+            photo: mediaUrl
         });
     });
 
     bot.action(/^qty_(.+)_(.+)$/, async (ctx) => {
         await ctx.answerCbQuery();
-        const userId = ctx.from.id;
+        const userId = `${ctx.platform}_${ctx.from.id}`;
         const productId = ctx.match[1];
         const qty = parseInt(ctx.match[2]);
         const products = await getProducts();
         const product = products.find(p => String(p.id) === String(productId));
-        const settings = ctx.state.settings;
+        const settings = (ctx.state?.settings || await getAppSettings());
 
         if (!product) {
             console.error(`❌ Product not found: ${productId}. Available:`, products.map(p => p.id).join(', '));
@@ -191,7 +203,7 @@ function setupOrderSystem(bot) {
     });
 
     async function showAddToCartChoice(ctx, product, qty, totalPrice, unitAmount = null) {
-        const userId = ctx.from.id;
+        const userId = `${ctx.platform}_${ctx.from.id}`;
         const settings = ctx.state?.settings || await getAppSettings();
         const pending = pendingOrders.get(userId);
         if (!pending) return safeEdit(ctx, settings.msg_session_expired || "❌ Session expirée.", Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_quick_menu || '◀️ Menu', 'main_menu')]]));
@@ -217,7 +229,7 @@ function setupOrderSystem(bot) {
 
     bot.action('add_to_cart', async (ctx) => {
         await ctx.answerCbQuery('Ajouté au panier ! 🛒');
-        const userId = ctx.from.id;
+        const userId = `${ctx.platform}_${ctx.from.id}`;
         const settings = ctx.state?.settings || await getAppSettings();
         const pending = pendingOrders.get(userId);
         if (!pending) return safeEdit(ctx, settings.msg_session_expired || "❌ Session expirée.", Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_quick_menu || '◀️ Menu', 'main_menu')]]));
@@ -240,7 +252,7 @@ function setupOrderSystem(bot) {
 
     bot.action('checkout_now', async (ctx) => {
         await ctx.answerCbQuery();
-        const userId = ctx.from.id;
+        const userId = `${ctx.platform}_${ctx.from.id}`;
         const pending = pendingOrders.get(userId);
         if (!pending) return;
 
@@ -254,8 +266,9 @@ function setupOrderSystem(bot) {
     });
 
     async function displayCart(ctx) {
-        const userId = ctx.from.id;
+        const userId = `${ctx.platform}_${ctx.from.id}`;
         const cart = userCarts.get(userId) || [];
+        const settings = (ctx.state?.settings || await getAppSettings());
         if (cart.length === 0) {
             return safeEdit(ctx, 'Votre panier est vide 📭', Markup.inlineKeyboard([[Markup.button.callback('🛍️ Retour au Catalogue', 'view_catalog')]]));
         }
@@ -288,7 +301,7 @@ function setupOrderSystem(bot) {
 
     bot.action(/^remove_item_(.+)$/, async (ctx) => {
         const idx = parseInt(ctx.match[1]);
-        const userId = ctx.from.id;
+        const userId = `${ctx.platform}_${ctx.from.id}`;
         let cart = userCarts.get(userId) || [];
         if (cart[idx]) {
             await ctx.answerCbQuery(`Retiré : ${cart[idx].productName}`);
@@ -300,8 +313,9 @@ function setupOrderSystem(bot) {
 
     bot.action('clear_cart', async (ctx) => {
         await ctx.answerCbQuery('Panier vidé 🗑️');
-        const settings = ctx.state?.settings || await getAppSettings();
-        userCarts.delete(ctx.from.id);
+        const settings = (ctx.state?.settings || await getAppSettings());
+        const userId = `${ctx.platform}_${ctx.from.id}`;
+        userCarts.delete(userId);
         try {
             await displayCatalog(ctx);
         } catch (e) {
@@ -316,7 +330,7 @@ function setupOrderSystem(bot) {
     });
 
     async function startCheckout(ctx) {
-        const userId = ctx.from.id;
+        const userId = `${ctx.platform}_${ctx.from.id}`;
         const cart = userCarts.get(userId) || [];
         const settings = ctx.state?.settings || await getAppSettings();
         if (cart.length === 0) return safeEdit(ctx, settings.msg_cart_empty || "📭 Votre panier est vide.", Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_quick_menu || '◀️ Menu', 'main_menu')]]));
@@ -342,7 +356,8 @@ function setupOrderSystem(bot) {
     }
 
     async function promptAddressEntry(ctx, totalPrice) {
-        const userId = ctx.from.id;
+        const settings = ctx.state?.settings || await getAppSettings();
+        const userId = `${ctx.platform}_${ctx.from.id}`;
         const cart = userCarts.get(userId) || [];
         const itemsText = cart.map(item => `• ${item.productName} (x${item.qty})${item.chosen_unit_amount ? ` [${item.chosen_unit_amount}]` : ''}`).join('\n');
 
@@ -364,6 +379,7 @@ function setupOrderSystem(bot) {
     }
 
     async function askUnit(ctx, product, qty) {
+        const settings = (ctx.state?.settings || await getAppSettings());
         const unit = product.unit;
         const baseVal = parseFloat(product.unit_value) || 1;
         const text = `⚖️ <b>Sélecton du format pour ${product.name}</b>\n\n` +
@@ -415,7 +431,8 @@ function setupOrderSystem(bot) {
             bundleText = ` (+ ${qty} offert(s) 🎁)`;
         }
 
-        const pending = pendingOrders.get(ctx.from.id);
+        const userId = `${ctx.platform}_${ctx.from.id}`;
+        const pending = pendingOrders.get(userId);
         if (pending) {
             pending.totalPrice = finalPrice;
             pending.chosen_unit_amount = `${amount}${product.unit}${bundleText}`;
@@ -445,7 +462,7 @@ function setupOrderSystem(bot) {
     // Capture de l'adresse (message texte)
     bot.on('message', async (ctx, next) => {
         if (!ctx.message.text || ctx.message.text.startsWith('/')) return next();
-        const userId = ctx.from.id;
+        const userId = `${ctx.platform}_${ctx.from.id}`;
         const addrState = awaitingAddressDetails.get(userId);
 
         // Step 1: Address Validation -> Suite vers SCHEDULING
@@ -495,7 +512,7 @@ function setupOrderSystem(bot) {
 
     bot.action('address_details_skip', async (ctx) => {
         await ctx.answerCbQuery();
-        const userId = ctx.from.id;
+        const userId = `${ctx.platform}_${ctx.from.id}`;
         const data = awaitingAddressDetails.get(userId);
         if (!data) return;
         data.finalized = true;
@@ -503,7 +520,7 @@ function setupOrderSystem(bot) {
     });
 
     async function finalizeCheckoutFlow(ctx, fullAddress) {
-        const userId = ctx.from.id;
+        const userId = `${ctx.platform}_${ctx.from.id}`;
         const cart = userCarts.get(userId) || [];
         const total = cart.reduce((acc, item) => acc + parseFloat(item.totalPrice), 0);
 
@@ -520,7 +537,7 @@ function setupOrderSystem(bot) {
         };
         pendingOrders.set(userId, checkoutData);
 
-        const settings = ctx.state.settings;
+        const settings = (ctx.state?.settings || await getAppSettings());
         const user = await getUser(userId);
 
         // SI CRÉDIT DISPONIBLE → ON DEMANDE (Step Finale)
@@ -567,7 +584,7 @@ function setupOrderSystem(bot) {
 
     bot.action('scheduling_now', async (ctx) => {
         await ctx.answerCbQuery();
-        const userId = ctx.from.id;
+        const userId = `${ctx.platform}_${ctx.from.id}`;
         const pending = pendingOrders.get(userId);
         if (!pending) return ctx.reply("Session expirée.");
         pending.scheduled_at = null;
@@ -577,7 +594,7 @@ function setupOrderSystem(bot) {
     });
 
     async function promptAddressDetails(ctx) {
-        const userId = ctx.from.id;
+        const userId = `${ctx.platform}_${ctx.from.id}`;
         const addrState = awaitingAddressDetails.get(userId);
         if (addrState) addrState.step = 2;
 
@@ -591,6 +608,7 @@ function setupOrderSystem(bot) {
 
     bot.action('scheduling_plan', async (ctx) => {
         await ctx.answerCbQuery();
+        const settings = ctx.state?.settings || await getAppSettings();
         const text = `📅 <b>Choisissez le moment de livraison :</b>`;
         const buttons = [];
 
@@ -645,7 +663,7 @@ function setupOrderSystem(bot) {
         const [date, hour] = [ctx.match[1], ctx.match[2]];
         const settings = ctx.state?.settings || await getAppSettings();
         await ctx.answerCbQuery();
-        const userId = ctx.from.id;
+        const userId = `${ctx.platform}_${ctx.from.id}`;
         const pending = pendingOrders.get(userId);
         if (!pending) return ctx.reply(settings.msg_session_expired || "Session expirée.");
 
@@ -670,7 +688,7 @@ function setupOrderSystem(bot) {
     bot.action('confirm_order_use_credit_yes', async (ctx) => {
         await ctx.answerCbQuery();
         const settings = ctx.state?.settings || await getAppSettings();
-        const userId = ctx.from.id;
+        const userId = `${ctx.platform}_${ctx.from.id}`;
         const pending = pendingOrderConfirmation.get(userId);
         if (!pending) return safeEdit(ctx, settings.msg_session_expired || "Sesssion expirée ❌", Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_quick_menu || '◀️ Menu', 'main_menu')]]));
 
@@ -681,7 +699,7 @@ function setupOrderSystem(bot) {
     bot.action('confirm_order_use_credit_no', async (ctx) => {
         await ctx.answerCbQuery();
         const settings = ctx.state?.settings || await getAppSettings();
-        const userId = ctx.from.id;
+        const userId = `${ctx.platform}_${ctx.from.id}`;
         const pending = pendingOrderConfirmation.get(userId);
         if (!pending) return safeEdit(ctx, settings.msg_session_expired || "Sesssion expirée ❌", Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_quick_menu || '◀️ Menu', 'main_menu')]]));
 
@@ -690,6 +708,7 @@ function setupOrderSystem(bot) {
 
     async function showMyOrders(ctx) {
         if (ctx.callbackQuery) await ctx.answerCbQuery().catch(() => { });
+        const settings = ctx.state?.settings || await getAppSettings();
         const userId = `${ctx.platform}_${ctx.from.id}`;
         const { getOrdersByUser, getUser } = require('../services/database');
 
@@ -731,7 +750,7 @@ function setupOrderSystem(bot) {
 
 
     async function showCartSummary(ctx, address, finalPrice, discount, scheduledAt = null) {
-        const userId = ctx.from.id;
+        const userId = `${ctx.platform}_${ctx.from.id}`;
         const cart = userCarts.get(userId) || [];
 
         let cartText = ``;
@@ -748,7 +767,7 @@ function setupOrderSystem(bot) {
             `💵 <b>NET À RÉGLER : ${finalPrice.toFixed(2)}€</b>\n\n` +
             `Confirmez-vous la commande ?`;
 
-        const settings = ctx.state.settings;
+        const settings = (ctx.state?.settings || await getAppSettings());
         const netToPay = finalPrice.toFixed(2);
         
         const keyboard = [];
@@ -782,7 +801,7 @@ function setupOrderSystem(bot) {
         const parts = fullTag.split('_');
         const useDiscount = parts[parts.length - 1] === 'discount';
         const paymentMethod = parts.slice(0, -1).join('_'); // All but last part
-        const userId = ctx.from.id;
+        const userId = `${ctx.platform}_${ctx.from.id}`;
         const pending = useDiscount ? pendingOrderConfirmation.get(userId) : pendingOrders.get(userId);
         if (!pending) return safeEdit(ctx, settings.msg_session_expired || '❌ Session expirée.', Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_quick_menu || '◀️ Menu', 'main_menu')]]));
 
@@ -828,12 +847,12 @@ function setupOrderSystem(bot) {
 
         // Logic for New Clients (0 previous delivered orders)
         if (ctx.state.user && (parseInt(ctx.state.user.order_count) || 0) === 0) {
-            const adminContact = ctx.state.settings.private_contact_url || 'https://t.me/Lejardinidf';
+            const adminContact = (ctx.state?.settings || await getAppSettings()).private_contact_url || 'https://t.me/Lejardinidf';
             const welcomeMsg = `👋 <b>Bienvenue pour votre première commande !</b>\n\nPour valider votre compte et accélérer votre livraison, merci de contacter l'administrateur : @Lejardinidf\n\n📱 Contact : ${adminContact}`;
             ctx.reply(welcomeMsg, { parse_mode: 'HTML' }).catch(() => { });
         }
 
-        const successText = ctx.state.settings.msg_order_success || `✅ <b>Commande #${order.id.slice(-5)} envoyée !</b>\n\nUn livreur va vous contacter dès qu'elle sera prise en charge.`;
+        const successText = (ctx.state?.settings || await getAppSettings()).msg_order_success || `✅ <b>Commande #${order.id.slice(-5)} envoyée !</b>\n\nUn livreur va vous contacter dès qu'elle sera prise en charge.`;
 
         // Removed duplicate createOrder call
         userCarts.delete(userId); // Vider le panier après commande
@@ -1421,7 +1440,7 @@ function setupOrderSystem(bot) {
         const { setPendingFeedback } = require('../services/database');
         await setPendingFeedback(`${ctx.platform}_${ctx.from.id}`, orderId, rate);
 
-        const settings = ctx.state.settings || await getAppSettings();
+        const settings = (ctx.state?.settings || await getAppSettings()) || await getAppSettings();
         await safeEdit(ctx,
             `✍️ <b>Un dernier mot ?</b>\n\nEnvoyez votre commentaire en répondant à ce message (ex: "Livraison rapide, au top !") :\n\n<i>Vous pouvez aussi joindre une photo 📸</i>`,
             Markup.inlineKeyboard([
@@ -2245,7 +2264,7 @@ function setupOrderSystem(bot) {
             // Nettoyage input
             await ctx.deleteMessage().catch(() => { });
 
-            const settings = ctx.state.settings;
+            const settings = (ctx.state?.settings || await getAppSettings());
             const user = await getUser(docId);
             const { getLivreurMenuKeyboard: getKB } = require('./start');
 
@@ -2261,11 +2280,13 @@ function setupOrderSystem(bot) {
         await next();
     });
 
-    bot.on('message', async (ctx) => {
+    bot.on('message', async (ctx, next) => {
         // Abandoned cart activity update
-        if (userCarts.has(ctx.from.id)) {
+        const userId = `${ctx.platform}_${ctx.from.id}`;
+        if (userCarts.has(userId)) {
             userLastActivity.set(ctx.from.id, Date.now());
         }
+        return next();
     });
  
     bot.action('set_dispo_true', async (ctx) => {

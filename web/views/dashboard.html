@@ -1929,7 +1929,8 @@
                                 onchange="handleFileUpload(this, 'prod')">
                             <div id="prod_preview" style="display:flex; flex-wrap:wrap; justify-content:center;"></div>
                         </div>
-                        <input type="hidden" id="prod_image_url">
+                        <label style="font-size:10px; opacity:0.6; margin-top:5px; display:block;">JSON des Médias (Photo/Vidéo)</label>
+                        <textarea id="prod_image_url" placeholder='[{"url":"...","type":"photo"}]' style="height:35px; font-family:monospace; font-size:9px; background:rgba(255,255,255,0.02); min-height:unset; resize:vertical;"></textarea>
                     </div>
 
                     <!-- ═══ OPTIONS AVANCÉES (accordéon) ═══ -->
@@ -5048,103 +5049,112 @@
 
         async function saveSettings() {
             try {
-                const s = {
-                    bot_name: document.getElementById('set_bot_name').value,
-                    dashboard_title: document.getElementById('set_title').value,
-                    accent_color: document.getElementById('set_color').value,
-                    admin_telegram_id: Array.from(document.querySelectorAll('.admin-id-input')).map(i => i.value.trim()).filter(v => v !== '').join(', '),
-                    admin_password: document.getElementById('set_current_password').value,
-                    dashboard_url: document.getElementById('set_dashboard_url').value,
-                    private_contact_url: document.getElementById('set_private_contact_url').value,
-                    channel_url: document.getElementById('set_channel_url').value,
-                    points_ratio: parseFloat(document.getElementById('set_pts_ratio').value) || 1,
-                    points_exchange: parseInt(document.getElementById('set_pts_exchange').value) || 100,
-                    points_credit_value: parseFloat(document.getElementById('set_pts_credit_value').value) || 5,
-                    ref_bonus: parseFloat(document.getElementById('set_ref_bonus').value) || 5,
-                    fidelity_bonus_thresholds: document.getElementById('set_fidelity_thresholds').value || '5,10',
-                    fidelity_bonus_amount: parseFloat(document.getElementById('set_fidelity_bonus_val').value) || 10,
-                    fidelity_min_spend: parseFloat(document.getElementById('set_fidelity_min_spend').value) || 50,
-                    languages: document.getElementById('set_lang').value || 'fr',
+                const getVal = (id) => {
+                    const el = document.getElementById(id);
+                    if (!el) {
+                        console.warn(`⚠️ Element ${id} not found during save`);
+                        return '';
+                    }
+                    return el.type === 'checkbox' ? el.checked : el.value;
+                };
 
-                    welcome_message: document.getElementById('set_welcome_msg').value,
-                    payment_modes: document.getElementById('set_payment_modes').value,
-                    msg_choose_qty: document.getElementById('set_msg_qty').value,
+                const s = {
+                    bot_name: getVal('set_bot_name'),
+                    dashboard_title: getVal('set_title'),
+                    accent_color: getVal('set_color'),
+                    admin_telegram_id: Array.from(document.querySelectorAll('.admin-id-input')).map(i => i.value.trim()).filter(v => v !== '').join(', '),
+                    admin_password: getVal('set_current_password'),
+                    dashboard_url: getVal('set_dashboard_url'),
+                    private_contact_url: getVal('set_private_contact_url'),
+                    channel_url: getVal('set_channel_url'),
+                    points_ratio: parseFloat(getVal('set_pts_ratio')) || 1,
+                    points_exchange: parseInt(getVal('set_pts_exchange')) || 100,
+                    points_credit_value: parseFloat(getVal('set_pts_credit_value')) || 5,
+                    ref_bonus: parseFloat(getVal('set_ref_bonus')) || 5,
+                    fidelity_bonus_thresholds: getVal('set_fidelity_thresholds') || '5,10',
+                    fidelity_bonus_amount: parseFloat(getVal('set_fidelity_bonus_val')) || 10,
+                    fidelity_min_spend: parseFloat(getVal('set_fidelity_min_spend')) || 50,
+                    languages: getVal('set_lang') || 'fr',
+
+                    welcome_message: getVal('set_welcome_msg'),
+                    payment_modes: getVal('set_payment_modes'),
+                    msg_choose_qty: getVal('set_msg_qty'),
 
                     payment_modes_config: JSON.stringify(Array.from(document.querySelectorAll('.payment-mode-row')).map(row => ({
-                        icon: row.querySelector('.set-pm-icon').value,
-                        label: row.querySelector('.set-pm-label').value,
-                        id: row.querySelector('.set-pm-id').value.toUpperCase().replace(/\s+/g, '_')
-                    })).filter(pm => pm.id !== '')),
+                        icon: row.querySelector('.set-pm-icon')?.value || '💰',
+                        label: row.querySelector('.set-pm-label')?.value || 'Espèces',
+                        id: row.querySelector('.set-pm-id')?.value?.toUpperCase().replace(/\s+/g, '_') || 'NONE'
+                    })).filter(pm => pm.id !== 'NONE')),
 
-                    ui_icon_catalog: document.getElementById('set_ui_icon_catalog').value,
-                    label_catalog: document.getElementById('set_label_catalog').value,
-                    ui_icon_orders: document.getElementById('set_ui_icon_orders').value,
-                    label_my_orders: document.getElementById('set_label_my_orders').value,
-                    ui_icon_contact: document.getElementById('set_ui_icon_contact').value,
-                    label_contact: document.getElementById('set_label_contact').value,
-                    ui_icon_profile: document.getElementById('set_ui_icon_profile').value,
-                    label_profile: document.getElementById('set_label_profile').value,
-                    ui_icon_livreur: document.getElementById('set_ui_icon_livreur').value,
-                    label_livreur_space: document.getElementById('set_label_livreur').value,
-                    ui_icon_admin: document.getElementById('set_ui_icon_admin').value,
-                    label_admin_bot: document.getElementById('set_label_admin_bot').value,
-                    ui_icon_web: document.getElementById('set_ui_icon_web').value,
-                    label_admin_web: document.getElementById('set_label_admin_web').value,
-                    ui_icon_wallet: document.getElementById('set_ui_icon_wallet').value,
-                    ui_icon_points: document.getElementById('set_ui_icon_points').value,
-                    ui_icon_channel: document.getElementById('set_ui_icon_channel').value,
-                    label_channel: document.getElementById('set_label_channel').value,
-                    ui_icon_welcome: document.getElementById('set_ui_icon_welcome').value,
-                    label_welcome: document.getElementById('set_label_welcome').value,
+                    ui_icon_catalog: getVal('set_ui_icon_catalog'),
+                    label_catalog: getVal('set_label_catalog'),
+                    ui_icon_orders: getVal('set_ui_icon_orders'),
+                    label_my_orders: getVal('set_label_my_orders'),
+                    ui_icon_contact: getVal('set_ui_icon_contact'),
+                    label_contact: getVal('set_label_contact'),
+                    ui_icon_profile: getVal('set_ui_icon_profile'),
+                    label_profile: getVal('set_label_profile'),
+                    ui_icon_livreur: getVal('set_ui_icon_livreur'),
+                    label_livreur_space: getVal('set_label_livreur'),
+                    ui_icon_admin: getVal('set_ui_icon_admin'),
+                    label_admin_bot: getVal('set_label_admin_bot'),
+                    ui_icon_web: getVal('set_ui_icon_web'),
+                    label_admin_web: getVal('set_label_admin_web'),
+                    ui_icon_wallet: getVal('set_ui_icon_wallet'),
+                    ui_icon_points: getVal('set_ui_icon_points'),
+                    ui_icon_channel: getVal('set_ui_icon_channel'),
+                    label_channel: getVal('set_label_channel'),
+                    ui_icon_welcome: getVal('set_ui_icon_welcome'),
+                    label_welcome: getVal('set_label_welcome'),
 
-                    status_pending_label: document.getElementById('set_status_pending_label').value,
-                    ui_icon_pending: document.getElementById('set_ui_icon_pending').value,
-                    status_taken_label: document.getElementById('set_status_taken_label').value,
-                    ui_icon_taken: document.getElementById('set_ui_icon_taken').value,
-                    status_delivered_label: document.getElementById('set_status_delivered_label').value,
-                    ui_icon_success: document.getElementById('set_ui_icon_success').value,
-                    status_cancelled_label: document.getElementById('set_status_cancelled_label').value,
-                    ui_icon_error: document.getElementById('set_ui_icon_error').value,
+                    status_pending_label: getVal('set_status_pending_label'),
+                    ui_icon_pending: getVal('set_ui_icon_pending'),
+                    status_taken_label: getVal('set_status_taken_label'),
+                    ui_icon_taken: getVal('set_ui_icon_taken'),
+                    status_delivered_label: getVal('set_status_delivered_label'),
+                    ui_icon_success: getVal('set_ui_icon_success'),
+                    status_cancelled_label: getVal('set_status_cancelled_label'),
+                    ui_icon_error: getVal('set_ui_icon_error'),
 
-                    label_support: document.getElementById('set_label_support').value,
-                    ui_icon_support: document.getElementById('set_ui_icon_support').value,
-                    msg_help_intro: document.getElementById('set_msg_help_intro').value,
+                    label_support: getVal('set_label_support'),
+                    ui_icon_support: getVal('set_ui_icon_support'),
+                    msg_help_intro: getVal('set_msg_help_intro'),
 
-                    label_info: document.getElementById('set_label_info').value,
-                    ui_icon_info: document.getElementById('set_ui_icon_info').value,
-                    label_leave_review: document.getElementById('set_label_leave_review').value,
-                    ui_icon_leave_review: document.getElementById('set_ui_icon_leave_review').value,
-                    label_view_reviews: document.getElementById('set_label_view_reviews').value,
-                    ui_icon_view_reviews: document.getElementById('set_ui_icon_view_reviews').value,
-                    label_reviews: document.getElementById('set_label_reviews').value,
-                    label_users: document.getElementById('set_label_users').value,
-                    default_wa_name: document.getElementById('set_default_wa_name').value,
+                    label_info: getVal('set_label_info'),
+                    ui_icon_info: getVal('set_ui_icon_info'),
+                    label_leave_review: getVal('set_label_leave_review'),
+                    ui_icon_leave_review: getVal('set_ui_icon_leave_review'),
+                    label_view_reviews: getVal('set_label_view_reviews'),
+                    ui_icon_view_reviews: getVal('set_ui_icon_view_reviews'),
+                    label_reviews: getVal('set_label_reviews'),
+                    label_users: getVal('set_label_users'),
+                    default_wa_name: getVal('set_default_wa_name'),
 
-                    show_broadcasts_btn: document.getElementById('set_show_broadcasts_btn').checked,
-                    show_reviews_btn: document.getElementById('set_show_reviews_btn').checked,
+                    show_broadcasts_btn: getVal('set_show_broadcasts_btn') === true,
+                    show_reviews_btn: getVal('set_show_reviews_btn') === true,
 
-                    enable_abandoned_cart_notifications: document.getElementById('set_enable_abandoned_cart_notifications').checked,
-                    msg_abandoned_cart: document.getElementById('set_msg_abandoned_cart').value,
+                    enable_abandoned_cart_notifications: getVal('set_enable_abandoned_cart_notifications') === true,
+                    msg_abandoned_cart: getVal('set_msg_abandoned_cart'),
 
                     // Content
-                    msg_order_received_admin: document.getElementById('set_msg_order_received_admin').value,
-                    msg_order_confirmed_client: document.getElementById('set_msg_order_confirmed_client').value,
-                    btn_livreur_space: document.getElementById('set_btn_livreur_space').value,
-                    btn_back_menu: document.getElementById('set_btn_back_menu').value,
-                    msg_status_taken: document.getElementById('set_msg_status_taken').value,
-                    msg_status_delivered: document.getElementById('set_msg_status_delivered').value,
-                    msg_delay_report: document.getElementById('set_msg_delay_report').value,
-                    msg_arrival_soon: document.getElementById('set_msg_arrival_soon').value,
-                    msg_review_prompt: document.getElementById('set_msg_review_prompt').value,
-                    msg_review_thanks: document.getElementById('set_msg_review_thanks').value,
-                    btn_leave_review: document.getElementById('set_btn_leave_review').value,
-                    btn_view_reviews: document.getElementById('set_btn_view_reviews').value,
-                    btn_confirm_review: document.getElementById('set_btn_confirm_review').value,
-                    btn_back_menu_nav: document.getElementById('set_btn_back_menu_nav').value,
-                    btn_cart_resume: document.getElementById('set_btn_cart_resume').value,
-                    btn_client_mode: document.getElementById('set_btn_client_mode').value,
-                    msg_thanks_participation: document.getElementById('set_msg_thanks_participation').value,
-                    msg_your_answer: document.getElementById('set_msg_your_answer').value
+                    msg_order_received_admin: getVal('set_msg_order_received_admin'),
+                    msg_order_confirmed_client: getVal('set_msg_order_confirmed_client'),
+                    btn_livreur_space: getVal('set_btn_livreur_space'),
+                    btn_back_menu: getVal('set_btn_back_menu'),
+                    msg_status_taken: getVal('set_msg_status_taken'),
+                    msg_status_delivered: getVal('set_msg_status_delivered'),
+                    msg_delay_report: getVal('set_msg_delay_report'),
+                    msg_arrival_soon: getVal('set_msg_arrival_soon'),
+                    msg_review_prompt: getVal('set_msg_review_prompt'),
+                    msg_review_thanks: getVal('set_msg_review_thanks'),
+                    btn_leave_review: getVal('set_btn_leave_review'),
+                    btn_view_reviews: getVal('set_btn_view_reviews'),
+                    btn_confirm_review: getVal('set_btn_confirm_review'),
+                    btn_back_menu_nav: getVal('set_btn_back_menu_nav'),
+                    btn_cart_resume: getVal('set_btn_cart_resume'),
+                    btn_client_mode: getVal('set_btn_client_mode'),
+                    msg_thanks_participation: getVal('set_msg_thanks_participation'),
+                    msg_your_answer: getVal('set_msg_your_answer')
                 };
 
                 // Ajout dynamique de tous les nouveaux champs de contenu
