@@ -24,7 +24,13 @@ class ChannelRegistry {
     }
 
     async _runOnAll(method) {
-        for (const ch of this.channels.values()) await ch[method]();
+        for (const ch of this.channels.values()) {
+            if (typeof ch[method] === 'function') {
+                await ch[method]().catch(e => console.error(`[Registry] ${ch.type}.${method}() failed:`, e.message));
+            } else {
+                console.warn(`[Registry] ${ch.type} does not have method ${method}`);
+            }
+        }
     }
 
     initializeAll() { return this._runOnAll('initialize'); }

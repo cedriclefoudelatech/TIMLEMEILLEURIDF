@@ -609,7 +609,7 @@ async function updateOrderStatus(orderId, status, extraData = {}) {
 
         const alertMsg = `${icon} <b>MISE À JOUR COMMANDE</b>\n\n🆔 ID : <code>#${orderId.slice(-5)}</code>\n🔄 Statut : <b>${label}</b>`;
         const { notifyAdmins } = require('./notifications');
-        notifyAdmins(null, alertMsg);
+        await notifyAdmins(null, alertMsg);
     } catch (e) { }
 
     if (status === 'delivered') {
@@ -1428,9 +1428,17 @@ async function getProducts() {
 
 async function saveProduct(data) {
     const id = data.id || `${Date.now()}`;
-    const createdAt = data.created_at || ts();
+    // Convertir created_at en ISO si c'est un timestamp unix (nombre ou string numérique)
+    let createdAt = data.created_at || ts();
+    if (typeof createdAt === 'number' || (typeof createdAt === 'string' && /^\d{10,13}$/.test(createdAt))) {
+        createdAt = new Date(Number(createdAt)).toISOString();
+    }
     delete data.id;
     delete data.created_at;
+    // Nettoyer aussi updated_at si présent avec un timestamp unix
+    if (data.updated_at && (typeof data.updated_at === 'number' || (typeof data.updated_at === 'string' && /^\d{10,13}$/.test(data.updated_at)))) {
+        data.updated_at = new Date(Number(data.updated_at)).toISOString();
+    }
     const { error } = await supabase.from(COL_PRODUCTS).upsert({ id, ...data, created_at: createdAt });
     if (error) {
         console.error("Error saveProduct", error);
@@ -1497,7 +1505,7 @@ async function recordPollVote(broadcastId, optionIdx, userId, userName = 'Anonym
     // Alerte Admin
     const { notifyAdmins } = require('./notifications');
     const label = poll.options[optionIdx] || `#${optionIdx}`;
-    notifyAdmins(null, `🗳 <b>VOTE SONDAGE</b>\n\n👤 Par : <b>${userName}</b>\n🆔 Sondage ID : <code>${broadcastId}</code>\n🔘 Réponse : "<b>${label}</b>"`);
+    await notifyAdmins(null, `🗳 <b>VOTE SONDAGE</b>\n\n👤 Par : <b>${userName}</b>\n🆔 Sondage ID : <code>${broadcastId}</code>\n🔘 Réponse : "<b>${label}</b>"`).catch(() => {});
 
     const { error } = await supabase.from(COL_BROADCASTS).update({ poll_data: poll }).eq('id', broadcastId);
     return error ? 'error' : 'success';
@@ -1522,7 +1530,7 @@ async function recordPollFreeResponse(broadcastId, userId, userName, responseTex
 
     // Alerte Admin
     const { notifyAdmins } = require('./notifications');
-    notifyAdmins(null, `🖋 <b>RÉPONSE LIBRE (SONDAGE)</b>\n\n👤 Par : <b>${userName}</b>\n🆔 Sondage ID : <code>${broadcastId}</code>\n📝 Message : "<i>${responseText}</i>"`);
+    await notifyAdmins(null, `🖋 <b>RÉPONSE LIBRE (SONDAGE)</b>\n\n👤 Par : <b>${userName}</b>\n🆔 Sondage ID : <code>${broadcastId}</code>\n📝 Message : "<i>${responseText}</i>"`).catch(() => {});
 
     const { error } = await supabase.from(COL_BROADCASTS).update({ poll_data: poll }).eq('id', broadcastId);
     return error ? 'error' : 'success';
@@ -1788,7 +1796,7 @@ async function markOrderSupplierNotified(orderId) {
 }
 
 async function markOrderSupplierReady(orderId, prepTime = null) {
-    const update = { supplier_ready_at: Date.now() };
+    const update = { supplier_ready_at: new Date().toISOString() };
     if (prepTime) update.supplier_prep_time = prepTime;
     await supabase.from(COL_ORDERS).update(update).eq('id', orderId);
 }

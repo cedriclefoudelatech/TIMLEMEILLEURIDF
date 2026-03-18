@@ -11,37 +11,34 @@ function getTgBot() {
 
 async function notifyAdmins(bot, message) {
     try {
-        // Si bot est null ou ne semble pas être un objet Telegraf, on cherche l'instance globale
-        const realBot = (bot && bot.telegram) ? bot : getTgBot();
-        
-        if (!realBot || !realBot.telegram) {
-            console.error("❌ notifyAdmins: No Telegram bot found in registry or arguments");
-            return;
-        }
-
         // On supporte l'appel avec (message) seul si bot est omis
         if (typeof bot === 'string' && !message) {
             message = bot;
+            bot = null;
         }
 
         const settings = await getAppSettings();
-        if (!settings || !settings.admin_telegram_id) return;
+        if (!settings) return;
 
+        // Construire la liste des admins AVANT de vérifier si elle est vide
+        // (pour ne pas ignorer ADMIN_TELEGRAM_ID env si admin_telegram_id DB est vide)
         const rawAdmins = String(settings.admin_telegram_id || '');
         const dbAdmins = rawAdmins.replace(/[\[\]"']/g, '').split(/[\s,]+/).filter(Boolean);
         const envAdmin = process.env.ADMIN_TELEGRAM_ID;
         const allAdmins = [...new Set([...dbAdmins, envAdmin].filter(Boolean))];
 
+        if (allAdmins.length === 0) {
+            console.warn("[Notification] Aucun admin trouvé (ni DB ni ENV). Alerte ignorée.");
+            return;
+        }
+
         for (const adminId of allAdmins) {
             // Unify ID format if it's just a number, assume telegram
             const finalId = (adminId.includes('_') || adminId.includes('@')) ? adminId : `telegram_${adminId}`;
             console.log(`[Notification] Envoi alerte admin à ${finalId}: ${message.substring(0, 50)}...`);
-            await sendMessageToUser(finalId, message).catch((err) => { 
+            await sendMessageToUser(finalId, message).catch((err) => {
                 console.error(`[Notification] Échec envoi à ${finalId}:`, err.message);
             });
-        }
-        if (allAdmins.length === 0) {
-            console.warn("[Notification] Aucun admin trouvé pour envoyer l'alerte.");
         }
     } catch (e) {
         console.error("❌ notifyAdmins failed:", e.message);
@@ -94,8 +91,14 @@ async function sendMessageToUser(userId, message, options = {}) {
             }
         }
 
-        // Telegram branch
-        const realBot = getTgBot();
+        // Telegram branch — essayer le registre, puis fallback sur getBotInstance
+        let realBot = getTgBot();
+        if (!realBot || !realBot.telegram) {
+            try {
+                const { getBotInstance } = require('../server');
+                realBot = getBotInstance();
+            } catch (e) { /* server.js pas encore chargé */ }
+        }
         if (!realBot || !realBot.telegram) {
             console.error(`[Notification] Bot Telegram inactif, impossible d'envoyer à ${userId}`);
             return null;

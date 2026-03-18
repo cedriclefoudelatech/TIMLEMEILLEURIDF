@@ -143,7 +143,7 @@ function createServer() {
     });
 
     // WhatsApp restart - nettoie la session et relance le QR
-    app.get('/wa-restart', async (req, res) => {
+    app.get('/wa-restart', authMiddleware, async (req, res) => {
         try {
             const waSession = registry.query('whatsapp');
             if (waSession && waSession.restart) {
@@ -158,7 +158,7 @@ function createServer() {
     });
 
     // WhatsApp connection logs - debug en live
-    app.get('/wa-logs', (req, res) => {
+    app.get('/wa-logs', authMiddleware, (req, res) => {
         const { waLogs } = require('./services/wa_log_shared');
         const logs = waLogs;
         res.setHeader('Content-Type', 'text/html');
@@ -679,7 +679,8 @@ function createServer() {
                 }
             }
 
-            const mediaUrls = req.body.media_urls ? JSON.parse(req.body.media_urls) : [];
+            let mediaUrls = [];
+            try { mediaUrls = req.body.media_urls ? JSON.parse(req.body.media_urls) : []; } catch (e) { mediaUrls = []; }
 
             if (!message && mediaFiles.length === 0 && mediaUrls.length === 0) {
                 return res.status(400).json({ error: 'Message ou média requis' });

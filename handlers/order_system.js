@@ -89,11 +89,11 @@ function setupOrderSystem(bot) {
                 `📝 Commentaire : <i>${text}</i>`;
 
             // Notifier les admins via service central
-            notifyAdmins(bot, feedbackMsg);
+            await notifyAdmins(bot, feedbackMsg);
 
             // Notifier le livreur
             if (order.livreur_id) {
-                sendTelegramMessage(order.livreur_id,
+                await sendTelegramMessage(order.livreur_id,
                     `👏 <b>Félicitations !</b>\n\nUn client a laissé une note pour votre livraison :\n\n${stars}\n"<i>${text}</i>"`
                 );
             }
@@ -134,7 +134,7 @@ function setupOrderSystem(bot) {
         const productId = ctx.match[1];
         const products = await getProducts();
         const product = products.find(p => p.id === productId);
-        const settings = (ctx.state?.settings || await getAppSettings()) || await getAppSettings();
+        const settings = ctx.state?.settings || await getAppSettings();
 
         if (!product) return safeEdit(ctx, settings.msg_product_not_found || '❌ Produit non trouvé.', [Markup.button.callback(settings.btn_back_menu || '◀️ Retour Menu', 'view_catalog')]);
 
@@ -851,7 +851,7 @@ function setupOrderSystem(bot) {
         else if (addr.includes('toulouse')) city = 'toulouse';
 
         const orderData = {
-            user_id: `${ctx.platform}_${userId}`,
+            user_id: userId,
             username: ctx.from.username || 'Inconnu',
             first_name: ctx.from.first_name || 'Inconnu',
             product_name: productList,
@@ -944,7 +944,7 @@ function setupOrderSystem(bot) {
             .replace('{pay_label}', payLabel)
             .replace('{order_id}', order.id);
 
-        notifyAdmins(bot, adminAlert);
+        await notifyAdmins(bot, adminAlert);
 
         // Notifier TOUS les livreurs via le service central
         await notifyLivreurs(bot, notificationText, {
@@ -955,10 +955,11 @@ function setupOrderSystem(bot) {
 
         // Notifier le fournisseur si le produit a un supplier_id
         try {
-            const cartItems = pending.items || [];
+            // Utiliser le panier (cart) plutôt que pending.items (qui n'existe pas)
+            const cartItems = cart.length > 0 ? cart : (pending ? [pending] : []);
             const products = await getProducts();
             for (const item of cartItems) {
-                const product = products.find(p => p.id === item.productId);
+                const product = products.find(p => p.id === item.productId || p.name === item.productName);
                 if (product && product.supplier_id) {
                     const supplier = await getSupplier(product.supplier_id);
                     if (supplier && supplier.telegram_id) {
@@ -966,7 +967,7 @@ function setupOrderSystem(bot) {
                             `\n\n📦 Produit : ${product.name} x${item.qty || 1}\n` +
                             `📍 Adresse : ${pending.address}\n` +
                             `🔑 Commande : #${order.id.slice(-5)}`;
-                        sendTelegramMessage(supplier.telegram_id, supplierMsg);
+                        await sendTelegramMessage(supplier.telegram_id, supplierMsg);
                         await markOrderSupplierNotified(order.id);
                     }
                 }
@@ -1058,7 +1059,7 @@ function setupOrderSystem(bot) {
         ctx.telegram.setChatMenuButton(ctx.chat.id, { type: 'commands' }).catch(() => { });
 
         // 6. Relayer à l'admin
-        notifyAdmins(bot, `🔔 <b>STATUT LIVREUR</b>\n\n👤 ${ctx.from.first_name}\n📍 Secteur : ${city.toUpperCase()}\n🔘 ${isAvailable ? '✅ DISPONIBLE' : '❌ INDISPONIBLE'}`);
+        await notifyAdmins(bot, `🔔 <b>STATUT LIVREUR</b>\n\n👤 ${ctx.from.first_name}\n📍 Secteur : ${city.toUpperCase()}\n🔘 ${isAvailable ? '✅ DISPONIBLE' : '❌ INDISPONIBLE'}`);
     });
 
     bot.command('ma_position', async (ctx) => {
@@ -1245,7 +1246,7 @@ function setupOrderSystem(bot) {
 
         // Notifier le client avec option d'annulation et aide
         if (order.user_id) {
-            sendTelegramMessage(order.user_id,
+            await sendTelegramMessage(order.user_id,
                 `🚚 <b>Bonne nouvelle !</b>\n\n` +
                 `Votre commande #${orderId.slice(-5)} est prise en charge par <b>${settings.bot_name || 'notre équipe'}</b>.\n` +
                 `⏳ Une estimation du temps d'arrivé vous sera donnée dans quelques minutes.\n\n` +
@@ -1261,7 +1262,7 @@ function setupOrderSystem(bot) {
         }
 
         // Relayer à l'admin
-        notifyAdmins(bot, `🚗 <b>COMMANDE ACCEPTÉE</b>\n\n🆔 Commande : <code>#${orderId.slice(-5)}</code>\n👤 Livreur : ${ctx.from.first_name}\n📦 Produit : ${order.product_name}\n📍 Adresse : ${order.address}\n💰 Total : ${order.total_price}€`);
+        await notifyAdmins(bot, `🚗 <b>COMMANDE ACCEPTÉE</b>\n\n🆔 Commande : <code>#${orderId.slice(-5)}</code>\n👤 Livreur : ${ctx.from.first_name}\n📦 Produit : ${order.product_name}\n📍 Adresse : ${order.address}\n💰 Total : ${order.total_price}€`);
     });
 
     bot.action(/^notify_(.+)_(.+)$/, async (ctx) => {
@@ -1278,7 +1279,7 @@ function setupOrderSystem(bot) {
         else if (timeCode === '5m') timeText = "⚡ dans 5 min";
         else if (timeCode === 'here') timeText = "📍 Suis arrivé, descends";
 
-        sendTelegramMessage(order.user_id,
+        await sendTelegramMessage(order.user_id,
             `🔔 <b>Mise à jour Livraison #${orderId.slice(-5)}</b>\n\n` +
             `Votre livreur vous informe qu'il arrive : <b>${timeText}</b>\n\n` +
             `<i>Restez joignable !</i>`,
@@ -1292,7 +1293,7 @@ function setupOrderSystem(bot) {
 
         // Relayer à l'admin
         const settings = await getAppSettings();
-        notifyAdmins(bot, `⏳ <b>ETA ENVOYÉ</b>\n\n🆔 Commande : <code>#${orderId.slice(-5)}</code>\n👤 Livreur : ${ctx.from.first_name}\n🕒 ETA : ${timeText}`);
+        await notifyAdmins(bot, `⏳ <b>ETA ENVOYÉ</b>\n\n🆔 Commande : <code>#${orderId.slice(-5)}</code>\n👤 Livreur : ${ctx.from.first_name}\n🕒 ETA : ${timeText}`);
     });
 
     bot.action(/^delay_report_(.+)$/, async (ctx) => {
@@ -1362,7 +1363,7 @@ function setupOrderSystem(bot) {
             parse_mode: 'HTML',
             ...Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_quick_menu || '◀️ Retour Menu', 'livreur_menu')]])
         });
-        notifyAdmins(bot, `⚠️ <b>LIVREUR ABANDON</b>\n\n🆔 Commande : <code>#${orderId.slice(-5)}</code>\n👤 Par : ${ctx.from.first_name}\nL'ordre est de nouveau disponible.`);
+        await notifyAdmins(bot, `⚠️ <b>LIVREUR ABANDON</b>\n\n🆔 Commande : <code>#${orderId.slice(-5)}</code>\n👤 Par : ${ctx.from.first_name}\nL'ordre est de nouveau disponible.`);
     });
 
     bot.action(/^finish_(.+)$/, async (ctx) => {
@@ -1391,7 +1392,7 @@ function setupOrderSystem(bot) {
             const deliveredMsg = settings.msg_status_delivered || `✅ <b>Votre commande #{short_id} a été livrée !</b>\n\nMerci de votre confiance et à bientôt chez ${settings.bot_name} !`;
             const finalDeliveredMsg = deliveredMsg.replace('{short_id}', orderId.slice(-5));
 
-            sendTelegramMessage(order.user_id,
+            await sendTelegramMessage(order.user_id,
                 finalDeliveredMsg,
                 {
                     ...Markup.inlineKeyboard([
@@ -1403,12 +1404,13 @@ function setupOrderSystem(bot) {
         }
 
         // Relayer à l'admin
-        notifyAdmins(bot, `✅ <b>COMMANDE LIVRÉE</b>\n\n🆔 Commande : <code>#${orderId.slice(-5)}</code>\n👤 Livreur : ${ctx.from.first_name}\n📦 Produit : ${order.product_name}\n💰 Montant : ${order.total_price}€`);
+        await notifyAdmins(bot, `✅ <b>COMMANDE LIVRÉE</b>\n\n🆔 Commande : <code>#${orderId.slice(-5)}</code>\n👤 Livreur : ${ctx.from.first_name}\n📦 Produit : ${order.product_name}\n💰 Montant : ${order.total_price}€`);
     });
 
     // --- Gestion de l'annulation par le client ---
     bot.action(/^cancel_order_client_(.+)$/, async (ctx) => {
         const orderId = ctx.match[1];
+        const settings = ctx.state?.settings || await getAppSettings();
         const order = await getOrder(orderId);
         if (!order || order.status === 'delivered' || order.status === 'cancelled') {
             return ctx.answerCbQuery('Action impossible ou déjà effectuée.', true);
@@ -1422,11 +1424,11 @@ function setupOrderSystem(bot) {
 
         // Notifier Admin
         const alertMsg = `⚠️ <b>ANNULATION CLIENT</b>\n\nLa commande <b>#${shortId}</b> a été annulée par le client.\n👤 Client: ${ctx.from.first_name}`;
-        notifyAdmins(bot, alertMsg);
+        await notifyAdmins(bot, alertMsg);
 
         // Notifier Livreur
         if (order.livreur_id) {
-            sendTelegramMessage(order.livreur_id, `⚠️ <b>COMMANDE ANNULÉE</b>\n\nLe client a annulé la commande <b>#${shortId}</b>. Ne vous déplacez pas.`);
+            await sendTelegramMessage(order.livreur_id, `⚠️ <b>COMMANDE ANNULÉE</b>\n\nLe client a annulé la commande <b>#${shortId}</b>. Ne vous déplacez pas.`);
         }
     });
 
@@ -1468,7 +1470,7 @@ function setupOrderSystem(bot) {
         const { setPendingFeedback } = require('../services/database');
         await setPendingFeedback(`${ctx.platform}_${ctx.from.id}`, orderId, rate);
 
-        const settings = (ctx.state?.settings || await getAppSettings()) || await getAppSettings();
+        const settings = ctx.state?.settings || await getAppSettings();
         await safeEdit(ctx,
             `✍️ <b>Un dernier mot ?</b>\n\nEnvoyez votre commentaire en répondant à ce message (ex: "Livraison rapide, au top !") :\n\n<i>Vous pouvez aussi joindre une photo 📸</i>`,
             Markup.inlineKeyboard([
@@ -1558,7 +1560,7 @@ function setupOrderSystem(bot) {
             const settings = await getAppSettings();
             const stars = '⭐'.repeat(data.rate);
             const mediaCount = (data.photos || []).length;
-            notifyAdmins(bot, `🌟 <b>NOUVEL AVIS GÉNÉRAL !</b>\n\n👤 Client : ${ctx.from.first_name}\n🌟 Note : ${stars}\n💬 Commentaire : ${data.text || '(Sans commentaire)'}${mediaCount > 0 ? `\n🖼 ${mediaCount} média(s) joint(s)` : ''}`);
+            await notifyAdmins(bot, `🌟 <b>NOUVEL AVIS GÉNÉRAL !</b>\n\n👤 Client : ${ctx.from.first_name}\n🌟 Note : ${stars}\n💬 Commentaire : ${data.text || '(Sans commentaire)'}${mediaCount > 0 ? `\n🖼 ${mediaCount} média(s) joint(s)` : ''}`);
 
             await safeEdit(ctx, settings.msg_review_thanks || '✅ <b>Merci !</b> Votre note a été enregistrée. 🏮', {
                 parse_mode: 'HTML',
@@ -1600,7 +1602,7 @@ function setupOrderSystem(bot) {
 
         const stars = '⭐'.repeat(data.rate);
         const mediaCount = (data.photos || []).length;
-        notifyAdmins(bot, `🌟 <b>NOUVEL AVIS GÉNÉRAL !</b>\n\n👤 Client : ${ctx.from.first_name}\n🌟 Note : ${stars}\n💬 ${data.text || '(Sans commentaire)'}${mediaCount > 0 ? `\n🖼 ${mediaCount} média(s)` : ''}`);
+        await notifyAdmins(bot, `🌟 <b>NOUVEL AVIS GÉNÉRAL !</b>\n\n👤 Client : ${ctx.from.first_name}\n🌟 Note : ${stars}\n💬 ${data.text || '(Sans commentaire)'}${mediaCount > 0 ? `\n🖼 ${mediaCount} média(s)` : ''}`);
 
         await safeEdit(ctx, settings.msg_review_thanks || '✅ <b>Merci !</b> Votre avis a été publié anonymement. 🏮', {
             parse_mode: 'HTML',
@@ -1903,7 +1905,7 @@ function setupOrderSystem(bot) {
             const stars = '⭐'.repeat(data.rate);
             const mediaCount = (data.photos || []).length;
             const adminMsg = `🌟 <b>NOUVEL AVIS GÉNÉRAL !</b>\n\n👤 Client : ${ctx.from.first_name}\n🌟 Note : ${stars}\n💬 Commentaire : ${data.text || '(Sans commentaire)'}${mediaCount > 0 ? `\n🖼 ${mediaCount} média(s) joint(s)` : ''}`;
-            notifyAdmins(bot, adminMsg);
+            await notifyAdmins(bot, adminMsg);
 
             await safeEdit(ctx, reviewSettings.msg_review_thanks || '✅ <b>Merci !</b> Votre avis a été publié anonymement. 🏮', {
                 parse_mode: 'HTML',
@@ -1947,7 +1949,7 @@ function setupOrderSystem(bot) {
 
                         // Alerte aux admins via service central
                         const alertMsg = `⚠️ <b>SIGNALEMENT RETARD</b>\n\n🆔 Commande : <code>#${shortId}</code>\n👤 Livreur : ${safeHtml(ctx.from.first_name)}\n📝 Motif : "<i>${safeHtml(reason)}</i>"`;
-                        notifyAdmins(bot, alertMsg);
+                        await notifyAdmins(bot, alertMsg);
 
                         await ctx.reply(`✅ Notification de retard envoyée au client.`).catch(() => { });
                     }
@@ -2003,7 +2005,7 @@ function setupOrderSystem(bot) {
 
                     // Alerte aux admins via service central
                     const alertMsg = `💬 <b>CHAT ${roleLabel.toUpperCase()}</b>\n\n🆔 Commande : <code>#${shortId}</code>\n👤 De : ${safeHtml(ctx.from.first_name)}\n📝 Message : "<i>${safeHtml(reply)}</i>"`;
-                    notifyAdmins(bot, alertMsg);
+                    await notifyAdmins(bot, alertMsg);
 
                     const targetRoleLabel = isLivreur ? "client" : "livreur";
                     const successIcon = settings ? (settings.ui_icon_success || '✅') : '✅';
@@ -2173,7 +2175,7 @@ function setupOrderSystem(bot) {
 
         // Notifier le livreur
         if (latest.livreur_id) {
-            sendTelegramMessage(latest.livreur_id,
+            await sendTelegramMessage(latest.livreur_id,
                 `❓ <b>DEMANDE CLIENT (ID #${shortId})</b>\n\nLe client demande où vous en êtes pour sa livraison.\nMerci de lui envoyer une estimation ASAP via le menu livreur !`
             );
         }
@@ -2200,7 +2202,7 @@ function setupOrderSystem(bot) {
         const settings = await getAppSettings();
         
         // Notification Admin
-        notifyAdmins(bot, `💬 <b>CONTACT ADMIN SOLICITÉ</b>\n\n👤 Client : ${ctx.from.first_name} (@${ctx.from.username || 'Inconnu'})\nID : <code>${ctx.from.id}</code>`);
+        await notifyAdmins(bot, `💬 <b>CONTACT ADMIN SOLICITÉ</b>\n\n👤 Client : ${ctx.from.first_name} (@${ctx.from.username || 'Inconnu'})\nID : <code>${ctx.from.id}</code>`);
 
         if (settings.private_contact_url) {
             return safeEdit(ctx, `💬 <b>Besoin d'un admin ?</b>\n\nContact direct : <a href="${settings.private_contact_url}">${settings.private_contact_url}</a>\n\nCliquez aussi sur le bouton ci-dessous :`,
@@ -2312,7 +2314,7 @@ function setupOrderSystem(bot) {
         // Abandoned cart activity update
         const userId = `${ctx.platform}_${ctx.from.id}`;
         if (userCarts.has(userId)) {
-            userLastActivity.set(ctx.from.id, Date.now());
+            userLastActivity.set(userId, Date.now());
         }
         return next();
     });
@@ -2402,7 +2404,7 @@ function setupOrderSystem(bot) {
         const orderId = ctx.match[1];
         await markOrderSupplierReady(orderId);
 
-        notifyAdmins(bot, `🏪 <b>Fournisseur : produit prêt !</b>\n\nCommande #${orderId.slice(-5)} marquée comme prête par le fournisseur.`);
+        await notifyAdmins(bot, `🏪 <b>Fournisseur : produit prêt !</b>\n\nCommande #${orderId.slice(-5)} marquée comme prête par le fournisseur.`);
 
         const supplier = await getSupplierByTelegramId(String(ctx.from.id));
         const orders = await getSupplierOrders(supplier.id, 20);

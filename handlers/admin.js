@@ -59,9 +59,11 @@ async function isAdmin(ctx) {
 }
 
 async function handleAdminLogin(ctx, password) {
-    const settings = ctx.state.settings;
-    if (password === settings.admin_password || password === process.env.ADMIN_PASSWORD || password === '1234') {
-        authenticatedAdmins.set(ctx.from.id, true);
+    const settings = ctx.state?.settings || await getAppSettings();
+    if (password === settings?.admin_password || password === process.env.ADMIN_PASSWORD || password === '1234') {
+        // Utiliser le même format de clé que isAdmin() (digits uniquement)
+        const adminKey = String(ctx.from.id).match(/\d+/g)?.[0] || String(ctx.from.id);
+        authenticatedAdmins.set(adminKey, true);
         return showAdminMenu(ctx);
     } else {
         return safeEdit(ctx, '❌ Mot de passe incorrect.');
@@ -103,7 +105,8 @@ function setupAdminHandlers(bot) {
         if (!(await isAdmin(ctx))) return safeEdit(ctx, '❌ Accès réservé.');
         const args = ctx.message.text.split(' ');
         if (args.length < 2) {
-            pendingAdminLogins.add(ctx.from.id);
+            const adminKey = String(ctx.from.id).match(/\d+/g)?.[0] || String(ctx.from.id);
+            pendingAdminLogins.add(adminKey);
             return safeEdit(ctx, '🔐 Veuillez entrer le mot de passe administrateur :');
         }
         return handleAdminLogin(ctx, args[1]);
@@ -132,12 +135,13 @@ function setupAdminHandlers(bot) {
         const rootAdminIds = String(settings.admin_telegram_id || '').match(/\d+/g) || [];
 
         // Root admins or already authenticated admins get in directly
-        if (rootAdminIds.includes(String(ctx.from.id)) || authenticatedAdmins.has(ctx.from.id)) {
+        const adminKey = String(ctx.from.id).match(/\d+/g)?.[0] || String(ctx.from.id);
+        if (rootAdminIds.includes(adminKey) || authenticatedAdmins.has(adminKey)) {
             await ctx.answerCbQuery();
             return showAdminMenu(ctx, true);
         }
 
-        pendingAdminLogins.add(ctx.from.id);
+        pendingAdminLogins.add(adminKey);
         await ctx.answerCbQuery();
         return ctx.reply('🔐 Veuillez entrer le mot de passe administrateur :');
     });
@@ -145,14 +149,14 @@ function setupAdminHandlers(bot) {
     // Handler pour la réinitialisation de mot de passe (via notification auto ou admin manuel)
     bot.action('admin_trigger_password_reset', async (ctx) => {
         if (!(await isAdmin(ctx))) return ctx.answerCbQuery('❌ Accès réservé.');
-        pendingPasswordReset.add(ctx.from.id);
+        pendingPasswordReset.add(String(ctx.from.id).match(/\d+/g)?.[0] || String(ctx.from.id));
         await ctx.answerCbQuery();
         return ctx.reply('🆕 <b>RÉINITIALISATION MOT DE PASSE</b>\n\nVeuillez envoyer le nouveau mot de passe d\'administration souhaité :', { parse_mode: 'HTML' });
     });
 
     // Handler texte (Pass et recherche)
     bot.on('text', async (ctx, next) => {
-        const userId = ctx.from.id;
+        const userId = String(ctx.from.id).match(/\d+/g)?.[0] || String(ctx.from.id);
         if (pendingAdminLogins.has(userId)) {
             pendingAdminLogins.delete(userId);
             return handleAdminLogin(ctx, ctx.message.text.trim());
@@ -261,7 +265,7 @@ function setupAdminHandlers(bot) {
 
         await ctx.answerCbQuery(`✅ Assigné à ${livreur.first_name}`);
         // Notification au livreur
-        sendTelegramMessage(lid.replace('telegram_', ''), `🔔 <b>ADMIN : Une commande vous a été assignée !</b>\n\nRegardez vos commandes dans votre espace livreur.`).catch(() => { });
+        await sendTelegramMessage(lid.replace('telegram_', ''), `🔔 <b>ADMIN : Une commande vous a été assignée !</b>\n\nRegardez vos commandes dans votre espace livreur.`).catch(() => { });
 
         return bot.handleUpdate({ ...ctx.update, callback_query: { ...ctx.callbackQuery, data: `admin_order_view_${orderId}` } });
     });
@@ -540,7 +544,7 @@ function setupAdminHandlers(bot) {
         const newState = !s.maintenance_mode;
         await updateAppSettings({ maintenance_mode: newState });
         await ctx.answerCbQuery(`✅ Maintenance ${newState ? 'Activée' : 'Désactivée'}`);
-        notifyAdmins(bot, `⚙️ <b>MODIFICATION PARAMÈTRE</b>\n\nNom : Maintenance\nNouveau statut : <b>${newState ? 'ACTIVÉE' : 'DÉSACTIVÉE'}</b>\nPar : ${ctx.from.first_name}`);
+        await notifyAdmins(bot, `⚙️ <b>MODIFICATION PARAMÈTRE</b>\n\nNom : Maintenance\nNouveau statut : <b>${newState ? 'ACTIVÉE' : 'DÉSACTIVÉE'}</b>\nPar : ${ctx.from.first_name}`);
         return showAdminMenu(ctx, true);
     });
 
@@ -597,7 +601,7 @@ function setupAdminHandlers(bot) {
         admins = admins.filter(id => id !== targetId);
         await updateAppSettings({ list_admins: admins });
         await ctx.answerCbQuery('✅ Admin supprimé');
-        notifyAdmins(bot, `👤 <b>ADMIN SUPPRIMÉ</b>\n\nID : <code>${targetId}</code>\nPar : ${ctx.from.first_name}`);
+        await notifyAdmins(bot, `👤 <b>ADMIN SUPPRIMÉ</b>\n\nID : <code>${targetId}</code>\nPar : ${ctx.from.first_name}`);
         return bot.handleUpdate({ ...ctx.update, callback_query: { ...ctx.callbackQuery, data: 'admin_manage_list' } });
     });
 
@@ -616,7 +620,7 @@ function setupAdminHandlers(bot) {
             admins.push(newId);
             await updateAppSettings({ list_admins: admins });
             await ctx.reply(`✅ <b>ID ${newId} ajouté</b> aux administrateurs !`, { parse_mode: 'HTML' });
-            notifyAdmins(bot, `👤 <b>NOUVEL ADMIN AJOUTÉ</b>\n\nID : <code>${newId}</code>\nPar : ${ctx.from.first_name}`);
+            await notifyAdmins(bot, `👤 <b>NOUVEL ADMIN AJOUTÉ</b>\n\nID : <code>${newId}</code>\nPar : ${ctx.from.first_name}`);
             return bot.handleUpdate({
                 ...ctx.update,
                 callback_query: { id: '0', from: ctx.from, data: 'admin_manage_list', message: ctx.message }
@@ -633,7 +637,7 @@ function setupAdminHandlers(bot) {
             const newVal = val; // Use the processed 'val'
             await updateAppSettings({ [field]: newVal });
             await ctx.reply(`✅ <b>${field}</b> mis à jour !`, { parse_mode: 'HTML' });
-            notifyAdmins(bot, `⚙️ <b>PARAMÈTRE MIS À JOUR</b>\n\nClé : <code>${field}</code>\nPar : ${ctx.from.first_name}`);
+            await notifyAdmins(bot, `⚙️ <b>PARAMÈTRE MIS À JOUR</b>\n\nClé : <code>${field}</code>\nPar : ${ctx.from.first_name}`);
             return bot.handleUpdate({
                 ...ctx.update,
                 callback_query: { id: '0', from: ctx.from, data: 'admin_settings', message: ctx.message }

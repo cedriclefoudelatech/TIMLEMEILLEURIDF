@@ -129,7 +129,7 @@ class Dispatcher {
         const ctx = {
             channel: channel,
             platform: channel.type, // 'telegram' ou 'whatsapp'
-            from: { id: userId, first_name: msg.name, is_bot: false },
+            from: { id: userId, first_name: msg.name, username: msg.user?.username || msg.username || '', is_bot: false },
             chat: { id: userId, type: 'private' },
             state: { user: msg.user, settings: settings },
             _handled: false,

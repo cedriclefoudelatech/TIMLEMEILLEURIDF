@@ -127,7 +127,7 @@ async function safeEdit(ctx, text, opts = {}) {
         try {
             const oldMenuId = await getLastMenuId(userId).catch(() => null);
             if (oldMenuId && String(oldMenuId) !== String(keepId)) {
-                deleteSingleMessage(oldMenuId);
+                await deleteSingleMessage(oldMenuId);
             }
         } catch (e) { }
     };

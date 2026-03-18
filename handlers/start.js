@@ -19,7 +19,7 @@ function setupStartHandler(bot) {
     bot.command('start', async (ctx) => {
         try {
             const user = ctx.from;
-            const settings = ctx.state.settings;
+            const settings = ctx.state?.settings || await getAppSettings();
             const docId = `${ctx.platform}_${user.id}`;
 
             // L'envoi du menu est géré par safeEdit (transition douce)
@@ -46,7 +46,7 @@ function setupStartHandler(bot) {
                     `Username : @${user.username || 'Inconnu'}\n` +
                     `ID : <code>${user.id}</code>\n` +
                     (referrerId ? `🎁 Parrainé par : <code>${referrerId}</code>` : `🔍 Arrivé en direct`);
-                notifyAdmins(bot, newMsg);
+                await notifyAdmins(bot, newMsg);
             }
             let hasActive = false;
             if (registeredUser.is_livreur) {
@@ -103,7 +103,7 @@ function setupStartHandler(bot) {
 
     bot.action('private_contact', async (ctx) => {
         await ctx.answerCbQuery();
-        const settings = ctx.state.settings;
+        const settings = ctx.state?.settings || await getAppSettings();
         const buttons = [];
         let text = `${settings.ui_icon_contact} <b>${settings.label_contact}</b>`;
         if (settings.private_contact_url) {
@@ -121,7 +121,7 @@ function setupStartHandler(bot) {
 
     bot.action('channel_link', async (ctx) => {
         await ctx.answerCbQuery();
-        const settings = ctx.state.settings;
+        const settings = ctx.state?.settings || await getAppSettings();
         const buttons = [];
         let text = `${settings.ui_icon_channel} <b>${settings.label_channel}</b>`;
         if (settings.channel_url) {
@@ -292,33 +292,7 @@ function setupStartHandler(bot) {
         });
     });
 
-    bot.action('livreur_menu', async (ctx) => {
-        await ctx.answerCbQuery();
-        const docId = `${ctx.platform}_${ctx.from.id}`;
-        const [settings, user] = await Promise.all([getAppSettings(), getUser(docId)]);
-
-        if (!user || !user.is_livreur) {
-            return safeEdit(ctx, "❌ Accès réservé aux livreurs.", Markup.inlineKeyboard([[Markup.button.callback('◀️ Menu', 'main_menu')]]));
-        }
-
-        const { getLivreurOrders } = require('../services/database');
-        const activeOrders = await getLivreurOrders(user.id);
-        const hasActive = activeOrders.length > 0;
-        const city = user?.current_city || user?.data?.current_city || 'Non défini';
-        const isAvail = user?.is_available || user?.data?.is_available;
-
-        const text = `${settings.ui_icon_livreur} <b>${settings.label_livreur || 'Espace Livreur'}</b>\n\n` +
-            `👤 ${user.first_name || ctx.from.first_name}\n` +
-            `📍 Secteur : <b>${city.toUpperCase()}</b>\n` +
-            `🔘 Statut : <b>${isAvail ? (settings.ui_icon_success || '✅') + ' DISPONIBLE' : (settings.ui_icon_error || '❌') + ' INDISPONIBLE'}</b>\n\n` +
-            (hasActive ? `🚀 <b>VOUS AVEZ ${activeOrders.length} COMMANDE(S) EN COURS !</b>` : '');
-
-        const keyboard = await getLivreurMenuKeyboard(ctx, settings, user, hasActive);
-        await safeEdit(ctx, text, {
-            photo: settings.welcome_photo || null,
-            ...keyboard
-        });
-    });
+    // NOTE: livreur_menu handler est dans order_system.js (il contient le nettoyage des états awaitingDelayReason/awaitingChatReply)
 
     // ========== GESTION GPS / LOCALISATION ==========
     bot.on('location', async (ctx) => {
@@ -400,8 +374,8 @@ async function getMainMenuKeyboard(ctx, settings = null, user = null) {
 
     // Vérifier si un panier existe pour proposer de le reprendre
     const { userCarts } = require('./order_system');
-    const uId = ctx.from.id;
-    const cart = userCarts.get(uId);
+    const cartKey = `${ctx.platform}_${ctx.from.id}`;
+    const cart = userCarts.get(cartKey);
 
     if (cart && cart.length > 0) {
         buttons.unshift([Markup.button.callback(settings.btn_cart_resume || '➡️ 🛒 REPRENDRE MON PANIER', 'view_cart')]);
@@ -450,7 +424,6 @@ async function getLivreurMenuKeyboard(ctx, settings = null, user = null, hasActi
     buttons.push([Markup.button.callback('📡 Tracking Live (Aide)', 'tracking_info')]);
     buttons.push([Markup.button.callback(`${settings.ui_icon_stats || '📈'} Mon historique livraisons`, 'my_deliveries')]);
     buttons.push([Markup.button.callback(settings.btn_client_mode || '🛒 Mode Client (commander)', 'client_menu')]);
-    buttons.push([Markup.button.callback(settings.btn_back_menu || '◀️ Retour au menu principal', 'main_menu')]);
 
     // Bouton Admin si le livreur est aussi admin
     if (await isAdmin(ctx)) {
