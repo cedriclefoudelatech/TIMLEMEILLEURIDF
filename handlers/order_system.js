@@ -740,23 +740,37 @@ function setupOrderSystem(bot) {
         const settings = ctx.state.settings;
         const netToPay = finalPrice.toFixed(2);
         
-        const keyboard = [
-            [Markup.button.callback(`💵 Espèces (${netToPay}€)`, `create_order_CASH_${discount > 0 ? 'discount' : 'normal'}`)],
-            [Markup.button.callback(`💳 Carte Bancaire (${netToPay}€)`, `create_order_CARD_${discount > 0 ? 'discount' : 'normal'}`)],
-            [Markup.button.callback('◀️ Modifier livraison', 'back_to_scheduling')],
-            [Markup.button.callback('❌ Annuler', 'view_catalog')]
-        ];
+        const keyboard = [];
+        
+        let pModes = [];
+        try {
+            pModes = typeof settings.payment_modes_config === 'string' ? JSON.parse(settings.payment_modes_config) : (settings.payment_modes_config || []);
+        } catch(e) { }
+
+        if (!pModes || pModes.length === 0) {
+            pModes = [
+                { id: 'CASH', label: 'Espèces', icon: '💵' },
+                { id: 'CARD', label: 'Carte Bancaire', icon: '💳' }
+            ];
+        }
+
+        pModes.forEach(mode => {
+            keyboard.push([Markup.button.callback(`${mode.icon} ${mode.label} (${netToPay}€)`, `create_order_${mode.id}_${discount > 0 ? 'discount' : 'normal'}`)]);
+        });
+
+        keyboard.push([Markup.button.callback('◀️ Modifier livraison', 'back_to_scheduling')]);
+        keyboard.push([Markup.button.callback('❌ Annuler', 'view_catalog')]);
 
         await safeEdit(ctx, text, {
             ...Markup.inlineKeyboard(keyboard)
         });
     }
 
-    bot.action(/^create_order_([^_]+)_(.+)$/, async (ctx) => {
-        await ctx.answerCbQuery();
-        const userId = ctx.from.id;
-        const paymentMethod = ctx.match[1]; // CASH or CARD
-        const useDiscount = ctx.match[2] === 'discount';
+    bot.action(/^create_order_(.+)$/, async (ctx) => {
+        const fullTag = ctx.match[1]; // e.g. "CASH_normal" or "CARD_discount"
+        const parts = fullTag.split('_');
+        const useDiscount = parts[parts.length - 1] === 'discount';
+        const paymentMethod = parts.slice(0, -1).join('_'); // All but last part
         const pending = useDiscount ? pendingOrderConfirmation.get(userId) : pendingOrders.get(userId);
         if (!pending) return safeEdit(ctx, '❌ Session expirée.', Markup.inlineKeyboard([[Markup.button.callback('◀️ Menu', 'main_menu')]]));
 
@@ -831,23 +845,45 @@ function setupOrderSystem(bot) {
         );
 
         // Notify Admin / Livreurs
-        const payIcon = paymentMethod === 'CARD' ? '💳' : '💵';
-        const notificationText = `🆕 <b>NOUVELLE COMMANDE !</b>\n\n` +
-            `📦 ${productList}\n` +
-            `📍 ${pending.address}\n` +
-            (pending.scheduled_at ? `🕒 <b>Prévu pour : ${pending.scheduled_at}</b>\n` : `🕒 Dès que possible\n`) +
-            `💰 <b>${finalPrice.toFixed(2)}€ (${payIcon} ${paymentMethod})</b>\n\n` +
+        const payIcon = pModes.find(m => m.id === paymentMethod)?.icon || '💰';
+        const payLabel = pModes.find(m => m.id === paymentMethod)?.label || paymentMethod;
+
+        const defaultLivreurNotif = `🆕 <b>NOUVELLE COMMANDE !</b>\n\n` +
+            `📦 {product_list}\n` +
+            `📍 {address}\n` +
+            `{scheduled}\n` +
+            `💰 <b>{total}€ ({pay_icon} {pay_label})</b>\n\n` +
             `<i>Ouvrez votre espace livreur pour la prendre.</i>`;
-        // Alerte aux admins via service central
-        const adminAlert = `🚨 <b>NOUVELLE COMMANDE !</b>\n\n` +
-            `📱 <b>Source :</b> ${ctx.platform === 'whatsapp' ? 'WhatsApp' : 'Telegram'}\n` +
-            `👤 Client : ${ctx.from.first_name} (@${ctx.from.username || 'Inconnu'})\n` +
-            `📦 Produit : ${productList}\n` +
-            `📍 Adresse : ${pending.address}\n` +
-            (pending.scheduled_at ? `🕒 <b>PLANIFIÉ : ${pending.scheduled_at}</b>\n` : `🚀 <b>ASAP</b>\n`) +
-            `💰 Total : ${finalPrice.toFixed(2)}€\n` +
-            `🔑 ID : <code>${order.id}</code>\n\n` +
+        
+        const notificationText = (settings.msg_order_notif_livreur || defaultLivreurNotif)
+            .replace('{product_list}', productList)
+            .replace('{address}', pending.address)
+            .replace('{scheduled}', (pending.scheduled_at ? `🕒 <b>Prévu pour : ${pending.scheduled_at}</b>` : `🕒 Dès que possible`))
+            .replace('{total}', finalPrice.toFixed(2))
+            .replace('{pay_icon}', payIcon)
+            .replace('{pay_label}', payLabel);
+
+        const defaultAdminAlert = `🚨 <b>NOUVELLE COMMANDE !</b>\n\n` +
+            `📱 <b>Source :</b> {platform}\n` +
+            `👤 Client : {client_name} (@{username})\n` +
+            `📦 Produit : {product_list}\n` +
+            `📍 Adresse : {address}\n` +
+            `{scheduled}\n` +
+            `💰 Total : {total}€ ({pay_icon} {pay_label})\n` +
+            `🔑 ID : <code>{order_id}</code>\n\n` +
             `Choisissez un livreur ou gérez la commande :`;
+
+        const adminAlert = (settings.msg_order_received_admin || defaultAdminAlert)
+            .replace('{platform}', (ctx.platform === 'whatsapp' ? 'WhatsApp' : 'Telegram'))
+            .replace('{client_name}', ctx.from.first_name)
+            .replace('{username}', (ctx.from.username || 'Inconnu'))
+            .replace('{product_list}', productList)
+            .replace('{address}', pending.address)
+            .replace('{scheduled}', (pending.scheduled_at ? `🕒 <b>PLANIFIÉ : ${pending.scheduled_at}</b>` : `🚀 <b>ASAP</b>`))
+            .replace('{total}', finalPrice.toFixed(2))
+            .replace('{pay_icon}', payIcon)
+            .replace('{pay_label}', payLabel)
+            .replace('{order_id}', order.id);
 
         notifyAdmins(bot, adminAlert);
 
@@ -1563,32 +1599,41 @@ function setupOrderSystem(bot) {
         if (pendingOrderFeedback) {
             const { orderId, rate } = pendingOrderFeedback;
             const text = ctx.message.text || ctx.message.caption || "(Avis sans texte)";
+            // Capture de média (Photo ou Vidéo)
             const photo = ctx.message.photo ? (Array.isArray(ctx.message.photo) ? ctx.message.photo[ctx.message.photo.length - 1] : ctx.message.photo) : null;
+            const video = ctx.message.video || null;
+            const media = photo || video;
 
             // Save to bot_orders feedback fields
             await saveFeedback(orderId, parseInt(rate), text);
 
-            let finalPhotoUrls = [];
-            if (photo) {
-                if (ctx.platform === 'whatsapp' && photo.isWa) {
+            let finalMediaUrls = [];
+            if (media) {
+                const isVideo = !!video;
+                const ext = isVideo ? '.mp4' : '.jpg';
+                const fileName = `rev_${Date.now()}${ext}`;
+
+                if (ctx.platform === 'whatsapp' && media.isWa) {
                     try {
                         const { uploadMediaBuffer } = require('../services/database');
-                        const buffer = await ctx.channel.downloadMedia(photo.msg);
+                        const buffer = await ctx.channel.downloadMedia(media.msg);
                         if (buffer) {
-                            const permanentUrl = await uploadMediaBuffer(buffer, `rev_${Date.now()}.jpg`);
-                            finalPhotoUrls.push(permanentUrl);
+                             const mime = isVideo ? 'video/mp4' : 'image/jpeg';
+                            const permanentUrl = await uploadMediaBuffer(buffer, fileName, mime);
+                            finalMediaUrls.push(permanentUrl);
                         }
                     } catch (e) {
-                        console.error('[WA-REVIEW] Photo processing failed:', e.message);
+                        console.error('[WA-REVIEW] Media processing failed:', e.message);
                     }
                 } else if (ctx.telegram) {
                     try {
-                        const link = await ctx.telegram.getFileLink(photo.file_id || photo);
-                        const permanentUrl = await uploadMediaFromUrl(link.href, `rev_${Date.now()}.jpg`);
-                        finalPhotoUrls.push(permanentUrl);
+                        const fileId = media.file_id || media;
+                        const link = await ctx.telegram.getFileLink(fileId);
+                        const permanentUrl = await uploadMediaFromUrl(link.href, fileName);
+                        finalMediaUrls.push(permanentUrl);
                     } catch (e) {
                         console.warn('[REVIEW] Upload to storage failed, using file_id:', e.message);
-                        finalPhotoUrls.push(photo.file_id || photo); 
+                        finalMediaUrls.push(media.file_id || media); 
                     }
                 }
             }
@@ -1601,7 +1646,7 @@ function setupOrderSystem(bot) {
                 text,
                 rating: parseInt(rate),
                 order_id: orderId,
-                photos: finalPhotoUrls,
+                photos: finalMediaUrls,
                 is_public: true
             });
 

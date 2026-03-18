@@ -118,7 +118,7 @@ class Dispatcher {
             chat: { id: userId, type: 'private' },
             state: { user: msg.user, settings: settings },
             _handled: false,
-            message: { text: msg.text, photo: msg.photo, message_id: msg.message_id || msg.rawId },
+            message: { text: msg.text, photo: msg.photo, video: msg.video, message_id: msg.message_id || msg.rawId },
             updateType: msg.type || 'message',
             match: null,
             botInfo: { username: settings.bot_name || 'Bot' },

@@ -78,7 +78,10 @@ function setupStartHandler(bot) {
                         `<code>https://t.me/${ctx.botInfo.username}?start=${registeredUser.referral_code}</code>`;
                     if (!referrerId) pendingReferralInput.set(docId, true);
                 } else {
-                    welcomeText = `👋 <b>Ravi de vous revoir, ${user.first_name} !</b>\n\nVous êtes déjà membre du ${settings.bot_name}.${paymentLine}`;
+                    const defaultBack = `👋 <b>Ravi de vous revoir, ${user.first_name} !</b>\n\nVous êtes déjà membre du ${settings.bot_name}.${paymentLine}`;
+                    welcomeText = settings.msg_welcome_back 
+                        ? settings.msg_welcome_back.replace('{first_name}', user.first_name).replace('{bot_name}', settings.bot_name).replace('{payment_line}', paymentLine)
+                        : defaultBack;
                 }
             }
 

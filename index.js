@@ -185,7 +185,22 @@ async function main() {
 
 
     // 2. Initialisation des Canaux
-    await initChannels();
+    const replicaIndex = process.env.RAILWAY_REPLICA_INDEX || '0';
+    if (replicaIndex === '0') {
+        console.log('[System] Replica 0: Starting all channels...');
+        await initChannels();
+    } else {
+        console.log(`[System] Replica ${replicaIndex}: WhatsApp disabled to avoid session conflict. Telegram only.`);
+        // Note: Seule la réplica 0 gère WA pour éviter le conflit 440 sur Baileys
+        const tgToken = process.env.BOT_TOKEN;
+        if (tgToken) {
+            const { TelegramChannel } = require('./channels/TelegramChannel');
+            const tg = new TelegramChannel(tgToken);
+            await tg.initialize();
+            registry.register(tg);
+            await registry.startAll();
+        }
+    }
 
     // 3. Liaison Canaux -> Dispatcher
     const channels = registry.query();
