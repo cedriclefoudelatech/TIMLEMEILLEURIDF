@@ -3566,11 +3566,6 @@
                     document.getElementById('set_label_contact').value = s.label_contact || 'Mon contact privé';
                     document.getElementById('set_ui_icon_profile').value = s.ui_icon_profile || '🎁';
                     document.getElementById('set_label_profile').value = s.label_profile || 'Mon Profil & Parrainage';
-
-                    // Nouveaux champs
-                    document.getElementById('set_welcome_msg').value = s.welcome_message || '';
-                    document.getElementById('set_payment_modes').value = s.payment_modes || '💵 Espèces';
-                    document.getElementById('set_msg_qty').value = s.msg_choose_qty || 'Choisissez la quantité souhaitée :';
                     document.getElementById('set_ui_icon_livreur').value = s.ui_icon_livreur || '🛵';
                     document.getElementById('set_label_livreur').value = s.label_livreur_space || 'Espace Livreur';
                     document.getElementById('set_ui_icon_admin').value = s.ui_icon_admin || '⚙️';
@@ -3580,6 +3575,7 @@
                     document.getElementById('set_ui_icon_wallet').value = s.ui_icon_wallet || '💳';
                     document.getElementById('set_ui_icon_points').value = s.ui_icon_points || '⭐️';
                     document.getElementById('set_ui_icon_channel').value = s.ui_icon_channel || '📢';
+                    document.getElementById('set_label_channel').value = s.label_channel || 'Lien Canal Telegram';
                     document.getElementById('set_ui_icon_info').value = s.ui_icon_info || 'ℹ️';
                     document.getElementById('set_label_info').value = s.label_info || 'Informations';
                     document.getElementById('set_ui_icon_support').value = s.ui_icon_support || '❓';
@@ -3590,12 +3586,11 @@
                     document.getElementById('set_label_view_reviews').value = s.label_view_reviews || 'Consulter les avis';
                     document.getElementById('set_ui_icon_welcome').value = s.ui_icon_welcome || '🏠';
                     document.getElementById('set_label_welcome').value = s.label_welcome || 'Message d\'accueil';
-                    document.getElementById('set_ui_icon_profile').value = s.ui_icon_profile || '🎁';
-                    document.getElementById('set_label_profile').value = s.label_profile || 'Mon Profil & Parrainage';
-                    document.getElementById('set_ui_icon_channel').value = s.ui_icon_channel || '📢';
-                    document.getElementById('set_label_channel').value = s.label_channel || 'Lien Canal Telegram';
-                    document.getElementById('set_ui_icon_wallet').value = s.ui_icon_wallet || '💳';
-                    document.getElementById('set_ui_icon_points').value = s.ui_icon_points || '⭐️';
+
+                    // Nouveaux champs
+                    document.getElementById('set_welcome_msg').value = s.welcome_message || '';
+                    document.getElementById('set_payment_modes').value = s.payment_modes || '💵 Espèces';
+                    document.getElementById('set_msg_qty').value = s.msg_choose_qty || 'Choisissez la quantité souhaitée :';
                     document.getElementById('set_msg_help_intro').value = s.msg_help_intro || 'Besoin d\'aide ?';
                     document.getElementById('set_show_broadcasts_btn').checked = s.show_broadcasts_btn === true || s.show_broadcasts_btn === 'true';
                     document.getElementById('set_show_reviews_btn').checked = s.show_reviews_btn === true || s.show_reviews_btn === 'true';
@@ -3616,7 +3611,7 @@
                     document.getElementById('set_msg_order_received_admin').value = s.msg_order_received_admin || '';
                     document.getElementById('set_msg_order_confirmed_client').value = s.msg_order_confirmed_client || '';
                     document.getElementById('set_btn_livreur_space').value = s.btn_livreur_space || '🛵 Espace Livreur';
-                    document.getElementById('set_btn_back_menu').value = s.btn_back_menu || '◀️ Retour Menu'; // This is the one in "Processus de Commande"
+                    document.getElementById('set_btn_back_menu').value = s.btn_back_menu || '◀️ Retour Menu';
                     document.getElementById('set_msg_status_taken').value = s.msg_status_taken || '';
                     document.getElementById('set_msg_status_delivered').value = s.msg_status_delivered || '';
                     document.getElementById('set_msg_delay_report').value = s.msg_delay_report || '';
@@ -3625,16 +3620,15 @@
                     document.getElementById('set_msg_review_thanks').value = s.msg_review_thanks || '';
                     document.getElementById('set_btn_leave_review').value = s.btn_leave_review || '✍️ Laisser un avis';
                     document.getElementById('set_btn_view_reviews').value = s.btn_view_reviews || '⭐️ Consulter les avis';
-                    document.getElementById('set_btn_confirm_review').value = s.btn_confirm_review || 'Confirmer la note'; // New
-                    document.getElementById('set_btn_back_menu_nav').value = s.btn_back_menu_nav || '◀️ Retour Menu'; // New, for Navigation & Menus
-                    document.getElementById('set_btn_cart_resume').value = s.btn_cart_resume || '🛒 Reprendre Panier'; // New
-                    document.getElementById('set_btn_client_mode').value = s.btn_client_mode || '👤 Mode Client'; // New
-                    document.getElementById('set_msg_thanks_participation').value = s.msg_thanks_participation || 'Merci pour votre participation !'; // New
-                    document.getElementById('set_msg_your_answer').value = s.msg_your_answer || 'Votre réponse :'; // New
-                    document.getElementById('set_label_contact').value = s.label_contact || ''; // New
-                    document.getElementById('set_label_reviews').value = s.label_reviews || ''; // New
-                    document.getElementById('set_label_users').value = s.label_users || ''; // New
-                    document.getElementById('set_default_wa_name').value = s.default_wa_name || ''; // New
+                    document.getElementById('set_btn_confirm_review').value = s.btn_confirm_review || 'Confirmer la note';
+                    document.getElementById('set_btn_back_menu_nav').value = s.btn_back_menu_nav || '◀️ Retour Menu';
+                    document.getElementById('set_btn_cart_resume').value = s.btn_cart_resume || '🛒 Reprendre Panier';
+                    document.getElementById('set_btn_client_mode').value = s.btn_client_mode || '👤 Mode Client';
+                    document.getElementById('set_msg_thanks_participation').value = s.msg_thanks_participation || 'Merci pour votre participation !';
+                    document.getElementById('set_msg_your_answer').value = s.msg_your_answer || 'Votre réponse :';
+                    document.getElementById('set_label_reviews').value = s.label_reviews || '';
+                    document.getElementById('set_label_users').value = s.label_users || '';
+                    document.getElementById('set_default_wa_name').value = s.default_wa_name || '';
                 }
             } catch (err) {
                 console.error('[LOAD DATA] Error:', err);
@@ -4743,16 +4737,20 @@
                     status_cancelled_label: document.getElementById('set_status_cancelled_label').value,
                     ui_icon_error: document.getElementById('set_ui_icon_error').value,
 
-                    label_help: document.getElementById('set_label_help').value,
-                    ui_icon_help: document.getElementById('set_ui_icon_help').value,
+                    label_support: document.getElementById('set_label_support').value,
+                    ui_icon_support: document.getElementById('set_ui_icon_support').value,
                     msg_help_intro: document.getElementById('set_msg_help_intro').value,
 
-                    label_broadcasts: document.getElementById('set_label_broadcasts').value,
+                    label_info: document.getElementById('set_label_info').value,
                     ui_icon_info: document.getElementById('set_ui_icon_info').value,
                     label_leave_review: document.getElementById('set_label_leave_review').value,
-                    ui_icon_review: document.getElementById('set_ui_icon_review').value,
+                    ui_icon_leave_review: document.getElementById('set_ui_icon_leave_review').value,
                     label_view_reviews: document.getElementById('set_label_view_reviews').value,
-                    ui_icon_reviews_list: document.getElementById('set_ui_icon_reviews_list').value,
+                    ui_icon_view_reviews: document.getElementById('set_ui_icon_view_reviews').value,
+                    label_reviews: document.getElementById('set_label_reviews').value,
+                    label_users: document.getElementById('set_label_users').value,
+                    default_wa_name: document.getElementById('set_default_wa_name').value,
+
                     show_broadcasts_btn: document.getElementById('set_show_broadcasts_btn').checked,
                     show_reviews_btn: document.getElementById('set_show_reviews_btn').checked,
 
@@ -4777,31 +4775,7 @@
                     btn_cart_resume: document.getElementById('set_btn_cart_resume').value,
                     btn_client_mode: document.getElementById('set_btn_client_mode').value,
                     msg_thanks_participation: document.getElementById('set_msg_thanks_participation').value,
-                    msg_your_answer: document.getElementById('set_msg_your_answer').value,
-                    label_contact: document.getElementById('set_label_contact').value,
-                    label_reviews: document.getElementById('set_label_reviews').value,
-                    label_users: document.getElementById('set_label_users').value,
-                    label_catalog: document.getElementById('set_label_catalog').value,
-                    label_my_orders: document.getElementById('set_label_my_orders').value,
-                    label_leave_review: document.getElementById('set_label_leave_review').value,
-                    label_view_reviews: document.getElementById('set_label_view_reviews').value,
-                    label_welcome: document.getElementById('set_label_welcome').value,
-                    label_profile: document.getElementById('set_label_profile').value,
-                    label_info: document.getElementById('set_label_info').value,
-                    label_support: document.getElementById('set_label_support').value,
-                    ui_icon_catalog: document.getElementById('set_ui_icon_catalog').value,
-                    ui_icon_orders: document.getElementById('set_ui_icon_orders').value,
-                    ui_icon_leave_review: document.getElementById('set_ui_icon_leave_review').value,
-                    ui_icon_view_reviews: document.getElementById('set_ui_icon_view_reviews').value,
-                    ui_icon_contact: document.getElementById('set_ui_icon_contact').value,
-                    ui_icon_channel: document.getElementById('set_ui_icon_channel').value,
-                    ui_icon_welcome: document.getElementById('set_ui_icon_welcome').value,
-                    ui_icon_profile: document.getElementById('set_ui_icon_profile').value,
-                    ui_icon_info: document.getElementById('set_ui_icon_info').value,
-                    ui_icon_support: document.getElementById('set_ui_icon_support').value,
-                    ui_icon_wallet: document.getElementById('set_ui_icon_wallet').value,
-                    ui_icon_points: document.getElementById('set_ui_icon_points').value,
-                    default_wa_name: document.getElementById('set_default_wa_name').value
+                    msg_your_answer: document.getElementById('set_msg_your_answer').value
                 };
                 await api('/settings', 'POST', s);
                 showToast('Paramètres mis à jour !');
