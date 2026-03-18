@@ -1210,7 +1210,11 @@ const SETTINGS_DEFAULTS = {
     payment_modes_config: '[]',
     default_wa_name: 'Utilisateur',
     enable_abandoned_cart_notifications: false,
-    msg_abandoned_cart: ''
+    msg_abandoned_cart: '',
+    msg_welcome_back: '',
+    msg_order_notif_livreur: '',
+    ui_icon_leave_review: '⭐️',
+    ui_icon_view_reviews: '👥'
 };
 
 let _settingsCache = null;

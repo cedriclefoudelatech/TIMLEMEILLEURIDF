@@ -8,6 +8,13 @@
 -- ---------------------------------------------------------------
 
 ALTER TABLE bot_settings
+    ADD COLUMN IF NOT EXISTS btn_back_menu            TEXT    DEFAULT '◀️ Retour Menu',
+    ADD COLUMN IF NOT EXISTS btn_back_menu_nav        TEXT    DEFAULT '◀️ Retour Menu',
+    ADD COLUMN IF NOT EXISTS label_livreur            TEXT    DEFAULT 'Espace Livreur',
+    ADD COLUMN IF NOT EXISTS msg_welcome_back         TEXT    DEFAULT '',
+    ADD COLUMN IF NOT EXISTS msg_order_notif_livreur  TEXT    DEFAULT '',
+    ADD COLUMN IF NOT EXISTS ui_icon_leave_review     TEXT    DEFAULT '⭐️',
+    ADD COLUMN IF NOT EXISTS ui_icon_view_reviews     TEXT    DEFAULT '👥',
     ADD COLUMN IF NOT EXISTS btn_cart_resume          TEXT    DEFAULT '➡️ 🛒 REPRENDRE MON PANIER',
     ADD COLUMN IF NOT EXISTS btn_client_mode          TEXT    DEFAULT '🛒 Mode Client (commander)',
     ADD COLUMN IF NOT EXISTS btn_livreur_space        TEXT    DEFAULT '🚴 Espace Livreur',
