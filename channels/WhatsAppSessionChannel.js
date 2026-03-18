@@ -1,6 +1,6 @@
 const Baileys = require('@whiskeysockets/baileys');
 const makeWASocket = Baileys.default || Baileys;
-const { DisconnectReason, jidDecode, fetchLatestBaileysVersion } = Baileys;
+const { DisconnectReason, jidDecode, fetchLatestBaileysVersion, makeCacheableSignalKeyStore } = Baileys;
 
 const { Channel } = require('./Channel');
 const { useSupabaseAuthState } = require('../services/database');
@@ -45,11 +45,21 @@ class WhatsAppSessionChannel extends Channel {
         const { version, isLatest } = await fetchLatestBaileysVersion();
         console.log(`[WA] Using version v${version.join('.')}, isLatest: ${isLatest}`);
 
+        const logger = pino({ level: 'silent' });
         this.sock = makeWASocket({
             version,
-            auth: state,
-            logger: pino({ level: 'silent' }),
-            browser: ['Ubuntu', 'Chrome', '20.0.04']
+            auth: {
+                creds: state.creds,
+                keys: makeCacheableSignalKeyStore(state.keys, logger)
+            },
+            logger,
+            browser: ['Ubuntu', 'Chrome', '20.0.04'],
+            syncFullHistory: false,
+            generateHighQualityLinkPreview: false,
+            getMessage: async (key) => {
+                // Nécessaire pour que Baileys puisse décrypter les messages retry
+                return { conversation: '' };
+            }
         });
 
 
