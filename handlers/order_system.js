@@ -6,7 +6,9 @@ const {
     incrementOrderCount, getAllLivreurs, _userCache,
     getClientActiveOrders, logHelpRequest, saveClientReply, incrementChatCount,
     getAndClearPendingFeedback, saveFeedback, addMessageToTrack,
-    saveReview, uploadMediaFromUrl
+    saveReview, uploadMediaFromUrl,
+    getSupplierByTelegramId, getSupplierProducts, getSupplierOrders, markOrderSupplierReady,
+    getSupplier, markOrderSupplierNotified
 } = require('../services/database');
 const { safeEdit, debugLog } = require('../services/utils');
 const { createPersistentMap } = require('../services/persistent_map');
@@ -903,6 +905,26 @@ function setupOrderSystem(bot) {
         }).catch(err => {
             console.error("Livreur notification failed:", err.message);
         });
+
+        // Notifier le fournisseur si le produit a un supplier_id
+        try {
+            const cartItems = pending.items || [];
+            const products = await getProducts();
+            for (const item of cartItems) {
+                const product = products.find(p => p.id === item.productId);
+                if (product && product.supplier_id) {
+                    const supplier = await getSupplier(product.supplier_id);
+                    if (supplier && supplier.telegram_id) {
+                        const supplierMsg = (settings.msg_supplier_new_order || '📦 <b>Nouvelle commande !</b>') +
+                            `\n\n📦 Produit : ${product.name} x${item.qty || 1}\n` +
+                            `📍 Adresse : ${pending.address}\n` +
+                            `🔑 Commande : #${order.id.slice(-5)}`;
+                        sendTelegramMessage(supplier.telegram_id, supplierMsg);
+                        await markOrderSupplierNotified(order.id);
+                    }
+                }
+            }
+        } catch (e) { console.error('[SUPPLIER-NOTIFY] Error:', e.message); }
     });
 
     // ========== SYSTEME LIVREUR ==========
@@ -2268,6 +2290,139 @@ function setupOrderSystem(bot) {
         const user = await getUser(docId);
         const keyboard = await getMainMenuKeyboard(ctx, settings, user);
         await safeEdit(ctx, `🔘 Statut mis à jour : <b>INDISPONIBLE ❌</b>`, { parse_mode: 'HTML', ...keyboard });
+    });
+
+    // ========== SYSTEME FOURNISSEUR ==========
+
+    bot.action('supplier_menu', async (ctx) => {
+        await ctx.answerCbQuery();
+        const settings = ctx.state?.settings || await getAppSettings();
+        const supplier = await getSupplierByTelegramId(String(ctx.from.id));
+        if (!supplier) return safeEdit(ctx, '❌ Vous n\'êtes pas enregistré comme fournisseur.', Markup.inlineKeyboard([[Markup.button.callback('◀️ Menu', 'main_menu')]]));
+
+        const products = await getSupplierProducts(supplier.id);
+        const orders = await getSupplierOrders(supplier.id, 5);
+        const pendingCount = orders.filter(o => o.status === 'pending' || o.status === 'accepted').length;
+
+        let text = `🏪 <b>Espace Fournisseur</b>\n\n`;
+        text += `👤 ${supplier.name}\n`;
+        text += `📦 ${products.length} produit(s) assigné(s)\n`;
+        if (pendingCount > 0) text += `🔔 <b>${pendingCount} commande(s) en attente !</b>\n`;
+
+        await safeEdit(ctx, text, Markup.inlineKeyboard([
+            [Markup.button.callback('📋 Commandes en cours', 'supplier_orders')],
+            [Markup.button.callback('📦 Mes produits', 'supplier_products')],
+            [Markup.button.callback(settings.btn_supplier_my_sales || '📊 Mes ventes', 'supplier_sales')],
+            [Markup.button.callback(settings.btn_back_menu || '◀️ Retour Menu', 'main_menu')]
+        ]));
+    });
+
+    bot.action('supplier_orders', async (ctx) => {
+        await ctx.answerCbQuery();
+        const settings = ctx.state?.settings || await getAppSettings();
+        const supplier = await getSupplierByTelegramId(String(ctx.from.id));
+        if (!supplier) return safeEdit(ctx, '❌ Accès refusé.', Markup.inlineKeyboard([[Markup.button.callback('◀️ Menu', 'main_menu')]]));
+
+        const orders = await getSupplierOrders(supplier.id, 20);
+        const pending = orders.filter(o => ['pending', 'accepted'].includes(o.status));
+
+        if (pending.length === 0) {
+            return safeEdit(ctx, '📭 Aucune commande en attente.', Markup.inlineKeyboard([
+                [Markup.button.callback('◀️ Retour', 'supplier_menu')]
+            ]));
+        }
+
+        let text = `📋 <b>Commandes en cours (${pending.length})</b>\n\n`;
+        pending.forEach((o, i) => {
+            const items = o.items_text || o.product_list || 'Produit';
+            text += `${i+1}. 📦 #${o.id.slice(-5)} - ${items}\n`;
+            text += `   📍 ${o.address || '?'} | 💰 ${o.total_price || '?'}€\n`;
+            text += `   ${o.supplier_ready_at ? '✅ Prêt' : '⏳ En préparation'}\n\n`;
+        });
+
+        const buttons = pending.filter(o => !o.supplier_ready_at).map(o =>
+            [Markup.button.callback(`✅ Prêt #${o.id.slice(-5)}`, `supplier_ready_${o.id}`)]
+        );
+        buttons.push([Markup.button.callback('◀️ Retour', 'supplier_menu')]);
+
+        await safeEdit(ctx, text, Markup.inlineKeyboard(buttons));
+    });
+
+    bot.action(/^supplier_ready_(.+)$/, async (ctx) => {
+        await ctx.answerCbQuery('✅ Marqué comme prêt !');
+        const orderId = ctx.match[1];
+        await markOrderSupplierReady(orderId);
+
+        notifyAdmins(bot, `🏪 <b>Fournisseur : produit prêt !</b>\n\nCommande #${orderId.slice(-5)} marquée comme prête par le fournisseur.`);
+
+        const supplier = await getSupplierByTelegramId(String(ctx.from.id));
+        const orders = await getSupplierOrders(supplier.id, 20);
+        const pending = orders.filter(o => ['pending', 'accepted'].includes(o.status));
+
+        if (pending.length === 0) {
+            return safeEdit(ctx, '✅ Toutes les commandes sont prêtes !', Markup.inlineKeyboard([
+                [Markup.button.callback('◀️ Retour', 'supplier_menu')]
+            ]));
+        }
+
+        let text = `📋 <b>Commandes en cours (${pending.length})</b>\n\n`;
+        pending.forEach((o, i) => {
+            const items = o.items_text || o.product_list || 'Produit';
+            text += `${i+1}. 📦 #${o.id.slice(-5)} - ${items}\n`;
+            text += `   ${o.supplier_ready_at ? '✅ Prêt' : '⏳ En préparation'}\n\n`;
+        });
+
+        const buttons = pending.filter(o => !o.supplier_ready_at).map(o =>
+            [Markup.button.callback(`✅ Prêt #${o.id.slice(-5)}`, `supplier_ready_${o.id}`)]
+        );
+        buttons.push([Markup.button.callback('◀️ Retour', 'supplier_menu')]);
+        await safeEdit(ctx, text, Markup.inlineKeyboard(buttons));
+    });
+
+    bot.action('supplier_products', async (ctx) => {
+        await ctx.answerCbQuery();
+        const supplier = await getSupplierByTelegramId(String(ctx.from.id));
+        if (!supplier) return safeEdit(ctx, '❌ Accès refusé.', Markup.inlineKeyboard([[Markup.button.callback('◀️ Menu', 'main_menu')]]));
+
+        const products = await getSupplierProducts(supplier.id);
+        if (products.length === 0) {
+            return safeEdit(ctx, '📭 Aucun produit ne vous est assigné pour le moment.', Markup.inlineKeyboard([
+                [Markup.button.callback('◀️ Retour', 'supplier_menu')]
+            ]));
+        }
+
+        let text = `📦 <b>Mes produits (${products.length})</b>\n\n`;
+        products.forEach((p, i) => {
+            text += `${i+1}. ${p.name} - ${p.price}€\n`;
+            text += `   ${p.is_available ? '✅ En vente' : '❌ Indisponible'}\n`;
+        });
+
+        await safeEdit(ctx, text, Markup.inlineKeyboard([
+            [Markup.button.callback('◀️ Retour', 'supplier_menu')]
+        ]));
+    });
+
+    bot.action('supplier_sales', async (ctx) => {
+        await ctx.answerCbQuery();
+        const supplier = await getSupplierByTelegramId(String(ctx.from.id));
+        if (!supplier) return safeEdit(ctx, '❌ Accès refusé.', Markup.inlineKeyboard([[Markup.button.callback('◀️ Menu', 'main_menu')]]));
+
+        const orders = await getSupplierOrders(supplier.id, 100);
+        const delivered = orders.filter(o => o.status === 'delivered');
+        const totalRevenue = delivered.reduce((sum, o) => sum + (parseFloat(o.total_price) || 0), 0);
+        const commission = supplier.commission_pct ? (totalRevenue * supplier.commission_pct / 100) : 0;
+
+        let text = `📊 <b>Statistiques Fournisseur</b>\n\n`;
+        text += `📦 Total commandes : ${orders.length}\n`;
+        text += `✅ Livrées : ${delivered.length}\n`;
+        text += `💰 Chiffre d'affaires : ${totalRevenue.toFixed(2)}€\n`;
+        if (supplier.commission_pct) {
+            text += `📈 Commission (${supplier.commission_pct}%) : ${commission.toFixed(2)}€\n`;
+        }
+
+        await safeEdit(ctx, text, Markup.inlineKeyboard([
+            [Markup.button.callback('◀️ Retour', 'supplier_menu')]
+        ]));
     });
 }
 

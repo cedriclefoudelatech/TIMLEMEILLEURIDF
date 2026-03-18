@@ -13,7 +13,8 @@ const {
     deleteUser, incrementOrderCount, makeDocId, getOrderAnalytics, searchLivreurs,
     getBroadcastHistory, deleteBroadcast, getDetailedLivreurActivity,
     nukeDatabase, decryptUser, supabase, COL_USERS,
-    registerUser, getLivreurHistory, getReviews, deleteReview, deleteOrder
+    registerUser, getLivreurHistory, getReviews, deleteReview, deleteOrder,
+    getSuppliers, getSupplier, saveSupplier, deleteSupplier, getSupplierProducts, getSupplierOrders
 } = require('./services/database');
 const { broadcastMessage } = require('./services/broadcast');
 const fs = require('fs');
@@ -731,6 +732,41 @@ function createServer() {
             await deleteBroadcast(req.params.id);
             res.json({ success: true });
         } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
+    });
+
+    // ====== SUPPLIERS / FOURNISSEURS ======
+    app.get('/api/suppliers', authMiddleware, async (req, res) => {
+        try { res.json(await getSuppliers()); }
+        catch (e) { res.status(500).json({ error: e.message }); }
+    });
+
+    app.get('/api/suppliers/:id', authMiddleware, async (req, res) => {
+        try { res.json(await getSupplier(req.params.id)); }
+        catch (e) { res.status(500).json({ error: e.message }); }
+    });
+
+    app.post('/api/suppliers', authMiddleware, async (req, res) => {
+        try {
+            const result = await saveSupplier(req.body);
+            res.json(result);
+        } catch (e) { res.status(500).json({ error: e.message }); }
+    });
+
+    app.delete('/api/suppliers/:id', authMiddleware, async (req, res) => {
+        try {
+            await deleteSupplier(req.params.id);
+            res.json({ success: true });
+        } catch (e) { res.status(500).json({ error: e.message }); }
+    });
+
+    app.get('/api/suppliers/:id/products', authMiddleware, async (req, res) => {
+        try { res.json(await getSupplierProducts(req.params.id)); }
+        catch (e) { res.status(500).json({ error: e.message }); }
+    });
+
+    app.get('/api/suppliers/:id/orders', authMiddleware, async (req, res) => {
+        try { res.json(await getSupplierOrders(req.params.id)); }
+        catch (e) { res.status(500).json({ error: e.message }); }
     });
 
     app.use('/api/*', (req, res) => {

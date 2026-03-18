@@ -1271,7 +1271,15 @@ const SETTINGS_DEFAULTS = {
     msg_cart_cleared: '✅ Panier vidé !',
     msg_thanks_for_feedback: '🙏 Merci pour votre note !',
     msg_location_updated: '📍 Secteur mis à jour',
-    msg_livreur_welcome: '🚴 <b>Bienvenue dans l\'équipe de livraison !</b>'
+    msg_livreur_welcome: '🚴 <b>Bienvenue dans l\'équipe de livraison !</b>',
+
+    // === FOURNISSEURS ===
+    msg_supplier_new_order: '📦 <b>Nouvelle commande !</b>',
+    msg_supplier_ready: '✅ Produit prêt pour livraison !',
+    btn_supplier_ready: '✅ Prêt à livrer',
+    btn_supplier_prep_time: '⏱ Temps de préparation',
+    btn_supplier_my_sales: '📊 Mes ventes',
+    btn_supplier_menu: '🏪 Espace Fournisseur'
 };
 
 let _settingsCache = null;
@@ -1691,6 +1699,60 @@ async function useSupabaseAuthState(sessionId) {
     };
 }
 
+// ====== SUPPLIERS / FOURNISSEURS ======
+const COL_SUPPLIERS = 'bot_suppliers';
+
+async function getSuppliers() {
+    const { data } = await supabase.from(COL_SUPPLIERS).select('*').order('created_at', { ascending: false });
+    return data || [];
+}
+
+async function getSupplier(id) {
+    const { data } = await supabase.from(COL_SUPPLIERS).select('*').eq('id', id).limit(1);
+    return data?.[0] || null;
+}
+
+async function getSupplierByTelegramId(telegramId) {
+    const { data } = await supabase.from(COL_SUPPLIERS).select('*').eq('telegram_id', String(telegramId)).limit(1);
+    return data?.[0] || null;
+}
+
+async function saveSupplier(supplier) {
+    if (supplier.id) {
+        const { data } = await supabase.from(COL_SUPPLIERS).update(supplier).eq('id', supplier.id).select();
+        return data?.[0] || supplier;
+    } else {
+        const { data } = await supabase.from(COL_SUPPLIERS).insert([supplier]).select();
+        return data?.[0] || supplier;
+    }
+}
+
+async function deleteSupplier(id) {
+    // Also unlink products
+    await supabase.from(COL_PRODUCTS).update({ supplier_id: null }).eq('supplier_id', id);
+    await supabase.from(COL_SUPPLIERS).delete().eq('id', id);
+}
+
+async function getSupplierProducts(supplierId) {
+    const { data } = await supabase.from(COL_PRODUCTS).select('*').eq('supplier_id', supplierId);
+    return data || [];
+}
+
+async function getSupplierOrders(supplierId, limit = 50) {
+    const { data } = await supabase.from(COL_ORDERS).select('*').eq('supplier_id', supplierId).order('created_at', { ascending: false }).limit(limit);
+    return (data || []).map(decryptOrder);
+}
+
+async function markOrderSupplierNotified(orderId) {
+    await supabase.from(COL_ORDERS).update({ supplier_notified: true }).eq('id', orderId);
+}
+
+async function markOrderSupplierReady(orderId, prepTime = null) {
+    const update = { supplier_ready_at: Date.now() };
+    if (prepTime) update.supplier_prep_time = prepTime;
+    await supabase.from(COL_ORDERS).update(update).eq('id', orderId);
+}
+
 module.exports = {
     supabase, COL_USERS, COL_PRODUCTS, COL_ORDERS, COL_SETTINGS, COL_BROADCASTS, COL_REFERRALS,
     incr, ts, makeDocId, decryptUser, decryptOrder, decryptReview,
@@ -1707,5 +1769,8 @@ module.exports = {
     incrementChatCount, saveClientReply, logHelpRequest,
     getUpcomingPlannedOrders, markNotifSent, registerUser, addToStat,
     _userCache,
-    useSupabaseAuthState
+    useSupabaseAuthState,
+    // Suppliers
+    COL_SUPPLIERS, getSuppliers, getSupplier, getSupplierByTelegramId, saveSupplier, deleteSupplier,
+    getSupplierProducts, getSupplierOrders, markOrderSupplierNotified, markOrderSupplierReady
 };

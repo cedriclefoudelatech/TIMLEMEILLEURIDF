@@ -1,5 +1,5 @@
 const { Markup } = require('telegraf');
-const { registerUser, getUser, incrementDailyStat, getAppSettings, addMessageToTrack, getLastMenuId } = require('../services/database');
+const { registerUser, getUser, incrementDailyStat, getAppSettings, addMessageToTrack, getLastMenuId, getSupplierByTelegramId } = require('../services/database');
 const { safeEdit } = require('../services/utils');
 const { createPersistentMap } = require('../services/persistent_map');
 const { isAdmin } = require('./admin');
@@ -409,6 +409,12 @@ async function getMainMenuKeyboard(ctx, settings = null, user = null) {
 
     if (user && user.is_livreur) {
         buttons.push([Markup.button.callback(`${settings.ui_icon_livreur} ${settings.label_livreur}`, 'livreur_menu')]);
+    }
+
+    // Check if user is a supplier
+    const supplierUser = await getSupplierByTelegramId(String(ctx.from.id));
+    if (supplierUser) {
+        buttons.push([Markup.button.callback(settings.btn_supplier_menu || '🏪 Espace Fournisseur', 'supplier_menu')]);
     }
 
     // Boutons Admin

@@ -1647,6 +1647,7 @@
             <span class="nav-label">Outils</span>
             <a class="nav-item" onclick="switchSection('insights')" id="side-nav-insights"><i>📊</i> Insights</a>
             <a class="nav-item" onclick="switchSection('broadcast')" id="side-nav-broadcast"><i>📣</i> Diffusion</a>
+            <a class="nav-item" onclick="switchSection('suppliers')" id="side-nav-suppliers"><i>🏪</i> Fournisseurs</a>
             <a class="nav-item" onclick="switchSection('features')" id="side-nav-features"><i>📖</i> Guide</a>
         </div>
 
@@ -2321,6 +2322,43 @@
                 </table>
             </div>
         </section>
+
+        <!-- SECTION: Fournisseurs -->
+        <div id="section-suppliers" class="section" style="display:none;">
+            <div class="card" style="margin-bottom:20px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                    <h1 style="margin:0;">🏪 Fournisseurs</h1>
+                    <button class="btn btn-primary" onclick="openSupplierForm()">➕ Ajouter</button>
+                </div>
+            </div>
+
+            <!-- Supplier Form -->
+            <div id="supplierFormCard" class="card" style="display:none; margin-bottom:20px;">
+                <h3 id="supplierFormTitle">➕ Nouveau Fournisseur</h3>
+                <input type="hidden" id="supplierId">
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
+                    <div><label>Nom *</label><input id="supplierName" placeholder="Nom du fournisseur" class="form-control"></div>
+                    <div><label>Téléphone</label><input id="supplierPhone" placeholder="+33..." class="form-control"></div>
+                    <div><label>Telegram ID</label><input id="supplierTelegramId" placeholder="ID Telegram" class="form-control"></div>
+                    <div><label>Plateforme</label><select id="supplierPlatform" class="form-control"><option value="telegram">Telegram</option><option value="whatsapp">WhatsApp</option></select></div>
+                    <div><label>Commission (%)</label><input id="supplierCommission" type="number" min="0" max="100" placeholder="0" class="form-control"></div>
+                    <div><label>Actif</label><select id="supplierActive" class="form-control"><option value="true">✅ Oui</option><option value="false">❌ Non</option></select></div>
+                </div>
+                <div style="margin-bottom:10px;">
+                    <label>Notes</label>
+                    <textarea id="supplierNotes" rows="2" placeholder="Notes internes..." class="form-control"></textarea>
+                </div>
+                <div style="display:flex; gap:10px;">
+                    <button class="btn btn-primary" onclick="saveSupplier()">💾 Enregistrer</button>
+                    <button class="btn btn-outline" onclick="closeSupplierForm()">Annuler</button>
+                </div>
+            </div>
+
+            <!-- Supplier List -->
+            <div class="card">
+                <div id="suppliersList"></div>
+            </div>
+        </div>
 
         <!-- FEATURES / GUIDE -->
         <section class="section" id="section-features">
@@ -3140,6 +3178,7 @@
                 'logistique': 'Logistique',
                 'insights': 'Statistiques',
                 'broadcast': 'Diffusion',
+                'suppliers': 'Fournisseurs',
                 'features': 'Guide',
                 'settings': 'Paramètres'
             };
@@ -3690,6 +3729,9 @@
                         const historyTbody = document.querySelector('#bcHistoryTable tbody');
                         if (historyTbody) historyTbody.innerHTML = '<tr><td colspan="7" style="color:var(--danger);padding:20px">Erreur de chargement.</td></tr>';
                     }
+                }
+                if (id === 'suppliers') {
+                    await loadSuppliers();
                 }
 
                 if (id === 'reviews') {
@@ -5242,6 +5284,100 @@
             modal.classList.add('active');
         }
 
+        // ====== SUPPLIERS / FOURNISSEURS ======
+        let suppliersData = [];
+
+        async function loadSuppliers() {
+            try {
+                const res = await apiFetch('/api/suppliers');
+                suppliersData = await res.json();
+                renderSuppliers();
+            } catch(e) { console.error('loadSuppliers error:', e); }
+        }
+
+        function renderSuppliers() {
+            const el = document.getElementById('suppliersList');
+            if (!suppliersData.length) {
+                el.innerHTML = '<p style="text-align:center; color:var(--text-muted);">Aucun fournisseur. Cliquez sur "Ajouter" pour en créer un.</p>';
+                return;
+            }
+            el.innerHTML = suppliersData.map(s => `
+                <div style="display:flex; justify-content:space-between; align-items:center; padding:12px; border-bottom:1px solid var(--border); flex-wrap:wrap; gap:8px;">
+                    <div>
+                        <b>${s.name}</b> ${s.is_active ? '<span style="color:green;">✅</span>' : '<span style="color:red;">❌</span>'}
+                        <div style="font-size:12px; color:var(--text-muted);">
+                            ${s.phone || ''} ${s.telegram_id ? '| TG: '+s.telegram_id : ''} ${s.commission_pct ? '| Commission: '+s.commission_pct+'%' : ''}
+                        </div>
+                    </div>
+                    <div style="display:flex; gap:5px;">
+                        <button class="btn btn-sm btn-outline" onclick="editSupplier('${s.id}')">✏️</button>
+                        <button class="btn btn-sm btn-outline" style="color:red;" onclick="deleteSupplierUI('${s.id}')">🗑</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function openSupplierForm() {
+            document.getElementById('supplierFormCard').style.display = 'block';
+            document.getElementById('supplierFormTitle').textContent = '➕ Nouveau Fournisseur';
+            document.getElementById('supplierId').value = '';
+            document.getElementById('supplierName').value = '';
+            document.getElementById('supplierPhone').value = '';
+            document.getElementById('supplierTelegramId').value = '';
+            document.getElementById('supplierPlatform').value = 'telegram';
+            document.getElementById('supplierCommission').value = '';
+            document.getElementById('supplierActive').value = 'true';
+            document.getElementById('supplierNotes').value = '';
+        }
+
+        function closeSupplierForm() {
+            document.getElementById('supplierFormCard').style.display = 'none';
+        }
+
+        function editSupplier(id) {
+            const s = suppliersData.find(x => x.id === id);
+            if (!s) return;
+            document.getElementById('supplierFormCard').style.display = 'block';
+            document.getElementById('supplierFormTitle').textContent = '✏️ Modifier: ' + s.name;
+            document.getElementById('supplierId').value = s.id;
+            document.getElementById('supplierName').value = s.name || '';
+            document.getElementById('supplierPhone').value = s.phone || '';
+            document.getElementById('supplierTelegramId').value = s.telegram_id || '';
+            document.getElementById('supplierPlatform').value = s.platform || 'telegram';
+            document.getElementById('supplierCommission').value = s.commission_pct || '';
+            document.getElementById('supplierActive').value = s.is_active ? 'true' : 'false';
+            document.getElementById('supplierNotes').value = s.notes || '';
+        }
+
+        async function saveSupplier() {
+            const data = {
+                name: document.getElementById('supplierName').value.trim(),
+                phone: document.getElementById('supplierPhone').value.trim(),
+                telegram_id: document.getElementById('supplierTelegramId').value.trim(),
+                platform: document.getElementById('supplierPlatform').value,
+                commission_pct: parseFloat(document.getElementById('supplierCommission').value) || 0,
+                is_active: document.getElementById('supplierActive').value === 'true',
+                notes: document.getElementById('supplierNotes').value.trim()
+            };
+            if (!data.name) return alert('Le nom est obligatoire');
+            const id = document.getElementById('supplierId').value;
+            if (id) data.id = id;
+
+            try {
+                await apiFetch('/api/suppliers', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data) });
+                closeSupplierForm();
+                await loadSuppliers();
+            } catch(e) { alert('Erreur: ' + e.message); }
+        }
+
+        async function deleteSupplierUI(id) {
+            if (!confirm('Supprimer ce fournisseur ?')) return;
+            try {
+                await apiFetch('/api/suppliers/' + id, { method: 'DELETE' });
+                await loadSuppliers();
+            } catch(e) { alert('Erreur: ' + e.message); }
+        }
+
         // --- PREMIUM TIMING LOGIC (Popover + Custom Selection) ---
         let selectedDates = { start: null, end: null };
         let selectedTimes = { start: null, end: null };
@@ -5341,7 +5477,7 @@
             const initSection = location.hash.replace('#', '') || 'overview';
             await switchSection(initSection);
 
-            const allSections = ['overview', 'users', 'products', 'logistique', 'broadcast', 'settings', 'insights', 'reviews'];
+            const allSections = ['overview', 'users', 'products', 'logistique', 'broadcast', 'suppliers', 'settings', 'insights', 'reviews'];
             const toPreload = allSections.filter(s => s !== initSection);
             await Promise.allSettled(toPreload.map(s => loadData(s, true).then(() => { _loadedSections[s] = true; })));
         })();
