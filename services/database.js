@@ -425,16 +425,28 @@ async function getActiveLivreursCount() {
     return available.length;
 }
 
-async function addMessageToTrack(docId, messageId) {
+async function addMessageToTrack(docId, messageId, isMenuMsg = true) {
     const user = await getUser(docId);
     if (!user) return;
 
-    // Stratégie : On ne garde que le message actif du menu (1 seul).
-    // Plus de liste de 50 messages → plus de suppression massive du chat.
-    await supabase.from(COL_USERS).update({
-        tracked_messages: [messageId],
-        last_menu_id: messageId
-    }).eq('id', docId);
+    if (isMenuMsg) {
+        // Message de menu actif : on remplace last_menu_id et on garde l'ancien dans tracked_messages
+        const existing = Array.isArray(user.tracked_messages) ? user.tracked_messages : [];
+        // Garder les messages intermédiaires (non-menu) + ancien menu pour cleanup, max 10
+        const updated = [...existing.filter(id => String(id) !== String(messageId)), messageId].slice(-10);
+        await supabase.from(COL_USERS).update({
+            tracked_messages: updated,
+            last_menu_id: messageId
+        }).eq('id', docId);
+    } else {
+        // Message intermédiaire (notification, réponse, etc.) : on l'ajoute à la liste pour cleanup futur
+        const existing = Array.isArray(user.tracked_messages) ? user.tracked_messages : [];
+        if (existing.includes(messageId)) return; // Déjà tracké
+        const updated = [...existing, messageId].slice(-10);
+        await supabase.from(COL_USERS).update({
+            tracked_messages: updated
+        }).eq('id', docId);
+    }
 
     _userCache.delete(docId);
 }
@@ -442,6 +454,11 @@ async function addMessageToTrack(docId, messageId) {
 async function getLastMenuId(docId) {
     const user = await getUser(docId);
     return user ? user.last_menu_id : null;
+}
+
+async function getTrackedMessages(docId) {
+    const user = await getUser(docId);
+    return user && Array.isArray(user.tracked_messages) ? user.tracked_messages : [];
 }
 
 // --- Orders ---
@@ -1812,7 +1829,7 @@ module.exports = {
     saveBroadcast, updateBroadcast, deleteBroadcast, getBroadcastHistory, recordPollVote, recordPollFreeResponse, incrementStat, incrementDailyStat,
     getGlobalStats, getDailyStats, getStatsOverview, getAppSettings, updateAppSettings, getClientActiveOrders,
     getProducts, saveProduct, deleteProduct, setLivreurAvailability,
-    getAvailableLivreurs, getAllLivreurs, getOrderAnalytics, saveUserLocation, addMessageToTrack, getLastMenuId, getLivreurOrders, getLivreurHistory, getOrdersByUser, getDetailedLivreurActivity, saveFeedback, setPendingFeedback, getAndClearPendingFeedback, nukeDatabase,
+    getAvailableLivreurs, getAllLivreurs, getOrderAnalytics, saveUserLocation, addMessageToTrack, getLastMenuId, getTrackedMessages, getLivreurOrders, getLivreurHistory, getOrdersByUser, getDetailedLivreurActivity, saveFeedback, setPendingFeedback, getAndClearPendingFeedback, nukeDatabase,
     saveReview, getReviews, getPublicReviews, deleteReview, uploadMediaFromUrl, uploadMediaBuffer,
     incrementChatCount, saveClientReply, logHelpRequest,
     getUpcomingPlannedOrders, markNotifSent, registerUser, addToStat,

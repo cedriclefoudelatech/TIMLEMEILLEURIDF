@@ -104,10 +104,20 @@ async function sendMessageToUser(userId, message, options = {}) {
             return null;
         }
         
-        return await realBot.telegram.sendMessage(cleanId, message, {
+        const sent = await realBot.telegram.sendMessage(cleanId, message, {
             parse_mode: 'HTML',
             ...options
         });
+        // Tracker ce message intermédiaire pour cleanup quand l'user revient au menu
+        if (sent && sent.message_id) {
+            try {
+                const { trackIntermediateMessage } = require('./utils');
+                trackIntermediateMessage(idStr, sent.message_id);
+            } catch (e) { }
+            const { addMessageToTrack } = require('./database');
+            addMessageToTrack(idStr, sent.message_id, false).catch(() => {});
+        }
+        return sent;
     } catch (e) {
         console.error(`❌ sendMessageToUser to ${idStr} failed:`, e.message);
         return null;

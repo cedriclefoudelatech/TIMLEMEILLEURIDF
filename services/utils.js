@@ -1,4 +1,4 @@
-const { getLastMenuId, addMessageToTrack, getUser } = require('./database');
+const { getLastMenuId, getTrackedMessages, addMessageToTrack, getUser } = require('./database');
 const path = require('path');
 const fs = require('fs');
 
@@ -10,8 +10,16 @@ const fs = require('fs');
  * - On ÉDITE toujours le message actuel (pas de delete+send).
  * - Si l'edit est impossible (changement media<->texte), on envoie un nouveau
  *   et on supprime UNIQUEMENT l'ancien message du menu (pas tout le chat).
- * - tracked_messages ne contient que l'ID du message actif du menu.
+ * - tracked_messages contient les IDs des messages intermédiaires à nettoyer.
+ *
+ * PERFORMANCE:
+ * - Le cleanup se fait en arrière-plan (non bloquant).
+ * - Cache mémoire local pour éviter les appels DB sur chaque navigation.
  */
+
+// Cache mémoire local des messages trackés (évite un aller-retour DB à chaque navigation)
+const _trackedCache = new Map(); // userId → [messageId, ...]
+
 function esc(str) {
     if (!str) return '';
     return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -110,7 +118,7 @@ async function safeEdit(ctx, text, opts = {}) {
 
     const currentMsg = ctx.callbackQuery?.message;
 
-    // Fonction pour supprimer UN SEUL message (l'ancien menu)
+    // Fonction pour supprimer UN SEUL message
     const deleteSingleMessage = async (messageId) => {
         if (!messageId) return;
         try {
@@ -122,14 +130,23 @@ async function safeEdit(ctx, text, opts = {}) {
         } catch (e) { }
     };
 
-    // Helper: supprimer les messages orphelins (broadcast, ancien menu, etc.)
-    const cleanupOrphans = async (keepId) => {
-        try {
-            const oldMenuId = await getLastMenuId(userId).catch(() => null);
-            if (oldMenuId && String(oldMenuId) !== String(keepId)) {
-                await deleteSingleMessage(oldMenuId);
-            }
-        } catch (e) { }
+    // Helper: supprimer tous les messages trackés sauf le message actif — EN ARRIÈRE-PLAN
+    const cleanupOrphans = (keepId) => {
+        // Non bloquant : on lance le cleanup sans attendre
+        (async () => {
+            try {
+                // D'abord le cache local, puis fallback DB
+                let tracked = _trackedCache.get(userId) || [];
+                if (tracked.length === 0) {
+                    tracked = await getTrackedMessages(userId).catch(() => []);
+                }
+                // Supprimer en parallèle pour aller vite
+                const toDelete = tracked.filter(id => String(id) !== String(keepId));
+                await Promise.allSettled(toDelete.map(id => deleteSingleMessage(id)));
+                // Mettre à jour le cache : ne garder que le message actif
+                _trackedCache.set(userId, [keepId]);
+            } catch (e) { }
+        })();
     };
 
     try {
@@ -154,9 +171,8 @@ async function safeEdit(ctx, text, opts = {}) {
                             parse_mode: 'HTML'
                         }, { reply_markup });
                     }
-                    // Edit réussi → tracker ce message + supprimer les orphelins
-                    await addMessageToTrack(userId, currentMsgId).catch(() => { });
-                    // Supprimer les vieux messages orphelins (ex: broadcast "catalogue à jour")
+                    // Edit réussi → tracker ce message + nettoyer les orphelins en arrière-plan
+                    addMessageToTrack(userId, currentMsgId).catch(() => { });
                     cleanupOrphans(currentMsgId);
                     return;
                 } catch (e) {
@@ -181,12 +197,12 @@ async function safeEdit(ctx, text, opts = {}) {
 
             const newMsgId = newMsg?.message_id || newMsg?.messageId;
             if (newMsgId) {
-                // Supprimer l'ancien message du callback
+                // Supprimer l'ancien message du callback immédiatement
                 deleteSingleMessage(currentMsgId);
-                // Supprimer aussi le dernier menu traqué s'il est différent (ex: broadcast orphelin)
+                // Nettoyer les orphelins en arrière-plan
                 cleanupOrphans(newMsgId);
                 // Tracker le nouveau comme seul message actif
-                await addMessageToTrack(userId, newMsgId).catch(() => { });
+                addMessageToTrack(userId, newMsgId).catch(() => { });
             }
             return;
         }
@@ -214,13 +230,10 @@ async function safeEdit(ctx, text, opts = {}) {
         if (newMsg) {
             const newMsgId = newMsg.message_id || newMsg.messageId;
             if (newMsgId) {
-                // Récupérer l'ancien message du menu pour le supprimer
-                const oldMenuId = await getLastMenuId(userId).catch(() => null);
-                if (oldMenuId && String(oldMenuId) !== String(newMsgId)) {
-                    deleteSingleMessage(oldMenuId);
-                }
+                // Nettoyer les orphelins en arrière-plan (inclut l'ancien menu)
+                cleanupOrphans(newMsgId);
                 // Tracker le nouveau
-                await addMessageToTrack(userId, newMsgId).catch(() => { });
+                addMessageToTrack(userId, newMsgId).catch(() => { });
             }
         }
 
@@ -230,9 +243,20 @@ async function safeEdit(ctx, text, opts = {}) {
             const fb = await ctx.replyWithHTML(text, extra);
             if (fb) {
                 const fbId = fb.message_id || fb.messageId;
-                if (fbId) await addMessageToTrack(userId, fbId).catch(() => { });
+                if (fbId) addMessageToTrack(userId, fbId).catch(() => { });
             }
         } catch (err) { }
+    }
+}
+
+// Permet à d'autres modules de tracker un message intermédiaire dans le cache local
+function trackIntermediateMessage(userId, messageId) {
+    const existing = _trackedCache.get(userId) || [];
+    if (!existing.includes(messageId)) {
+        existing.push(messageId);
+        // Max 10 messages
+        if (existing.length > 10) existing.shift();
+        _trackedCache.set(userId, existing);
     }
 }
 
@@ -247,4 +271,4 @@ function debugLog(msg) {
     console.log(msg);
 }
 
-module.exports = { safeEdit, debugLog, esc };
+module.exports = { safeEdit, debugLog, esc, trackIntermediateMessage };
