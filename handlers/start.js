@@ -22,6 +22,9 @@ function setupStartHandler(bot) {
             const settings = ctx.state?.settings || await getAppSettings();
             const docId = `${ctx.platform}_${user.id}`;
 
+            // Quitter tout contexte produit
+            try { const { clearActiveMediaGroup } = require('../services/utils'); clearActiveMediaGroup(docId); } catch(e) {}
+
             // L'envoi du menu est géré par safeEdit (transition douce)
             // L'effacement du /start entrant est géré par le middleware global
 
@@ -250,7 +253,13 @@ function setupStartHandler(bot) {
     bot.action('main_menu', async (ctx) => {
         await ctx.answerCbQuery();
         const docId = `${ctx.platform}_${ctx.from.id}`;
-        
+
+        // Quitter le contexte produit → libérer le media group
+        try {
+            const { clearActiveMediaGroup } = require('../services/utils');
+            clearActiveMediaGroup(docId);
+        } catch (e) { }
+
         // Nettoyage des états en attente (delay/chat)
         try {
             const { awaitingDelayReason, awaitingChatReply } = require('./order_system');

@@ -10,7 +10,7 @@ const {
     getSupplierByTelegramId, getSupplierProducts, getSupplierOrders, markOrderSupplierReady,
     getSupplier, markOrderSupplierNotified
 } = require('../services/database');
-const { safeEdit, debugLog } = require('../services/utils');
+const { safeEdit, debugLog, trackIntermediateMessage, setActiveMediaGroup, clearActiveMediaGroup } = require('../services/utils');
 const { createPersistentMap } = require('../services/persistent_map');
 const { notifyAdmins, notifyLivreurs, sendTelegramMessage } = require('../services/notifications');
 
@@ -137,6 +137,8 @@ function setupOrderSystem(bot) {
 
     bot.action('view_catalog', async (ctx) => {
         await ctx.answerCbQuery();
+        // Quitter le contexte produit → libérer le media group pour le cleanup
+        clearActiveMediaGroup(`${ctx.platform}_${ctx.from.id}`);
         await displayCatalog(ctx);
     });
 
@@ -177,57 +179,57 @@ function setupOrderSystem(bot) {
 
         // Détermination du média à afficher
         const allMedia = getAllMediaUrls(product);
-        const firstMedia = allMedia.length > 0 ? allMedia[0].url : null;
+        const keyboard = Markup.inlineKeyboard([buttons, [Markup.button.callback(settings.btn_back_generic || '◀️ Retour', 'view_catalog')]]);
 
-        // Boutons : quantités + optionnel "voir toutes les photos" + retour
-        const btnRows = [buttons];
-        if (allMedia.length > 1) {
-            btnRows.push([Markup.button.callback(`📸 Voir les ${allMedia.length} photos/vidéos`, `show_all_media_${productId}`)]);
-        }
-        btnRows.push([Markup.button.callback(settings.btn_back_generic || '◀️ Retour', 'view_catalog')]);
-        const keyboard = Markup.inlineKeyboard(btnRows);
+        if (allMedia.length > 1 && ctx.platform === 'telegram' && ctx.telegram) {
+            // MULTI-IMAGE : media group + message texte/boutons séparé
+            const userId = `${ctx.platform}_${ctx.from.id}`;
+            const chatId = ctx.chat.id;
+            const currentMsg = ctx.callbackQuery?.message;
 
-        // Toujours edit-in-place avec la première image (pas de delete+send)
-        await safeEdit(ctx, text, {
-            ...keyboard,
-            photo: firstMedia
-        });
-    });
-
-    // Handler : Voir toutes les photos/vidéos d'un produit
-    bot.action(/^show_all_media_(.+)$/, async (ctx) => {
-        await ctx.answerCbQuery('📸 Chargement des médias...');
-        const productId = ctx.match[1];
-        const products = await getProducts();
-        const product = products.find(p => p.id === productId);
-        if (!product) return;
-
-        const allMedia = getAllMediaUrls(product);
-        if (allMedia.length <= 1) return;
-
-        const userId = `${ctx.platform}_${ctx.from.id}`;
-        const chatId = ctx.chat.id;
-
-        try {
-            // Envoyer le media group (toutes les images/vidéos)
-            const mediaGroup = allMedia.slice(0, 10).map((m, i) => ({
-                type: m.type === 'video' ? 'video' : 'photo',
-                media: m.url,
-                ...(m.type === 'video' ? { supports_streaming: true } : {})
-            }));
-            const mgMsgs = await ctx.telegram.sendMediaGroup(chatId, mediaGroup);
-
-            // Tracker les messages du media group pour le cleanup
-            const { addMessageToTrack } = require('../services/database');
-            const { trackIntermediateMessage } = require('../services/utils');
-            if (mgMsgs && Array.isArray(mgMsgs)) {
-                for (const msg of mgMsgs) {
-                    trackIntermediateMessage(userId, msg.message_id);
-                    await addMessageToTrack(userId, msg.message_id, false).catch(() => {});
-                }
+            // Supprimer l'ancien message (le catalogue)
+            if (currentMsg) {
+                try { await ctx.telegram.deleteMessage(chatId, currentMsg.message_id).catch(() => {}); } catch(e) {}
             }
-        } catch (e) {
-            console.error('[PRODUCT] show_all_media failed:', e.message);
+
+            try {
+                // Envoyer le media group
+                const mediaGroup = allMedia.slice(0, 10).map((m, i) => ({
+                    type: m.type === 'video' ? 'video' : 'photo',
+                    media: m.url,
+                    ...(i === 0 ? { caption: `📦 <b>${product.name}</b>`, parse_mode: 'HTML' } : {}),
+                    ...(m.type === 'video' ? { supports_streaming: true } : {})
+                }));
+                const mgMsgs = await ctx.telegram.sendMediaGroup(chatId, mediaGroup);
+
+                // Protéger le media group du cleanup
+                const mgIds = (mgMsgs || []).map(m => m.message_id).filter(Boolean);
+                setActiveMediaGroup(userId, mgIds);
+
+                // Tracker les messages du media group
+                for (const id of mgIds) {
+                    trackIntermediateMessage(userId, id);
+                    await addMessageToTrack(userId, id, false).catch(() => {});
+                }
+
+                // Message texte + boutons (seul ce message sera édité par la suite)
+                const btnMsg = await ctx.replyWithHTML(text, { ...keyboard });
+                const btnMsgId = btnMsg?.message_id || btnMsg?.messageId;
+                if (btnMsgId) {
+                    await addMessageToTrack(userId, btnMsgId, true).catch(() => {});
+                }
+            } catch (mgErr) {
+                console.error('[PRODUCT] MediaGroup failed, fallback single:', mgErr.message);
+                clearActiveMediaGroup(userId);
+                await safeEdit(ctx, text, { ...keyboard, photo: allMedia[0].url });
+            }
+        } else {
+            // 1 seule image ou pas d'image : edit-in-place classique
+            clearActiveMediaGroup(`${ctx.platform}_${ctx.from.id}`);
+            await safeEdit(ctx, text, {
+                ...keyboard,
+                photo: allMedia.length > 0 ? allMedia[0].url : null
+            });
         }
     });
 
@@ -306,16 +308,19 @@ function setupOrderSystem(bot) {
             [Markup.button.callback(settings.btn_back_generic || '◀️ Retour', `product_${product.id}`)]
         ];
 
-        // Snappiness: Pass photo to avoid delete/re-send cycle in safeEdit
+        // Si un media group est actif (multi-images), pas de photo dans safeEdit
+        // sinon le media group reste visible au-dessus et safeEdit édite juste le texte+boutons
+        const hasActiveGroup = getAllMediaUrls(product).length > 1;
         await safeEdit(ctx, text, {
             ...Markup.inlineKeyboard(buttons),
-            photo: getMediaUrl(product)
+            photo: hasActiveGroup ? null : getMediaUrl(product)
         });
     }
 
     bot.action('add_to_cart', async (ctx) => {
         await ctx.answerCbQuery('Ajouté au panier ! 🛒');
         const userId = `${ctx.platform}_${ctx.from.id}`;
+        clearActiveMediaGroup(userId); // Quitter le contexte produit
         const settings = ctx.state?.settings || await getAppSettings();
         const pending = pendingOrders.get(userId);
         if (!pending) return safeEdit(ctx, settings.msg_session_expired || "❌ Session expirée.", Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_quick_menu || '◀️ Menu', 'main_menu')]]));
@@ -339,6 +344,7 @@ function setupOrderSystem(bot) {
     bot.action('checkout_now', async (ctx) => {
         await ctx.answerCbQuery();
         const userId = `${ctx.platform}_${ctx.from.id}`;
+        clearActiveMediaGroup(userId); // Quitter le contexte produit
         const pending = pendingOrders.get(userId);
         if (!pending) return;
 
@@ -2282,10 +2288,11 @@ function setupOrderSystem(bot) {
         try {
             await ctx.answerCbQuery();
             const { getMainMenuKeyboard } = require('./start');
-            
+
             // Récupérer explicitement les settings et user
             const { getUser, getAppSettings } = require('../services/database');
             const userId = `${ctx.platform}_${ctx.from.id}`;
+            clearActiveMediaGroup(userId); // Quitter le contexte produit
             const [user, settings] = await Promise.all([
                 getUser(userId),
                 getAppSettings()

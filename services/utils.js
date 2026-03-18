@@ -20,6 +20,17 @@ const fs = require('fs');
 // Cache mémoire local des messages trackés (évite un aller-retour DB à chaque navigation)
 const _trackedCache = new Map(); // userId → [messageId, ...]
 
+// Media group actif : protège ces messages du cleanup tant qu'on reste dans le produit
+const _activeMediaGroup = new Map(); // userId → [messageId, ...]
+
+function setActiveMediaGroup(userId, msgIds) {
+    _activeMediaGroup.set(userId, msgIds);
+}
+
+function clearActiveMediaGroup(userId) {
+    _activeMediaGroup.delete(userId);
+}
+
 function esc(str) {
     if (!str) return '';
     return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -131,6 +142,7 @@ async function safeEdit(ctx, text, opts = {}) {
     };
 
     // Helper: supprimer tous les messages trackés sauf le message actif — EN ARRIÈRE-PLAN
+    // Protège les messages du media group actif (ils restent tant qu'on est dans le produit)
     const cleanupOrphans = (keepId) => {
         // Non bloquant : on lance le cleanup sans attendre
         (async () => {
@@ -140,18 +152,21 @@ async function safeEdit(ctx, text, opts = {}) {
                 if (tracked.length === 0) {
                     tracked = await getTrackedMessages(userId).catch(() => []);
                 }
-                console.log(`[CLEANUP] User ${userId}: tracked=${JSON.stringify(tracked)}, keepId=${keepId}`);
-                // Supprimer en parallèle pour aller vite
-                const toDelete = tracked.filter(id => String(id) !== String(keepId));
+                // IDs protégés : media group actif + message actuel
+                const protectedIds = new Set([String(keepId)]);
+                const mgIds = _activeMediaGroup.get(userId) || [];
+                mgIds.forEach(id => protectedIds.add(String(id)));
+
+                const toDelete = tracked.filter(id => !protectedIds.has(String(id)));
                 if (toDelete.length > 0) {
-                    console.log(`[CLEANUP] Suppression de ${toDelete.length} message(s): ${toDelete.join(', ')}`);
+                    console.log(`[CLEANUP] User ${userId}: suppression ${toDelete.length} msg (protégés: ${protectedIds.size})`);
                     const results = await Promise.allSettled(toDelete.map(id => deleteSingleMessage(id)));
                     results.forEach((r, i) => {
                         if (r.status === 'rejected') console.warn(`[CLEANUP] Échec suppression msg ${toDelete[i]}: ${r.reason}`);
                     });
                 }
-                // Mettre à jour le cache : ne garder que le message actif
-                _trackedCache.set(userId, [keepId]);
+                // Mettre à jour le cache : garder les protégés
+                _trackedCache.set(userId, [...protectedIds].map(Number).filter(Boolean));
             } catch (e) {
                 console.error(`[CLEANUP] Erreur: ${e.message}`);
             }
@@ -298,4 +313,4 @@ function debugLog(msg) {
     console.log(msg);
 }
 
-module.exports = { safeEdit, debugLog, esc, trackIntermediateMessage };
+module.exports = { safeEdit, debugLog, esc, trackIntermediateMessage, setActiveMediaGroup, clearActiveMediaGroup };
