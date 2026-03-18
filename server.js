@@ -351,43 +351,27 @@ function createServer() {
             const ext = path.extname(file.name) || (file.mimetype.includes('video') ? '.mp4' : '.jpg');
             const fileName = `${Date.now()}-${Math.round(Math.random() * 1E9)}${ext}`;
 
-            // 1. Sauvegarde locale (temporaire/fallback)
-            const dir = path.resolve(__dirname, 'web', 'public', 'uploads');
-            const uploadPath = path.join(dir, fileName);
-            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-            await file.mv(uploadPath);
+            debugLog(`[UPLOAD] Upload Supabase Storage: ${fileName} (${file.mimetype})`);
 
-            let finalUrl = `/public/uploads/${fileName}`;
+            // Upload direct vers Supabase Storage (seule source de vérité — pas de fallback local)
+            const { supabase } = require('./config/supabase');
+            const fileBuf = file.data; // express-fileupload met le buffer dans .data
 
-            // 2. Tentative d'upload sur Supabase Storage (Persistance Cloud)
-            try {
-                const { supabase } = require('./config/supabase');
+            const { error } = await supabase.storage
+                .from('uploads')
+                .upload(fileName, fileBuf, {
+                    contentType: file.mimetype,
+                    upsert: true
+                });
 
-                debugLog(`[UPLOAD] Tentative Supabase Storage: ${fileName}`);
-
-                // Read the file data from disk since 'useTempFiles' strips the buffer in req.files
-                const fs = require('fs');
-                const fileBuf = fs.readFileSync(uploadPath);
-
-                const { data, error } = await supabase.storage
-                    .from('uploads')
-                    .upload(fileName, fileBuf, {
-                        contentType: file.mimetype,
-                        upsert: true
-                    });
-
-                if (error) {
-                    throw error;
-                }
-
-                // URL publique standard Supabase Storage
-                const { data: publicData } = supabase.storage.from('uploads').getPublicUrl(fileName);
-                finalUrl = publicData.publicUrl;
-
-                debugLog(`[UPLOAD-OK] Supabase: ${finalUrl}`);
-            } catch (storageErr) {
-                debugLog(`[UPLOAD-WARN] Échec Supabase Storage: ${storageErr.message}. Utilisation fallback local.`);
+            if (error) {
+                debugLog(`[UPLOAD-FAIL] Supabase Storage: ${error.message}`);
+                return res.status(500).json({ error: `Upload échoué: ${error.message}` });
             }
+
+            const { data: publicData } = supabase.storage.from('uploads').getPublicUrl(fileName);
+            const finalUrl = publicData.publicUrl;
+            debugLog(`[UPLOAD-OK] ${finalUrl}`);
 
             res.json({ success: true, url: finalUrl });
         } catch (e) {
