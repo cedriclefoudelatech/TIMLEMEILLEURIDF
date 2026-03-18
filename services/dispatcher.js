@@ -18,13 +18,11 @@ class Dispatcher {
     _normalizeId(id) {
         if (!id) return id;
         const s = String(id);
-        // Toujours normaliser vers @s.whatsapp.net pour éviter les doublons @lid
         if (s.includes('@s.whatsapp.net')) {
             return s.split(':')[0].split('@')[0] + '@s.whatsapp.net';
         }
         if (s.includes('@lid')) {
-            // @lid est un format interne WhatsApp — on normalise vers @s.whatsapp.net
-            return s.split(':')[0].split('@')[0] + '@s.whatsapp.net';
+            return s.split(':')[0].split('@')[0] + '@lid';
         }
         return s;
     }

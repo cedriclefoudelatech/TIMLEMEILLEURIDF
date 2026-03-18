@@ -1966,6 +1966,14 @@
                                 <input type="text" id="prod_promo" placeholder="ex: -10% ou PROMO 15€" style="margin-bottom:0; font-size:12px;">
                             </div>
 
+                            <!-- Fournisseur -->
+                            <div style="margin-bottom:14px;">
+                                <label style="font-size:11px;">🏪 Fournisseur</label>
+                                <select id="prod_supplier_id" style="margin-bottom:0; font-size:12px;">
+                                    <option value="">Aucun (vente directe)</option>
+                                </select>
+                            </div>
+
                             <!-- 🎁 CADEAU -->
                             <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px; background:rgba(255,165,0,0.06); padding:8px 10px; border-radius:8px; cursor:pointer;" onclick="document.getElementById('prod_is_bundle').click()">
                                 <input type="checkbox" id="prod_is_bundle" onchange="toggleBundleArea()"
@@ -4478,10 +4486,12 @@
             }
 
             try {
+                const supplier_id = document.getElementById('prod_supplier_id').value || null;
                 const payload = {
                     name, description, price, unit, unit_value, promo, image_url,
                     is_bundle, bundle_config,
-                    has_discounts, discounts_config
+                    has_discounts, discounts_config,
+                    supplier_id
                 };
                 if (pid) payload.id = pid;
 
@@ -4511,6 +4521,7 @@
             document.getElementById('prod_promo').value = p.promo || '';
             document.getElementById('prod_image_url').value = p.image_url || '';
 
+            document.getElementById('prod_supplier_id').value = p.supplier_id || '';
             document.getElementById('prod_is_bundle').checked = !!p.is_bundle;
             if (p.bundle_config) {
                 document.getElementById('bundle_trigger_qty').value = p.bundle_config.trigger_qty || 1;
@@ -4532,7 +4543,7 @@
             }
 
             // Ouvrir les options avancées si des valeurs avancées sont remplies
-            const hasAdvanced = p.unit || p.promo || p.is_bundle || p.has_discounts;
+            const hasAdvanced = p.unit || p.promo || p.is_bundle || p.has_discounts || p.supplier_id;
             const advSection = document.getElementById('prod_advanced');
             if (hasAdvanced && advSection) {
                 advSection.style.display = 'block';
@@ -4587,6 +4598,7 @@
             document.getElementById('prod_unit_value').value = '';
             document.getElementById('prod_promo').value = '';
             document.getElementById('prod_image_url').value = '';
+            document.getElementById('prod_supplier_id').value = '';
             document.getElementById('prod_is_bundle').checked = false;
             document.getElementById('prod_has_discounts').checked = false;
             document.getElementById('bundle_trigger_qty').value = 1;
@@ -4902,6 +4914,20 @@
             if (tab === 'reviews') loadData('reviews');
         }
 
+        async function loadSupplierDropdown() {
+            const select = document.getElementById('prod_supplier_id');
+            if (!select) return;
+            const current = select.value;
+            try {
+                const suppliers = await api('/suppliers', 'GET', null, true) || [];
+                select.innerHTML = '<option value="">Aucun (vente directe)</option>';
+                suppliers.filter(s => s.is_active).forEach(s => {
+                    select.innerHTML += `<option value="${s.id}">${s.name}${s.phone ? ' ('+s.phone+')' : ''}</option>`;
+                });
+                if (current) select.value = current;
+            } catch(e) { /* suppliers table may not exist yet */ }
+        }
+
         function switchProductTab(tab) {
             const subs = ['add', 'list'];
             subs.forEach(s => {
@@ -4915,6 +4941,7 @@
                 }
             });
             if (tab === 'list') loadData('products');
+            if (tab === 'add') loadSupplierDropdown();
         }
 
         // Logic for Settings Tabs

@@ -116,6 +116,26 @@ async function registerUser(platformUser, platform = 'telegram', referrerId = nu
         existing = existingArray && existingArray.length > 0 ? existingArray[0] : null;
     }
 
+    // Déduplication WhatsApp : chercher le même numéro sous l'autre suffixe (@lid vs @s.whatsapp.net)
+    if (!existing && platform === 'whatsapp') {
+        const rawId = String(platformUser.id || '');
+        const phoneNum = rawId.split('@')[0].split(':')[0];
+        if (phoneNum) {
+            const altSuffix = rawId.includes('@lid') ? '@s.whatsapp.net' : '@lid';
+            const altId = `whatsapp_${phoneNum}${altSuffix}`;
+            if (!_userCache.has(altId)) {
+                const { data: altArray } = await supabase.from(COL_USERS).select('*').eq('id', altId).limit(1);
+                if (altArray && altArray.length > 0) {
+                    existing = altArray[0];
+                    console.log(`[WA-Dedup] Utilisateur trouvé sous ${altId} pour ${docId} — fusion`);
+                }
+            } else {
+                existing = _userCache.get(altId).data;
+                console.log(`[WA-Dedup] Utilisateur trouvé en cache sous ${altId} pour ${docId}`);
+            }
+        }
+    }
+
     const isGroup = platformUser.type === 'group' || platformUser.type === 'supergroup';
 
     // Si l'utilisateur existe déjà
@@ -781,8 +801,28 @@ async function getActiveUserCount(platform = null) {
     return count || 0;
 }
 async function getRecentUsers(limit = 20) {
-    const { data } = await supabase.from(COL_USERS).select('*').order('last_active', { ascending: false }).limit(limit);
-    return (data || []).map(decryptUser);
+    const { data } = await supabase.from(COL_USERS).select('*').order('last_active', { ascending: false }).limit(limit * 2);
+    const users = (data || []).map(decryptUser);
+    // Déduplication WhatsApp : même numéro de téléphone sous @lid et @s.whatsapp.net
+    const seen = new Map();
+    const deduped = [];
+    for (const u of users) {
+        if (u.platform === 'whatsapp' && u.platform_id) {
+            const phoneNum = String(u.platform_id).split('@')[0].split(':')[0];
+            if (seen.has(phoneNum)) {
+                // Garder celui avec le plus de commandes ou le plus récent
+                const prev = seen.get(phoneNum);
+                if ((u.order_count || 0) > (prev.order_count || 0)) {
+                    deduped[deduped.indexOf(prev)] = u;
+                    seen.set(phoneNum, u);
+                }
+                continue;
+            }
+            seen.set(phoneNum, u);
+        }
+        deduped.push(u);
+    }
+    return deduped.slice(0, limit);
 }
 async function searchUsers(query) {
     // Exact match by ID first (snappy)
