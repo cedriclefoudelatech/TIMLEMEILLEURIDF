@@ -109,8 +109,8 @@ async function broadcastMessage(platform, message, options = {}) {
         }
     }
 
-    // 2. Init log en DB
-    const mediaUrlsJson = JSON.stringify(unifiedMediaList.filter(m => m.url).map(m => m.url));
+    // 2. Init log en DB — on garde URL + type pour pouvoir afficher correctement
+    const mediaUrlsJson = JSON.stringify(unifiedMediaList.filter(m => m.url).map(m => ({ url: m.url, type: m.type || 'photo' })));
     const finalMessageStr = message ? message : `[Médias: ${unifiedMediaList.length}]`;
     const payloadMessage = `${finalMessageStr}|||MEDIA_URLS|||${mediaUrlsJson}`;
 

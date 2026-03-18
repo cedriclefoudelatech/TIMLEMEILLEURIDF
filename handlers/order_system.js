@@ -1543,13 +1543,22 @@ function setupOrderSystem(bot) {
             `${stars}\n"<i>${esc(r.text) || 'Sans commentaire'}</i>"\n\n` +
             `👤 <b>Client de la famille</b> - ${date}`;
 
-        // Photo resolution
+        // Photo/Video resolution
         let photo = r.photo_file_id || null;
+        let video = null;
         if (!photo) {
             let photos = r.photos;
             if (typeof photos === 'string') { try { photos = JSON.parse(photos); } catch (e) { photos = []; } }
             if (!Array.isArray(photos)) photos = photos ? [photos] : [];
-            photo = photos.find(p => p && !p.includes('api.telegram.org/file/')) || null;
+            const mediaUrl = photos.find(p => p && !String(p).includes('api.telegram.org/file/')) || null;
+            if (mediaUrl) {
+                const videoExts = ['.mp4', '.mov', '.avi', '.mkv', '.webm'];
+                if (videoExts.some(ext => String(mediaUrl).toLowerCase().includes(ext))) {
+                    video = mediaUrl;
+                } else {
+                    photo = mediaUrl;
+                }
+            }
         }
 
         const navButtons = [];
@@ -1565,6 +1574,7 @@ function setupOrderSystem(bot) {
         const settings = ctx.state?.settings || await getAppSettings();
         await safeEdit(ctx, text, {
             photo: photo,
+            video: video,
             ...Markup.inlineKeyboard(keyboard)
         });
     });
@@ -1591,19 +1601,26 @@ function setupOrderSystem(bot) {
         // Décoder le message s'il contient des médias
         let fullMsg = b.message || "";
         let photo = null;
+        let video = null;
         if (fullMsg.includes("|||MEDIA_URLS|||")) {
             const parts = fullMsg.split("|||MEDIA_URLS|||");
             fullMsg = parts[0];
             try {
-                const urls = JSON.parse(parts[1]);
-                if (urls && urls.length > 0) {
-                    // For Telegram, use file_id if available, otherwise URL
-                    if (ctx.telegram && urls[0].startsWith('http')) {
-                        photo = urls[0]; // Assume it's a direct URL for Telegram
-                    } else if (ctx.platform === 'whatsapp' && urls[0].startsWith('http')) {
-                        photo = urls[0]; // WhatsApp also uses direct URLs
+                const mediaItems = JSON.parse(parts[1]);
+                if (mediaItems && mediaItems.length > 0) {
+                    const firstItem = mediaItems[0];
+                    // Nouveau format: {url, type} — Ancien format: string URL
+                    const mediaUrl = typeof firstItem === 'string' ? firstItem : firstItem.url;
+                    let mediaType = typeof firstItem === 'object' ? firstItem.type : null;
+                    // Auto-détection par extension si pas de type
+                    if (!mediaType && mediaUrl) {
+                        const videoExts = ['.mp4', '.mov', '.avi', '.mkv', '.webm'];
+                        mediaType = videoExts.some(ext => mediaUrl.toLowerCase().includes(ext)) ? 'video' : 'photo';
+                    }
+                    if (mediaType === 'video') {
+                        video = mediaUrl;
                     } else {
-                        photo = urls[0]; // Fallback, might be a file_id or other
+                        photo = mediaUrl;
                     }
                 }
             } catch (e) {
@@ -1650,6 +1667,7 @@ function setupOrderSystem(bot) {
 
         await safeEdit(ctx, text, {
             photo: photo,
+            video: video,
             parse_mode: 'HTML',
             ...Markup.inlineKeyboard(keyboard)
         });
