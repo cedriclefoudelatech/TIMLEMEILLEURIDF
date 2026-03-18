@@ -5291,8 +5291,7 @@
 
         async function loadSuppliers() {
             try {
-                const res = await apiFetch('/api/suppliers');
-                suppliersData = await res.json();
+                suppliersData = await api('/suppliers', 'GET', null, true) || [];
                 renderSuppliers();
             } catch(e) { console.error('loadSuppliers error:', e); }
         }
@@ -5366,7 +5365,7 @@
             if (id) data.id = id;
 
             try {
-                await apiFetch('/api/suppliers', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data) });
+                await api('/suppliers', 'POST', data, true);
                 closeSupplierForm();
                 await loadSuppliers();
             } catch(e) { alert('Erreur: ' + e.message); }
@@ -5375,16 +5374,15 @@
         async function deleteSupplierUI(id) {
             if (!confirm('Supprimer ce fournisseur ?')) return;
             try {
-                await apiFetch('/api/suppliers/' + id, { method: 'DELETE' });
+                await api('/suppliers/' + id, 'DELETE', null, true);
                 await loadSuppliers();
             } catch(e) { alert('Erreur: ' + e.message); }
         }
 
         async function promoteToSupplier(platformId, platform, name) {
-            // Check if already a supplier
             try {
-                const res = await apiFetch('/api/suppliers');
-                const existing = (await res.json()).find(s => s.telegram_id === String(platformId));
+                const suppliers = await api('/suppliers', 'GET', null, true) || [];
+                const existing = suppliers.find(s => s.telegram_id === String(platformId));
                 if (existing) {
                     showToast('Cet utilisateur est déjà fournisseur !', 'info');
                     switchSection('suppliers');
@@ -5395,18 +5393,14 @@
             if (!confirm(`Promouvoir "${name}" en fournisseur ?`)) return;
 
             try {
-                await apiFetch('/api/suppliers', {
-                    method: 'POST',
-                    headers: {'Content-Type':'application/json'},
-                    body: JSON.stringify({
-                        name: name || 'Fournisseur',
-                        telegram_id: String(platformId),
-                        platform: platform || 'telegram',
-                        is_active: true,
-                        commission_pct: 0,
-                        notes: 'Promu depuis la liste utilisateurs'
-                    })
-                });
+                await api('/suppliers', 'POST', {
+                    name: name || 'Fournisseur',
+                    telegram_id: String(platformId),
+                    platform: platform || 'telegram',
+                    is_active: true,
+                    commission_pct: 0,
+                    notes: 'Promu depuis la liste utilisateurs'
+                }, true);
                 showToast('✅ ' + name + ' est maintenant fournisseur !', 'success');
                 switchSection('suppliers');
             } catch(e) { showToast('Erreur: ' + e.message, 'error'); }

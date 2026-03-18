@@ -140,7 +140,7 @@ class WhatsAppSessionChannel extends Channel {
 
                 const selfJidClean = selfJid?.split(':')[0];
                 const remoteJidClean = remoteJid?.split('@')[0].split(':')[0];
-                const isMessageToSelf = remoteJidClean === selfJidClean || remoteJid?.endsWith('@lid');
+                const isMessageToSelf = remoteJidClean === selfJidClean;
 
                 // Détecter si le message vient d'un BOT (Baileys ou autre bot instance)
                 const isBotId = msg.key.id.startsWith('BAE5') || msg.key.id.startsWith('3EB0') || msg.key.id.length > 20;
@@ -365,11 +365,12 @@ class WhatsAppSessionChannel extends Channel {
     _normalizeId(id) {
         if (!id) return id;
         const s = String(id);
+        // Toujours normaliser vers @s.whatsapp.net pour éviter les doublons @lid
         if (s.includes('@s.whatsapp.net')) {
             return s.split(':')[0].split('@')[0] + '@s.whatsapp.net';
         }
         if (s.includes('@lid')) {
-            return s.split(':')[0].split('@')[0] + '@lid';
+            return s.split(':')[0].split('@')[0] + '@s.whatsapp.net';
         }
         return s;
     }
