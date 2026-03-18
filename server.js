@@ -2,6 +2,8 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fileUpload = require('express-fileupload');
+const jwt = require('jsonwebtoken');
+const rateLimit = require('express-rate-limit');
 const {
     getUserCount, getActiveUserCount, getRecentUsers, searchUsers,
     getReferralLeaderboard, getStatsOverview, getDailyStats,
@@ -36,6 +38,21 @@ function setBotInstance(bot) { _bot = bot; }
 function getBotInstance() { return _bot; }
 
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
+const JWT_SECRET = process.env.ENCRYPTION_KEY || require('crypto').randomBytes(64).toString('hex');
+
+// Rate limiter : 5 tentatives max par 15 minutes sur le login
+const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 5,
+    message: { error: 'Trop de tentatives. Réessayez dans 15 minutes.' },
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => req.ip || 'unknown',
+    handler: (req, res, next, options) => {
+        console.warn(`[AUTH] Rate limit atteint pour IP: ${req.ip}`);
+        res.status(429).json(options.message);
+    }
+});
 
 function createServer() {
     const app = express();
@@ -80,15 +97,25 @@ function createServer() {
     // ========== Authentication ==========
 
     async function authMiddleware(req, res, next) {
-        const token = req.headers.authorization?.replace('Bearer ', '') || req.query.token;
-        if (!token) return res.status(401).json({ error: 'Token manquant' });
+        const raw = req.headers.authorization?.replace('Bearer ', '') || req.query.token;
+        if (!raw) return res.status(401).json({ error: 'Token manquant' });
 
-        const settings = await getAppSettings();
-        if (token === settings.admin_password) {
+        // 1. Essai JWT signé
+        try {
+            jwt.verify(raw, JWT_SECRET);
             return next();
-        }
+        } catch (_) {}
 
-        console.warn(`[AUTH] Tentative d'accès non autorisée avec le token: ${token.substring(0, 3)}...`);
+        // 2. Rétrocompatibilité : token = mot de passe en clair (ancien comportement)
+        // Conservé uniquement pour la migration — supprimé après déploiement stable
+        try {
+            const settings = await getAppSettings();
+            if (raw === settings.admin_password || raw === ADMIN_PASSWORD) {
+                return next();
+            }
+        } catch (_) {}
+
+        console.warn(`[AUTH] Accès refusé — token invalide (IP: ${req.ip})`);
         res.status(401).json({ error: 'Non autorisé' });
     }
 
@@ -150,7 +177,7 @@ function createServer() {
 
     // ========== API Routes ==========
 
-    app.post('/api/login', async (req, res) => {
+    app.post('/api/login', loginLimiter, async (req, res) => {
         try {
             const { password } = req.body;
             let settings = {};
@@ -161,8 +188,16 @@ function createServer() {
             }
 
             if (password === settings.admin_password || password === ADMIN_PASSWORD) {
-                res.json({ success: true, token: password });
+                // Émet un JWT signé valable 12h — le mot de passe ne transite plus dans les requêtes
+                const token = jwt.sign(
+                    { role: 'admin', iat: Math.floor(Date.now() / 1000) },
+                    JWT_SECRET,
+                    { expiresIn: '12h' }
+                );
+                console.log(`[AUTH] Login admin réussi (IP: ${req.ip})`);
+                res.json({ success: true, token });
             } else {
+                console.warn(`[AUTH] Échec login (IP: ${req.ip})`);
                 res.status(401).json({ error: 'Mot de passe incorrect' });
             }
         } catch (e) {

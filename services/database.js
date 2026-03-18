@@ -61,6 +61,26 @@ function decryptUser(userData) {
 
     return decrypted;
 }
+function decryptOrder(order) {
+    if (!order) return null;
+    return {
+        ...order,
+        address: encryption.decrypt(order.address) || order.address || '',
+        first_name: encryption.decrypt(order.first_name) || order.first_name || '',
+        username: encryption.decrypt(order.username) || order.username || '',
+    };
+}
+
+function decryptReview(review) {
+    if (!review) return null;
+    return {
+        ...review,
+        text: encryption.decrypt(review.text) || review.text || '',
+        first_name: encryption.decrypt(review.first_name) || review.first_name || '',
+        username: encryption.decrypt(review.username) || review.username || '',
+    };
+}
+
 function makeDocId(platform, platformId) { return `${platform}_${platformId}`; }
 
 async function activeUsersQuery(platform, type = null, limit = null) {
@@ -437,9 +457,16 @@ async function createOrder(orderData) {
     }
 
     const id = `${Date.now()}-${Math.round(Math.random() * 1E9)}`;
+
+    // Chiffrement des champs sensibles avant stockage en base
+    const secureOrderData = { ...orderData };
+    if (secureOrderData.address) secureOrderData.address = encryption.encrypt(secureOrderData.address);
+    if (secureOrderData.first_name) secureOrderData.first_name = encryption.encrypt(secureOrderData.first_name);
+    if (secureOrderData.username) secureOrderData.username = encryption.encrypt(secureOrderData.username);
+
     const { data, error } = await supabase.from(COL_ORDERS).insert([{
         id: id,
-        ...orderData,
+        ...secureOrderData,
         scheduled_at: orderData.scheduled_at || null,
         status: 'pending',
         created_at: ts(),
@@ -584,7 +611,7 @@ async function updateOrderStatus(orderId, status, extraData = {}) {
 
 async function getOrdersByUser(userId) {
     const { data } = await supabase.from(COL_ORDERS).select('*').eq('user_id', userId).order('created_at', { ascending: false });
-    return data || [];
+    return (data || []).map(decryptOrder);
 }
 
 async function assignOrderLivreur(orderId, livreurId, livreurName) {
@@ -697,7 +724,7 @@ async function getAndClearPendingFeedback(userId) {
 
 async function getOrder(orderId) {
     const { data } = await supabase.from(COL_ORDERS).select('*').eq('id', orderId).limit(1);
-    return data && data.length > 0 ? data[0] : null;
+    return data && data.length > 0 ? decryptOrder(data[0]) : null;
 }
 
 async function getAvailableOrders(city = null) {
@@ -706,12 +733,12 @@ async function getAvailableOrders(city = null) {
         q = q.eq('city', city.toLowerCase());
     }
     const { data } = await q.order('created_at', { ascending: false });
-    return data || [];
+    return (data || []).map(decryptOrder);
 }
 
 async function getAllOrders(limit = 50) {
     const { data } = await supabase.from(COL_ORDERS).select('*').order('created_at', { ascending: false }).limit(limit);
-    return data || [];
+    return (data || []).map(decryptOrder);
 }
 
 async function getLivreurHistory(livreurId) {
@@ -720,7 +747,7 @@ async function getLivreurHistory(livreurId) {
         .eq('livreur_id', livreurId)
         .eq('status', 'delivered')
         .order('created_at', { ascending: false });
-    return data || [];
+    return (data || []).map(decryptOrder);
 }
 
 async function getLivreurOrders(livreurId) {
@@ -728,7 +755,7 @@ async function getLivreurOrders(livreurId) {
         .select('*')
         .eq('livreur_id', livreurId)
         .eq('status', 'taken');
-    return data || [];
+    return (data || []).map(decryptOrder);
 }
 
 async function getUser(docId) {
@@ -1397,19 +1424,25 @@ async function nukeDatabase() {
 // --- Reviews ---
 async function saveReview(reviewData) {
     const id = reviewData.id || `rev_${Date.now()}`;
-    const { error } = await supabase.from(COL_REVIEWS).upsert([{ id, ...reviewData, created_at: ts() }]);
+    const secureData = {
+        ...reviewData,
+        text: reviewData.text ? encryption.encrypt(reviewData.text) : reviewData.text,
+        first_name: reviewData.first_name ? encryption.encrypt(reviewData.first_name) : reviewData.first_name,
+        username: reviewData.username ? encryption.encrypt(reviewData.username) : reviewData.username,
+    };
+    const { error } = await supabase.from(COL_REVIEWS).upsert([{ id, ...secureData, created_at: ts() }]);
     if (error) throw error;
     return id;
 }
 
 async function getReviews(limit = 50) {
     const { data } = await supabase.from(COL_REVIEWS).select('*').order('created_at', { ascending: false }).limit(limit);
-    return data || [];
+    return (data || []).map(decryptReview);
 }
 
 async function getPublicReviews(limit = 20) {
     const { data } = await supabase.from(COL_REVIEWS).select('*').eq('is_public', true).order('created_at', { ascending: false }).limit(limit);
-    return data || [];
+    return (data || []).map(decryptReview);
 }
 
 async function deleteReview(id) {
@@ -1562,7 +1595,7 @@ async function useSupabaseAuthState(sessionId) {
 
 module.exports = {
     supabase, COL_USERS, COL_PRODUCTS, COL_ORDERS, COL_SETTINGS, COL_BROADCASTS, COL_REFERRALS,
-    incr, ts, makeDocId, decryptUser,
+    incr, ts, makeDocId, decryptUser, decryptOrder, decryptReview,
     registerUser, getAllActiveUsers, getAllUsersForBroadcast, markUserBlocked, markUserUnblocked, deleteUser, getUser, updateUserWallet, updateUserPoints,
     getUserCount, getActiveUserCount, getRecentUsers, searchUsers, searchLivreurs,
     generateReferralCode, getReferralLeaderboard, incrementOrderCount,

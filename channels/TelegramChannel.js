@@ -45,9 +45,11 @@ class TelegramChannel extends Channel {
                 await this.messageHandler({
                     from: ctx.from.id,
                     name: ctx.from.first_name,
-                    text: ctx.message.text,
+                    text: ctx.message.text || ctx.message.caption,
+                    photo: ctx.message.photo,
+                    video: ctx.message.video,
                     message_id: ctx.message.message_id,
-                    type: 'text',
+                    type: 'message',
                     ctx: ctx // On garde le ctx original pour compatibilité ascendante si besoin
                 });
             }
@@ -68,7 +70,7 @@ class TelegramChannel extends Channel {
     }
 
     async start() {
-        console.log(`[TG] Lancement du bot (${this.token.substring(0, 10)}...)...`);
+        console.log(`[TG] Lancement du bot (${this.token.substring(0, 4)}****...)...`);
         try {
             this.bot.launch().then(() => {
                 console.log('✅ [TG] Bot lancé avec succès !');
