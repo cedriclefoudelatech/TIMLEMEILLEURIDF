@@ -122,6 +122,16 @@ async function safeEdit(ctx, text, opts = {}) {
         } catch (e) { }
     };
 
+    // Helper: supprimer les messages orphelins (broadcast, ancien menu, etc.)
+    const cleanupOrphans = async (keepId) => {
+        try {
+            const oldMenuId = await getLastMenuId(userId).catch(() => null);
+            if (oldMenuId && String(oldMenuId) !== String(keepId)) {
+                deleteSingleMessage(oldMenuId);
+            }
+        } catch (e) { }
+    };
+
     try {
         // ═══════════════════════════════════════════════════
         // A. TENTATIVE D'EDIT — C'est la méthode PRIORITAIRE
@@ -144,9 +154,10 @@ async function safeEdit(ctx, text, opts = {}) {
                             parse_mode: 'HTML'
                         }, { reply_markup });
                     }
-                    // Edit réussi → on met à jour le tracking avec CE message uniquement
+                    // Edit réussi → tracker ce message + supprimer les orphelins
                     await addMessageToTrack(userId, currentMsgId).catch(() => { });
-                    // PAS de cleanup agressif — le message a été édité en place !
+                    // Supprimer les vieux messages orphelins (ex: broadcast "catalogue à jour")
+                    cleanupOrphans(currentMsgId);
                     return;
                 } catch (e) {
                     if (String(e.description || '').includes('not modified')) return;
@@ -155,7 +166,6 @@ async function safeEdit(ctx, text, opts = {}) {
             }
 
             // CAS 2 : Type différent (texte→media ou media→texte) → Delete ancien + Send nouveau
-            // On supprime UNIQUEMENT l'ancien message du menu, rien d'autre
             let newMsg;
             try {
                 if (photo || video) {
@@ -171,8 +181,10 @@ async function safeEdit(ctx, text, opts = {}) {
 
             const newMsgId = newMsg?.message_id || newMsg?.messageId;
             if (newMsgId) {
-                // Supprimer l'ancien message du menu uniquement
+                // Supprimer l'ancien message du callback
                 deleteSingleMessage(currentMsgId);
+                // Supprimer aussi le dernier menu traqué s'il est différent (ex: broadcast orphelin)
+                cleanupOrphans(newMsgId);
                 // Tracker le nouveau comme seul message actif
                 await addMessageToTrack(userId, newMsgId).catch(() => { });
             }
