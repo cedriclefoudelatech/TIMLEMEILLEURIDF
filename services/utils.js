@@ -140,12 +140,21 @@ async function safeEdit(ctx, text, opts = {}) {
                 if (tracked.length === 0) {
                     tracked = await getTrackedMessages(userId).catch(() => []);
                 }
+                console.log(`[CLEANUP] User ${userId}: tracked=${JSON.stringify(tracked)}, keepId=${keepId}`);
                 // Supprimer en parallèle pour aller vite
                 const toDelete = tracked.filter(id => String(id) !== String(keepId));
-                await Promise.allSettled(toDelete.map(id => deleteSingleMessage(id)));
+                if (toDelete.length > 0) {
+                    console.log(`[CLEANUP] Suppression de ${toDelete.length} message(s): ${toDelete.join(', ')}`);
+                    const results = await Promise.allSettled(toDelete.map(id => deleteSingleMessage(id)));
+                    results.forEach((r, i) => {
+                        if (r.status === 'rejected') console.warn(`[CLEANUP] Échec suppression msg ${toDelete[i]}: ${r.reason}`);
+                    });
+                }
                 // Mettre à jour le cache : ne garder que le message actif
                 _trackedCache.set(userId, [keepId]);
-            } catch (e) { }
+            } catch (e) {
+                console.error(`[CLEANUP] Erreur: ${e.message}`);
+            }
         })();
     };
 
