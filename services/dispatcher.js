@@ -342,7 +342,13 @@ class Dispatcher {
         }
 
         if (extra.parse_mode === 'HTML') options.parse_mode = 'HTML';
-        if (extra.photo) options.media_url = extra.photo;
+        if (extra.video) {
+            options.media_url = extra.video;
+            options.media_type = 'video';
+        } else if (extra.photo) {
+            options.media_url = extra.photo;
+            options.media_type = 'photo';
+        }
         if (extra.caption) options.caption = extra.caption;
         if (extra.protect_content) options.protect_content = true;
         return options;

@@ -201,7 +201,13 @@ class TelegramChannel extends Channel {
 
         // Si un média est fourni dans les options, on l'envoie avec le clavier
         if (options.media_url) {
-            if (options.media_type === 'video') {
+            let mediaType = options.media_type || null;
+            // Fallback: détection par extension si media_type manquant
+            if (!mediaType) {
+                const videoExts = /\.(mp4|mov|avi|mkv|webm|m4v)(\?.*)?$/i;
+                mediaType = videoExts.test(options.media_url) ? 'video' : 'photo';
+            }
+            if (mediaType === 'video') {
                 return this.sendVideo(userId, options.media_url, text, sendOpts);
             } else {
                 return this.sendPhoto(userId, options.media_url, text, sendOpts);

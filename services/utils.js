@@ -79,8 +79,8 @@ async function safeEdit(ctx, text, opts = {}) {
             }
         }
 
-        const videoExts = ['.mp4', '.mov', '.avi', '.mkv', '.webm'];
-        if (isDetectedVideo || (photo && typeof photo === 'string' && videoExts.some(ext => photo.toLowerCase().endsWith(ext)))) {
+        const videoExtRegex = /\.(mp4|mov|avi|mkv|webm|m4v)(\?.*)?$/i;
+        if (isDetectedVideo || (photo && typeof photo === 'string' && videoExtRegex.test(photo))) {
             if (!opts.video) opts.video = photo;
             photo = null;
         }
