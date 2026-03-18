@@ -185,6 +185,27 @@ class Dispatcher {
                     }
                     return channel.deleteMessage(cid || userId, mid);
                 },
+                sendMediaGroup: async (cid, mediaGroup, opts = {}) => {
+                    if (channel.type === 'telegram') {
+                        const tgCh = registry.query('telegram');
+                        const tgBot = tgCh?.getBotInstance?.();
+                        if (tgBot) {
+                            if (!_isPrivileged) opts = { ...opts, protect_content: true };
+                            return tgBot.telegram.sendMediaGroup(cid || userId, mediaGroup, opts);
+                        }
+                    }
+                    // Fallback pour WhatsApp : envoyer les médias un par un
+                    const results = [];
+                    for (const m of mediaGroup) {
+                        const mediaUrl = typeof m.media === 'string' ? m.media : m.media?.url;
+                        if (m.type === 'video') {
+                            results.push(await ctx.replyWithVideo(mediaUrl, { caption: m.caption || '' }));
+                        } else {
+                            results.push(await ctx.replyWithPhoto(mediaUrl, { caption: m.caption || '' }));
+                        }
+                    }
+                    return results;
+                },
                 setChatMenuButton: async () => {}
             },
 
