@@ -1670,7 +1670,10 @@ async function deleteOrder(id) {
 async function useSupabaseAuthState(sessionId) {
     const TABLE = 'bot_state';
     const NAMESPACE = 'wa_session';
-    const { BufferJSON, initAuthCreds } = require('@whiskeysockets/baileys');
+    // Dynamic import for ESM-only baileys (Node 22+)
+    const baileysMod = await import('@whiskeysockets/baileys');
+    const BufferJSON = baileysMod.BufferJSON;
+    const initAuthCreds = baileysMod.initAuthCreds;
 
     // Construit un ID unique pour bot_state : "wa_session::{sessionId}::{key}"
     function makeId(key) {
