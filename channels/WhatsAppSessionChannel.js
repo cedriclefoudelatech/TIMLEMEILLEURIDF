@@ -1,6 +1,16 @@
-const Baileys = require('@whiskeysockets/baileys');
-const makeWASocket = Baileys.default || Baileys;
-const { DisconnectReason, jidDecode, fetchLatestBaileysVersion, makeCacheableSignalKeyStore } = Baileys;
+// Dynamic import wrapper for ESM-only @whiskeysockets/baileys (Node 22+)
+let Baileys, makeWASocket, DisconnectReason, jidDecode, fetchLatestBaileysVersion, makeCacheableSignalKeyStore, downloadMediaMessage;
+
+async function loadBaileys() {
+    if (Baileys) return;
+    Baileys = await import('@whiskeysockets/baileys');
+    makeWASocket = Baileys.default?.default || Baileys.default || Baileys;
+    DisconnectReason = Baileys.DisconnectReason;
+    jidDecode = Baileys.jidDecode;
+    fetchLatestBaileysVersion = Baileys.fetchLatestBaileysVersion;
+    makeCacheableSignalKeyStore = Baileys.makeCacheableSignalKeyStore;
+    downloadMediaMessage = Baileys.downloadMediaMessage;
+}
 
 const { Channel } = require('./Channel');
 const { useSupabaseAuthState } = require('../services/database');
@@ -29,10 +39,12 @@ class WhatsAppSessionChannel extends Channel {
     static getLogs() { return waLogs; }
 
     async initialize() {
+        await loadBaileys();
         console.log(`[WA-Session] Supabase mode for: ${this.sessionId}`);
     }
 
     async start() {
+        await loadBaileys();
         const { state, saveCreds, clearSession } = await useSupabaseAuthState(this.sessionId);
         this._clearSession = clearSession;
         const { version, isLatest } = await fetchLatestBaileysVersion();
@@ -372,7 +384,7 @@ class WhatsAppSessionChannel extends Channel {
 
     async downloadMedia(msg) {
         try {
-            const { downloadMediaMessage } = require('@whiskeysockets/baileys');
+            await loadBaileys();
             const buffer = await downloadMediaMessage(
                 msg,
                 'buffer',
