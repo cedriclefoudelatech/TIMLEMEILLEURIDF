@@ -275,22 +275,22 @@ class WhatsAppSessionChannel extends Channel {
         const sentIds = [];
         console.log(`[WA-Interactive] To: ${jid}, Buttons: ${buttons.length}, HasMedia: ${!!options.media_url}`);
 
-        try {
-            const cleanText = this._stripHTML(text);
-            let textMenu = cleanText;
+        const cleanText = this._stripHTML(text);
+        let textMenu = cleanText;
 
-            // Préparer le menu textuel si des boutons sont présents
-            if (buttons.length > 0) {
-                if (textMenu) textMenu += "\n\n";
-                textMenu += "*📋 OPTIONS DISPONIBLES :*\n";
-                buttons.forEach((b, i) => {
-                    textMenu += `*${i+1}* — ${b.title}\n`;
-                });
-                textMenu += "\n_Répondez avec le chiffre correspondant._";
-            }
+        // Préparer le menu textuel si des boutons sont présents
+        if (buttons.length > 0) {
+            if (textMenu) textMenu += "\n\n";
+            textMenu += "*📋 OPTIONS DISPONIBLES :*\n";
+            buttons.forEach((b, i) => {
+                textMenu += `*${i+1}* — ${b.title}\n`;
+            });
+            textMenu += "\n_Répondez avec le chiffre correspondant._";
+        }
 
-            // 1. Envoi combiné (Média + Texte/Menu)
-            if (options.source || options.media_url) {
+        // 1. Tentative envoi avec média (si présent)
+        if (options.source || options.media_url) {
+            try {
                 const mediaType = options.media_type === 'video' ? 'video' : 'image';
                 const msgPayload = {
                     [mediaType]: options.source ? options.source : { url: options.media_url },
@@ -298,15 +298,20 @@ class WhatsAppSessionChannel extends Channel {
                 };
                 const result = await this.sock.sendMessage(jid, msgPayload);
                 if (result?.key?.id) sentIds.push(result.key.id);
-            } else {
-                // 2. Envoi Texte seul (Menu inclus)
-                const result = await this.sock.sendMessage(jid, { text: textMenu || "Choisissez une option :" });
-                if (result?.key?.id) sentIds.push(result.key.id);
+                return { success: true, sentIds };
+            } catch (e) {
+                console.warn(`[WA-Interactive] Échec envoi média (${options.media_url || 'source buffer'}) — fallback texte seul. Erreur: ${e.message}`);
+                // Fallback : envoyer texte seul ci-dessous
             }
+        }
 
+        // 2. Envoi Texte seul (aussi utilisé comme fallback si le média échoue)
+        try {
+            const result = await this.sock.sendMessage(jid, { text: textMenu || "Choisissez une option :" });
+            if (result?.key?.id) sentIds.push(result.key.id);
             return { success: true, sentIds };
         } catch (e) {
-            console.error('[WA-Interactive] Multi-send failed:', e);
+            console.error('[WA-Interactive] Échec envoi texte:', e);
             return { success: false, sentIds };
         }
     }
