@@ -54,10 +54,20 @@ function decryptWithIterations(salt, iv, tag, encryptedText, iterations) {
 }
 
 function decrypt(encryptedData) {
-    if (!encryptedData || !encryptedData.includes(':')) return encryptedData;
+    if (!encryptedData || typeof encryptedData !== 'string' || !encryptedData.includes(':')) return encryptedData;
 
     try {
-        const [saltHex, ivHex, tagHex, encryptedText] = encryptedData.split(':');
+        const parts = encryptedData.split(':');
+        // Un message chiffré doit avoir exactement 4 parties: salt:iv:tag:encryptedText
+        if (parts.length !== 4) return encryptedData;
+
+        const [saltHex, ivHex, tagHex, encryptedText] = parts;
+        
+        // Vérification basique que ce sont des chaînes hexadécimales
+        if (!/^[0-9a-f]+$/i.test(saltHex) || !/^[0-9a-f]+$/i.test(ivHex) || !/^[0-9a-f]+$/i.test(tagHex)) {
+            return encryptedData;
+        }
+
         const salt = Buffer.from(saltHex, 'hex');
         const iv = Buffer.from(ivHex, 'hex');
         const tag = Buffer.from(tagHex, 'hex');
@@ -75,8 +85,16 @@ function decrypt(encryptedData) {
 
         throw new Error('Aucune itération ne fonctionne');
     } catch (error) {
+        // Si c'est une chaîne non chiffrée qui contient des deux-points par hasard, 
+        // on retourne simplement la chaîne originale au lieu de loguer une erreur.
+        if (error.message.includes('The first argument must be of type string') || 
+            error.message.includes('Avoir itération') || 
+            error.message.includes('Unsupported state')) {
+            return encryptedData;
+        }
+        
         console.error('❌ Erreur de déchiffrement finale:', error.message);
-        return "[Erreur de déchiffrement]";
+        return encryptedData; // Retourne le texte original si erreur inattendue
     }
 }
 

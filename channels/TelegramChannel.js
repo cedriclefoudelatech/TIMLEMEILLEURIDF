@@ -5,7 +5,12 @@ const path = require('path');
 class TelegramChannel extends Channel {
     constructor(token) {
         super('telegram', 'Telegram');
-        this.token = token;
+        // Nettoyage agressif du token (trim et suppression des caractères parasites comme \n, \r ou =)
+        let cleanToken = (token || '').trim();
+        if (cleanToken.startsWith('=')) {
+            cleanToken = cleanToken.substring(1).trim();
+        }
+        this.token = cleanToken;
         this.bot = null;
         this.messageHandler = null;
     }

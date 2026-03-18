@@ -1073,7 +1073,7 @@ async function getOrderAnalytics() {
         }
 
         const clientId = order.user_id || 'unknown';
-        const clientName = order.first_name || order.username || 'Client Inconnu';
+        const clientName = encryption.decrypt(order.first_name) || encryption.decrypt(order.username) || 'Client Inconnu';
         if (!analytics.byUser[clientName]) {
             analytics.byUser[clientName] = { count: 0, ca: 0 };
         }
