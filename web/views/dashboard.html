@@ -1052,6 +1052,203 @@
             }
         }
 
+        /* =====================================================
+           MOBILE IMPROVEMENTS — UI/UX OPTIMISATIONS
+           ===================================================== */
+
+        /* --- Modal : bottom sheet sur mobile --- */
+        @media (max-width: 640px) {
+            .modal-overlay {
+                padding: 0;
+                align-items: flex-end;
+            }
+
+            .modal-box {
+                max-width: 100%;
+                max-height: 88vh;
+                overflow-y: auto;
+                -webkit-overflow-scrolling: touch;
+                border-radius: 24px 24px 0 0;
+                padding: 24px 20px;
+                padding-bottom: calc(20px + env(safe-area-inset-bottom));
+            }
+
+            .modal-actions {
+                flex-direction: column-reverse;
+                gap: 10px;
+            }
+
+            .modal-actions .btn {
+                width: 100%;
+                padding: 14px;
+                text-align: center;
+                font-size: 15px;
+            }
+        }
+
+        /* --- Toasts : repositionnement mobile (top centre, pas caché par notch) --- */
+        @media (max-width: 640px) {
+            .toast-container {
+                top: 70px;
+                right: 12px;
+                left: 12px;
+                width: auto;
+                align-items: stretch;
+            }
+
+            .toast {
+                min-width: unset;
+                width: 100%;
+                text-align: center;
+                border-radius: 14px;
+            }
+        }
+
+        /* --- Col : éviter le scroll horizontal sur très petit écran --- */
+        @media (max-width: 400px) {
+            .col {
+                min-width: 0 !important;
+                width: 100%;
+            }
+        }
+
+        /* --- Boutons d'action (table users) : wrapping et taille tactile --- */
+        @media (max-width: 640px) {
+            .action-btns {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 6px;
+                padding-top: 8px;
+            }
+
+            .action-btns .btn {
+                flex: 1 1 calc(50% - 6px);
+                min-width: 0;
+                text-align: center;
+                padding: 10px 6px;
+                font-size: 11px;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+        }
+
+        /* --- Stats grid : 2 colonnes compactes sur mobile --- */
+        @media (max-width: 600px) and (min-width: 380px) {
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr) !important;
+                gap: 12px;
+            }
+
+            .stat-card {
+                padding: 18px;
+                border-radius: 20px;
+            }
+
+            .stat-card .icon {
+                width: 38px;
+                height: 38px;
+                font-size: 20px;
+            }
+
+            .stat-value {
+                font-size: 26px;
+            }
+
+            .stat-label {
+                font-size: 11px;
+            }
+        }
+
+        /* --- Inputs & selects : taille tactile minimum --- */
+        @media (max-width: 768px) {
+            .btn {
+                min-height: 44px;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+            }
+
+            select, input[type="text"], input[type="number"], input[type="password"], textarea {
+                min-height: 48px;
+                border-radius: 12px !important;
+                padding: 12px 16px !important;
+            }
+        }
+
+        /* --- Section produits : image centrée sur mobile --- */
+        @media (max-width: 640px) {
+            .product-card {
+                flex-wrap: wrap;
+            }
+
+            .product-card .product-thumb {
+                width: 100%;
+                height: 140px;
+                object-fit: cover;
+                border-radius: 14px;
+                margin-bottom: 8px;
+            }
+        }
+
+        /* --- Bottom nav : label plus visible, padding safe-area --- */
+        @media (max-width: 1024px) {
+            .mobile-nav {
+                bottom: max(12px, env(safe-area-inset-bottom));
+                padding-bottom: 0;
+            }
+        }
+
+        /* --- Formulaire diffusion : forcer 1 colonne sur mobile --- */
+        @media (max-width: 768px) {
+            #section-broadcast .flex {
+                flex-direction: column;
+            }
+
+            #section-broadcast .col {
+                min-width: 0;
+                width: 100%;
+            }
+        }
+
+        /* --- Table dans modal (historique livreur) : lisible sur mobile --- */
+        @media (max-width: 600px) {
+            .modal-box table {
+                font-size: 12px;
+            }
+
+            .modal-box table th,
+            .modal-box table td {
+                padding: 6px 4px !important;
+            }
+
+            .modal-box [style*="max-height:400px"] {
+                max-height: 55vh !important;
+            }
+        }
+
+        /* --- Sous-onglets settings : style pill horizontal scrollable sur mobile --- */
+        @media (max-width: 640px) {
+            .sub-tabs {
+                flex-direction: row !important;
+                overflow-x: auto;
+                scrollbar-width: none;
+                padding-bottom: 4px;
+                gap: 8px;
+                flex-wrap: nowrap !important;
+            }
+
+            .sub-tabs::-webkit-scrollbar { display: none; }
+
+            .sub-tab-btn {
+                white-space: nowrap;
+                flex-shrink: 0;
+                min-width: fit-content;
+                padding: 10px 16px !important;
+                text-align: center !important;
+            }
+        }
+
         .flex-wrap {
             flex-wrap: wrap;
         }
@@ -2171,6 +2368,10 @@
                         onclick="switchSettingsTab('security')">Sécurité</button>
                     <button class="btn btn-sm btn-outline" id="btn-stab-fidelity"
                         onclick="switchSettingsTab('fidelity')">Fidélité</button>
+                    <button class="btn btn-sm btn-outline" id="btn-stab-payment"
+                        onclick="switchSettingsTab('payment')">Paiement</button>
+                    <button class="btn btn-sm btn-outline" id="btn-stab-content"
+                        onclick="switchSettingsTab('content')">Textes</button>
                     <button class="btn btn-sm btn-outline" id="btn-stab-ui"
                         onclick="switchSettingsTab('ui')">Interface</button>
                     <button class="btn btn-sm btn-outline" id="btn-stab-auto"
@@ -2318,6 +2519,25 @@
                 </div>
 
                 <button class="btn btn-accent" style="margin-top:25px;" onclick="saveSettings()">Sauvegarder les réglages</button>
+            </div>
+
+            <!-- Onglet Paiement -->
+            <div id="sub-settings-payment" class="card" style="display:none;">
+                <h3>Modes de Paiement</h3>
+                <p style="color:var(--text-muted); font-size:12px; margin-bottom:20px;">Configurez les options de paiement proposées lors de la confirmation de commande.</p>
+                
+                <div id="payment_modes_container" style="display:flex; flex-direction:column; gap:12px; margin-bottom:20px;">
+                    <!-- Les modes seront injectés ici -->
+                </div>
+                
+                <button class="btn btn-outline btn-sm" onclick="addPaymentModeRow()">+ Ajouter un mode de paiement</button>
+                
+                <div style="margin-top:30px; padding:15px; background:rgba(0,120,255,0.1); border-radius:8px; border-left:4px solid #0078ff;">
+                    <div style="font-weight:bold; color:#0078ff; font-size:14px; margin-bottom:5px;">💡 Guide</div>
+                    <p style="color:var(--text-muted); font-size:13px;">L'ID doit être unique (ex: CASH, CARD, PAYPAL). L'icône et le libellé seront affichés sur les boutons du bot.</p>
+                </div>
+                
+                <button class="btn btn-accent" style="margin-top:25px;" onclick="saveSettings()">Sauvegarder les modes de paiement</button>
             </div>
 
             <!-- Onglet Contenu (Bot Content) -->
@@ -2839,7 +3059,12 @@
                 if (Array.isArray(photos) && photos.length > 0 && photos[0]) {
                     const firstPhoto = photos[0];
                     if (firstPhoto.startsWith('http') || firstPhoto.includes('/')) {
-                        photoHtml = `<img src="${firstPhoto}" style="width:60px; height:60px; cursor:pointer; object-fit:cover; border-radius:10px; border:1px solid var(--border);" onclick="window.open('${firstPhoto}')" title="Agrandir">`;
+                        const isVideo = firstPhoto.toLowerCase().includes('.mp4') || firstPhoto.toLowerCase().includes('.mov') || firstPhoto.toLowerCase().includes('.mkv');
+                        if (isVideo) {
+                            photoHtml = `<video src="${firstPhoto}" style="width:60px; height:60px; object-fit:cover; border-radius:10px; border:1px solid var(--border);" muted onclick="window.open('${firstPhoto}')" title="Agrandir"></video>`;
+                        } else {
+                            photoHtml = `<img src="${firstPhoto}" style="width:60px; height:60px; cursor:pointer; object-fit:cover; border-radius:10px; border:1px solid var(--border);" onclick="window.open('${firstPhoto}')" title="Agrandir">`;
+                        }
                     } else {
                         photoHtml = `<div style="padding:4px; background:var(--hover); border-radius:6px; font-size:10px; color:var(--text-muted); text-align:center; width:60px;">PHOTO TG</div>`;
                     }
@@ -3288,6 +3513,22 @@
                 }
                 if (id === 'settings') {
                     const s = await api('/settings');
+                    
+                    // Payment Modes Initialization
+                    const pmContainer = document.getElementById('payment_modes_container');
+                    pmContainer.innerHTML = '';
+                    let pModes = [];
+                    try {
+                        pModes = typeof s.payment_modes_config === 'string' ? JSON.parse(s.payment_modes_config) : (s.payment_modes_config || []);
+                    } catch(e) { console.error('Parse PM config failed', e); }
+                    if (!pModes || pModes.length === 0) {
+                        // Defaults
+                        addPaymentModeRow({id:'CASH', label:'Espèces', icon:'💵'});
+                        addPaymentModeRow({id:'CARD', label:'Carte Bancaire', icon:'💳'});
+                    } else {
+                        pModes.forEach(m => addPaymentModeRow(m));
+                    }
+
                     document.getElementById('set_bot_name').value = s.bot_name;
                     document.getElementById('set_title').value = s.dashboard_title || 'Admin Panel';
                     document.getElementById('set_color').value = s.accent_color || '#ff0050';
@@ -4343,7 +4584,7 @@
 
         // Logic for Settings Tabs
         function switchSettingsTab(tab) {
-            const tabs = ['general', 'security', 'fidelity', 'ui', 'content', 'auto', 'danger'];
+            const tabs = ['general', 'security', 'fidelity', 'payment', 'content', 'ui', 'auto', 'danger'];
             tabs.forEach(t => {
                 const el = document.getElementById('sub-settings-' + t);
                 if (el) el.style.display = (t === tab) ? 'block' : 'none';
@@ -4386,10 +4627,10 @@
                         const date = d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
                         return `
                                             <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
-                                                <td style="padding:8px 5px; opacity:0.7;">${date}</td>
-                                                <td style="padding:8px 5px;">${o.first_name}</td>
-                                                <td style="padding:8px 5px;">${o.product_name}</td>
-                                                <td style="padding:8px 5px;"><b>${o.total_price}€</b></td>
+                                                <td data-label="Date" style="padding:8px 5px; opacity:0.7;">${date}</td>
+                                                <td data-label="Client" style="padding:8px 5px;">${o.first_name}</td>
+                                                <td data-label="Produit" style="padding:8px 5px;">${o.product_name}</td>
+                                                <td data-label="Prix" style="padding:8px 5px;"><b>${o.total_price}€</b></td>
                                             </tr>
                                         `;
                     }).join('')}
@@ -4428,6 +4669,21 @@
             } catch (e) { showToast(e.message, 'error'); }
         }
 
+        function addPaymentModeRow(data = {id:'', label:'', icon:''}) {
+            const container = document.getElementById('payment_modes_container');
+            if (!container) return;
+            const div = document.createElement('div');
+            div.className = 'payment-mode-row';
+            div.style = "display:grid; grid-template-columns: 1fr 2fr 2fr auto; gap:10px; align-items:center; background:rgba(255,255,255,0.03); padding:10px; border-radius:8px;";
+            div.innerHTML = `
+                <input class="set-pm-icon" placeholder="💰" value="${data.icon || ''}" style="text-align:center;">
+                <input class="set-pm-label" placeholder="Espèces" value="${data.label || ''}">
+                <input class="set-pm-id" placeholder="ID (ex: CASH)" value="${data.id || ''}" ${data.id ? 'readonly style="opacity:0.6"' : ''}>
+                <button class="btn btn-sm btn-outline text-danger" onclick="this.parentElement.remove()">✕</button>
+            `;
+            container.appendChild(div);
+        }
+
         async function saveSettings() {
             try {
                 const s = {
@@ -4451,6 +4707,12 @@
                     welcome_message: document.getElementById('set_welcome_msg').value,
                     payment_modes: document.getElementById('set_payment_modes').value,
                     msg_choose_qty: document.getElementById('set_msg_qty').value,
+
+                    payment_modes_config: JSON.stringify(Array.from(document.querySelectorAll('.payment-mode-row')).map(row => ({
+                        icon: row.querySelector('.set-pm-icon').value,
+                        label: row.querySelector('.set-pm-label').value,
+                        id: row.querySelector('.set-pm-id').value.toUpperCase().replace(/\s+/g, '_')
+                    })).filter(pm => pm.id !== '')),
 
                     ui_icon_catalog: document.getElementById('set_ui_icon_catalog').value,
                     label_catalog: document.getElementById('set_label_catalog').value,
