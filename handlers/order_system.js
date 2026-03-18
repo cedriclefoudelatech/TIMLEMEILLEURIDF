@@ -10,7 +10,7 @@ const {
     getSupplierByTelegramId, getSupplierProducts, getSupplierOrders, markOrderSupplierReady,
     getSupplier, markOrderSupplierNotified
 } = require('../services/database');
-const { safeEdit, debugLog, trackIntermediateMessage, setActiveMediaGroup, clearActiveMediaGroup } = require('../services/utils');
+const { safeEdit, debugLog, trackIntermediateMessage, setActiveMediaGroup, clearActiveMediaGroup, getActiveMediaGroup } = require('../services/utils');
 const { createPersistentMap } = require('../services/persistent_map');
 const { notifyAdmins, notifyLivreurs, sendTelegramMessage } = require('../services/notifications');
 
@@ -181,51 +181,58 @@ function setupOrderSystem(bot) {
         const allMedia = getAllMediaUrls(product);
         const keyboard = Markup.inlineKeyboard([buttons, [Markup.button.callback(settings.btn_back_generic || '◀️ Retour', 'view_catalog')]]);
 
+        const userId = `${ctx.platform}_${ctx.from.id}`;
+        const existingMg = getActiveMediaGroup(userId);
+
         if (allMedia.length > 1 && ctx.platform === 'telegram' && ctx.telegram) {
-            // MULTI-IMAGE : media group + message texte/boutons séparé
-            const userId = `${ctx.platform}_${ctx.from.id}`;
-            const chatId = ctx.chat.id;
-            const currentMsg = ctx.callbackQuery?.message;
+            if (existingMg.length > 0) {
+                // RETOUR vers le produit : media group déjà visible → juste éditer le texte+boutons
+                await safeEdit(ctx, text, { ...keyboard });
+            } else {
+                // PREMIÈRE VISITE : créer media group + texte/boutons
+                const chatId = ctx.chat.id;
+                const currentMsg = ctx.callbackQuery?.message;
 
-            // Supprimer l'ancien message (le catalogue)
-            if (currentMsg) {
-                try { await ctx.telegram.deleteMessage(chatId, currentMsg.message_id).catch(() => {}); } catch(e) {}
-            }
-
-            try {
-                // Envoyer le media group
-                const mediaGroup = allMedia.slice(0, 10).map((m, i) => ({
-                    type: m.type === 'video' ? 'video' : 'photo',
-                    media: m.url,
-                    ...(i === 0 ? { caption: `📦 <b>${product.name}</b>`, parse_mode: 'HTML' } : {}),
-                    ...(m.type === 'video' ? { supports_streaming: true } : {})
-                }));
-                const mgMsgs = await ctx.telegram.sendMediaGroup(chatId, mediaGroup);
-
-                // Protéger le media group du cleanup
-                const mgIds = (mgMsgs || []).map(m => m.message_id).filter(Boolean);
-                setActiveMediaGroup(userId, mgIds);
-
-                // Tracker les messages du media group
-                for (const id of mgIds) {
-                    trackIntermediateMessage(userId, id);
-                    await addMessageToTrack(userId, id, false).catch(() => {});
+                // Supprimer l'ancien message (le catalogue)
+                if (currentMsg) {
+                    try { await ctx.telegram.deleteMessage(chatId, currentMsg.message_id).catch(() => {}); } catch(e) {}
                 }
 
-                // Message texte + boutons (seul ce message sera édité par la suite)
-                const btnMsg = await ctx.replyWithHTML(text, { ...keyboard });
-                const btnMsgId = btnMsg?.message_id || btnMsg?.messageId;
-                if (btnMsgId) {
-                    await addMessageToTrack(userId, btnMsgId, true).catch(() => {});
+                try {
+                    // Envoyer le media group
+                    const mediaGroup = allMedia.slice(0, 10).map((m, i) => ({
+                        type: m.type === 'video' ? 'video' : 'photo',
+                        media: m.url,
+                        ...(i === 0 ? { caption: `📦 <b>${product.name}</b>`, parse_mode: 'HTML' } : {}),
+                        ...(m.type === 'video' ? { supports_streaming: true } : {})
+                    }));
+                    const mgMsgs = await ctx.telegram.sendMediaGroup(chatId, mediaGroup);
+
+                    // Protéger le media group du cleanup
+                    const mgIds = (mgMsgs || []).map(m => m.message_id).filter(Boolean);
+                    setActiveMediaGroup(userId, mgIds);
+
+                    // Tracker les messages du media group
+                    for (const id of mgIds) {
+                        trackIntermediateMessage(userId, id);
+                        await addMessageToTrack(userId, id, false).catch(() => {});
+                    }
+
+                    // Message texte + boutons (seul ce message sera édité par la suite)
+                    const btnMsg = await ctx.replyWithHTML(text, { ...keyboard });
+                    const btnMsgId = btnMsg?.message_id || btnMsg?.messageId;
+                    if (btnMsgId) {
+                        await addMessageToTrack(userId, btnMsgId, true).catch(() => {});
+                    }
+                } catch (mgErr) {
+                    console.error('[PRODUCT] MediaGroup failed, fallback single:', mgErr.message);
+                    clearActiveMediaGroup(userId);
+                    await safeEdit(ctx, text, { ...keyboard, photo: allMedia[0].url });
                 }
-            } catch (mgErr) {
-                console.error('[PRODUCT] MediaGroup failed, fallback single:', mgErr.message);
-                clearActiveMediaGroup(userId);
-                await safeEdit(ctx, text, { ...keyboard, photo: allMedia[0].url });
             }
         } else {
             // 1 seule image ou pas d'image : edit-in-place classique
-            clearActiveMediaGroup(`${ctx.platform}_${ctx.from.id}`);
+            clearActiveMediaGroup(userId);
             await safeEdit(ctx, text, {
                 ...keyboard,
                 photo: allMedia.length > 0 ? allMedia[0].url : null

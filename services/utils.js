@@ -31,6 +31,10 @@ function clearActiveMediaGroup(userId) {
     _activeMediaGroup.delete(userId);
 }
 
+function getActiveMediaGroup(userId) {
+    return _activeMediaGroup.get(userId) || [];
+}
+
 function esc(str) {
     if (!str) return '';
     return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -313,4 +317,4 @@ function debugLog(msg) {
     console.log(msg);
 }
 
-module.exports = { safeEdit, debugLog, esc, trackIntermediateMessage, setActiveMediaGroup, clearActiveMediaGroup };
+module.exports = { safeEdit, debugLog, esc, trackIntermediateMessage, setActiveMediaGroup, clearActiveMediaGroup, getActiveMediaGroup };
