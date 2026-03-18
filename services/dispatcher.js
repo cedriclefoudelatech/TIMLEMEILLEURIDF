@@ -107,10 +107,24 @@ class Dispatcher {
         }
     }
 
+    _isPrivilegedUser(userId, user, settings) {
+        // Admin ou livreur = pas de protect_content
+        if (user?.is_livreur) return true;
+        const platformId = String(userId).includes('_') ? userId.split('_').slice(1).join('_') : userId;
+        const cleanId = String(platformId).match(/\d+/g)?.[0] || '';
+        const adminIds = String(settings?.admin_telegram_id || '').match(/\d+/g) || [];
+        const envAdmin = String(process.env.ADMIN_TELEGRAM_ID || '').match(/\d+/g)?.[0] || '';
+        const extraAdmins = (Array.isArray(settings?.list_admins) ? settings.list_admins : [])
+            .map(id => String(id).match(/\d+/g)?.[0]).filter(Boolean);
+        return adminIds.includes(cleanId) || extraAdmins.includes(cleanId) || cleanId === envAdmin;
+    }
+
     async _createUnifiedContext(channel, msg, normalizedFrom) {
         const userId = normalizedFrom || this._normalizeId(msg.from);
         const settings = await getAppSettings();
         
+        const _isPrivileged = this._isPrivilegedUser(userId, msg.user, settings);
+
         const ctx = {
             channel: channel,
             platform: channel.type, // 'telegram' ou 'whatsapp'
@@ -118,6 +132,7 @@ class Dispatcher {
             chat: { id: userId, type: 'private' },
             state: { user: msg.user, settings: settings },
             _handled: false,
+            _isPrivileged,
             message: { text: msg.text, photo: msg.photo, video: msg.video, message_id: msg.message_id || msg.rawId },
             updateType: msg.type || 'message',
             match: null,
@@ -174,6 +189,10 @@ class Dispatcher {
 
             reply: async (text, extra = {}) => {
                 ctx._handled = true;
+                // Telegram : protect_content pour les utilisateurs non-privilégiés
+                if (channel.type === 'telegram' && !_isPrivileged) {
+                    extra = { ...extra, protect_content: true };
+                }
                 const options = this._convertExtra(extra);
                 if (options.buttons) this.userLastButtons.set(userId, options.buttons);
                 
@@ -214,6 +233,9 @@ class Dispatcher {
             replyWithHTML: async (text, extra = {}) => ctx.reply(text, { ...extra, parse_mode: 'HTML' }),
             replyWithPhoto: async (photo, extra = {}) => {
                 ctx._handled = true;
+                if (channel.type === 'telegram' && !_isPrivileged) {
+                    extra = { ...extra, protect_content: true };
+                }
                 const options = this._convertExtra(extra);
                 if (options.buttons) this.userLastButtons.set(userId, options.buttons);
                 
@@ -235,6 +257,9 @@ class Dispatcher {
             },
             replyWithVideo: async (video, extra = {}) => {
                 ctx._handled = true;
+                if (channel.type === 'telegram' && !_isPrivileged) {
+                    extra = { ...extra, protect_content: true };
+                }
                 const options = this._convertExtra(extra);
                 if (options.buttons) this.userLastButtons.set(userId, options.buttons);
                 

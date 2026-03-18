@@ -121,6 +121,7 @@ class TelegramChannel extends Channel {
             const extra = { parse_mode: 'HTML' };
             if (options.reply_markup) extra.reply_markup = options.reply_markup;
             else if (options.inline_keyboard || options.keyboard) extra.reply_markup = options;
+            if (options.protect_content) extra.protect_content = true;
 
             await this.bot.telegram.sendMessage(chatId, finalMsg, extra);
             return { success: true };
@@ -135,6 +136,7 @@ class TelegramChannel extends Channel {
             const extra = { parse_mode: 'HTML', caption: caption };
             if (options.reply_markup) extra.reply_markup = options.reply_markup;
             else if (options.inline_keyboard || options.keyboard) extra.reply_markup = options;
+            if (options.protect_content) extra.protect_content = true;
 
             await this.bot.telegram.sendPhoto(chatId, this._resolveMedia(url), extra);
             return { success: true };
@@ -149,6 +151,7 @@ class TelegramChannel extends Channel {
             const extra = { parse_mode: 'HTML', caption: caption };
             if (options.reply_markup) extra.reply_markup = options.reply_markup;
             else if (options.inline_keyboard || options.keyboard) extra.reply_markup = options;
+            if (options.protect_content) extra.protect_content = true;
 
             await this.bot.telegram.sendVideo(chatId, this._resolveMedia(url), extra);
             return { success: true };
