@@ -3481,11 +3481,14 @@
 
                 if (id === 'overview' || id === 'insights' || !window.appStats) {
                     const statsTask = api('/stats', 'GET', null, silent).then(data => {
+                        console.log('[STATS] Received:', data);
                         window.appStats = data;
-                        if (document.getElementById('usersTotalCounter')) document.getElementById('usersTotalCounter').innerText = (data.totalUsers || 0) + ' clients';
-                        if (document.getElementById('livreursTotalCounter')) document.getElementById('livreursTotalCounter').innerText = (data.totalLivreurs || 0) + ' livreurs';
+                        if (data) {
+                            if (document.getElementById('usersTotalCounter')) document.getElementById('usersTotalCounter').innerText = (data.totalUsers || 0) + ' clients';
+                            if (document.getElementById('livreursTotalCounter')) document.getElementById('livreursTotalCounter').innerText = (data.totalLivreurs || 0) + ' livreurs';
+                        }
                         return data;
-                    }).catch(e => { console.warn("Stats failed", e); return null; });
+                    }).catch(e => { console.warn("[STATS] Failed:", e); return null; });
 
                     if (id === 'overview' || id === 'insights') {
                         await statsTask;
@@ -3494,7 +3497,7 @@
 
                 if (id === 'overview') {
                     const s = window.appStats;
-                    if (!s) return; // Prevent crash if stats failed
+                    if (!s) { console.warn('[STATS] appStats is null, showing defaults'); }
                     const setStat = (id, val) => {
                         const el = document.getElementById(id);
                         if (el) el.innerText = (val !== undefined && val !== null) ? val : '—';
