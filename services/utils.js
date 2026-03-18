@@ -5,6 +5,12 @@ const fs = require('fs');
 /**
  * L'Unique porte de sortie pour les menus du bot.
  * Garantit qu'un seul message de menu existe à la fois (Flux Constant).
+ *
+ * LOGIQUE CLÉ:
+ * - On ÉDITE toujours le message actuel (pas de delete+send).
+ * - Si l'edit est impossible (changement media<->texte), on envoie un nouveau
+ *   et on supprime UNIQUEMENT l'ancien message du menu (pas tout le chat).
+ * - tracked_messages ne contient que l'ID du message actif du menu.
  */
 function esc(str) {
     if (!str) return '';
@@ -12,23 +18,26 @@ function esc(str) {
 }
 
 async function safeEdit(ctx, text, opts = {}) {
-    const isGroup = ctx.chat.type !== 'private';
+    const isGroup = ctx.chat?.type !== 'private';
     const userId = isGroup ? `${ctx.platform}_${ctx.chat.id}` : `${ctx.platform}_${ctx.from.id}`;
-    const chatId = ctx.chat.id;
+    const chatId = ctx.chat?.id;
+
+    if (!chatId) {
+        console.error('[SAFE-EDIT] No chat ID available');
+        return;
+    }
 
     // 1. Médias & Clavier
     let photo = opts.photo || null;
     if (photo === '') photo = null;
-    console.log('[SAFE-EDIT] Received opts.photo:', opts.photo ? JSON.stringify(opts.photo).substring(0, 120) : null);
 
     let isDetectedVideo = false;
 
-    // Résolution Photo (Base URL si path relatif + Extraction Liste)
+    // Résolution Photo
     if (photo) {
         const settings = ctx.state?.settings || {};
         const baseUrl = (settings.dashboard_url || '').replace(/\/$/, '');
 
-        // Si c'est un tableau de photos, on prend la première
         if (Array.isArray(photo)) {
             if (photo.length > 0) {
                 const p0 = photo[0];
@@ -55,24 +64,21 @@ async function safeEdit(ctx, text, opts = {}) {
             } else photo = cp;
         }
 
-        // Final check: if relative path (not URL, not file_id), add baseUrl
-        // On considère que c'est un file_id si ça n'a pas de / ni de .
         const isFileId = photo && typeof photo === 'string' && !photo.includes('/') && !photo.includes('.');
 
         if (photo && typeof photo === 'string' && !photo.startsWith('http') && !photo.startsWith('data:') && !isFileId) {
-            // Résolution chemin local absolu pour upload direct (plus fiable que URL si local)
             const relativePath = photo.startsWith('/public/') ? photo.replace('/public/', 'web/public/') : photo;
             const absolutePath = path.resolve(process.cwd(), relativePath.startsWith('/') ? relativePath.substring(1) : relativePath);
-            
+
             if (fs.existsSync(absolutePath)) {
-                console.log('[SAFE-EDIT] Local file detected, using absolute path:', absolutePath);
                 photo = absolutePath;
             } else {
+                const settings = ctx.state?.settings || {};
+                const baseUrl = (settings.dashboard_url || '').replace(/\/$/, '');
                 photo = baseUrl + (photo.startsWith('/') ? '' : '/') + photo;
             }
         }
 
-        // Auto-detection: Si l'URL de la photo est en réalité une vidéo
         const videoExts = ['.mp4', '.mov', '.avi', '.mkv', '.webm'];
         if (isDetectedVideo || (photo && typeof photo === 'string' && videoExts.some(ext => photo.toLowerCase().endsWith(ext)))) {
             if (!opts.video) opts.video = photo;
@@ -85,93 +91,108 @@ async function safeEdit(ctx, text, opts = {}) {
     if (video && typeof video === 'string' && !video.startsWith('http') && !video.startsWith('data:')) {
          const settings = ctx.state?.settings || {};
          const baseUrl = (settings.dashboard_url || '').replace(/\/$/, '');
-         if (!video.includes('/') && !video.includes('.')) { /* file_id, do nothing */ }
+         if (!video.includes('/') && !video.includes('.')) { /* file_id */ }
          else {
              const relativePath = video.startsWith('/public/') ? video.replace('/public/', 'web/public/') : video;
              const absolutePath = path.resolve(process.cwd(), relativePath.startsWith('/') ? relativePath.substring(1) : relativePath);
-             
+
              if (fs.existsSync(absolutePath)) {
-                 console.log('[SAFE-EDIT] Local video detected, using absolute path:', absolutePath);
                  video = absolutePath;
              } else {
                  video = baseUrl + (video.startsWith('/') ? '' : '/') + video;
              }
          }
     }
+
     let reply_markup = opts.reply_markup || (opts.inline_keyboard ? opts : (Array.isArray(opts) ? { inline_keyboard: opts } : null));
     if (reply_markup && reply_markup.reply_markup) reply_markup = reply_markup.reply_markup;
     const extra = { parse_mode: 'HTML', disable_web_page_preview: true, reply_markup };
 
     const currentMsg = ctx.callbackQuery?.message;
 
-    // Fonction de nettoyage asynchrone pour ne pas ralentir le bot
-    const runCleanup = async (newId) => {
+    // Fonction pour supprimer UN SEUL message (l'ancien menu)
+    const deleteSingleMessage = async (messageId) => {
+        if (!messageId) return;
         try {
-            const userObj = await getUser(userId).catch(() => null);
-            if (!userObj) return;
-
-            const toDelete = new Set();
-            if (currentMsg) toDelete.add(String(currentMsg.message_id || currentMsg.messageId));
-            if (userObj.last_menu_id) toDelete.add(String(userObj.last_menu_id));
-            if (userObj.tracked_messages) {
-                userObj.tracked_messages.forEach(mid => { if (mid) toDelete.add(String(mid)); });
-            }
-            if (newId) toDelete.delete(String(newId));
-
-            for (const mid of toDelete) {
-                if (ctx.platform === 'telegram') {
-                    // Telegram: suppression via l'instance Telegraf
-                    ctx.telegram.deleteMessage(chatId, mid).catch(() => { });
-                } else if (ctx.platform === 'whatsapp') {
-                    // WhatsApp: suppression via le canal
-                    ctx.channel.deleteMessage(chatId, mid).catch(() => { });
-                }
+            if (ctx.platform === 'telegram' && ctx.telegram) {
+                await ctx.telegram.deleteMessage(chatId, messageId).catch(() => { });
+            } else if (ctx.platform === 'whatsapp' && ctx.channel) {
+                await ctx.channel.deleteMessage(chatId, messageId).catch(() => { });
             }
         } catch (e) { }
     };
 
     try {
-        // A. TENTATIVE D'EDIT (Telegram Uniquement)
+        // ═══════════════════════════════════════════════════
+        // A. TENTATIVE D'EDIT — C'est la méthode PRIORITAIRE
+        // ═══════════════════════════════════════════════════
         if (currentMsg && ctx.telegram) {
+            const currentMsgId = currentMsg.message_id;
             const isMediaMsg = !!(currentMsg.photo || currentMsg.video);
             const wantMedia = !!(photo || video);
 
+            // CAS 1 : Même type (texte→texte ou media→media) → EDIT direct
             if (isMediaMsg === wantMedia) {
                 try {
                     if (!wantMedia) {
-                        await ctx.telegram.editMessageText(chatId, currentMsg.message_id, null, text, extra);
+                        await ctx.telegram.editMessageText(chatId, currentMsgId, null, text, extra);
                     } else {
-                        await ctx.telegram.editMessageMedia(chatId, currentMsg.message_id, null, {
+                        await ctx.telegram.editMessageMedia(chatId, currentMsgId, null, {
                             type: photo ? 'photo' : 'video',
                             media: photo || video,
                             caption: text,
                             parse_mode: 'HTML'
                         }, { reply_markup });
                     }
-                    await addMessageToTrack(userId, currentMsg.message_id).catch(() => { });
-                    runCleanup(currentMsg.message_id); // Toujours nettoyer même sur Edit réussi
+                    // Edit réussi → on met à jour le tracking avec CE message uniquement
+                    await addMessageToTrack(userId, currentMsgId).catch(() => { });
+                    // PAS de cleanup agressif — le message a été édité en place !
                     return;
                 } catch (e) {
                     if (String(e.description || '').includes('not modified')) return;
-                    console.warn('safeEdit: edit failed, fallback to send', e.message);
+                    console.warn('[SAFE-EDIT] Edit failed, fallback to send:', e.message);
                 }
             }
-        }
 
-        // B. ENVOI DU NOUVEAU
-        let newMsg;
-        if (photo || video) {
-            console.log('[SAFE-EDIT] Sending media, photo URL:', photo ? String(photo).substring(0, 80) : null);
+            // CAS 2 : Type différent (texte→media ou media→texte) → Delete ancien + Send nouveau
+            // On supprime UNIQUEMENT l'ancien message du menu, rien d'autre
+            let newMsg;
             try {
-                if (photo) newMsg = await ctx.replyWithPhoto(photo, { caption: text, ...extra });
-                else newMsg = await ctx.replyWithVideo(video, { caption: text, ...extra });
-                // Si le média a échoué (returned falsy or no messageId) → fallback texte
-                if (newMsg && !newMsg.message_id && !newMsg.messageId && newMsg.success === false) {
-                    console.warn('[SAFE-EDIT] Media renvoyé mais marqué failed, fallback texte');
+                if (photo || video) {
+                    if (photo) newMsg = await ctx.replyWithPhoto(photo, { caption: text, ...extra });
+                    else newMsg = await ctx.replyWithVideo(video, { caption: text, ...extra });
+                } else {
                     newMsg = await ctx.replyWithHTML(text, extra);
                 }
             } catch (err) {
-                console.error('[SAFE-EDIT] Media Send FAILED:', err.message, '| photo was:', photo ? String(photo).substring(0, 100) : null);
+                console.error('[SAFE-EDIT] Send failed:', err.message);
+                newMsg = await ctx.replyWithHTML(text, extra);
+            }
+
+            const newMsgId = newMsg?.message_id || newMsg?.messageId;
+            if (newMsgId) {
+                // Supprimer l'ancien message du menu uniquement
+                deleteSingleMessage(currentMsgId);
+                // Tracker le nouveau comme seul message actif
+                await addMessageToTrack(userId, newMsgId).catch(() => { });
+            }
+            return;
+        }
+
+        // ═══════════════════════════════════════════════════
+        // B. PAS DE CALLBACK (premier envoi, ou WhatsApp)
+        //    → Send nouveau + supprimer l'ancien menu
+        // ═══════════════════════════════════════════════════
+        let newMsg;
+        if (photo || video) {
+            try {
+                if (photo) newMsg = await ctx.replyWithPhoto(photo, { caption: text, ...extra });
+                else newMsg = await ctx.replyWithVideo(video, { caption: text, ...extra });
+                if (newMsg && !newMsg.message_id && !newMsg.messageId && newMsg.success === false) {
+                    newMsg = await ctx.replyWithHTML(text, extra);
+                }
+            } catch (err) {
+                console.error('[SAFE-EDIT] Media failed:', err.message);
                 newMsg = await ctx.replyWithHTML(text, extra);
             }
         } else {
@@ -179,14 +200,15 @@ async function safeEdit(ctx, text, opts = {}) {
         }
 
         if (newMsg) {
-            // Sur WA message_id est dans res, sur TG c'est direct (messageId depuis sendMessage/sendPhoto)
-            const msgId = newMsg.message_id || newMsg.messageId;
-            if (msgId) {
-                await addMessageToTrack(userId, msgId).catch(() => { });
-                runCleanup(msgId);
-            } else if (currentMsg && currentMsg.message_id) {
-                // Fallback: si pas de messageId retourné mais on a le msg précédent, nettoyer quand même
-                runCleanup(null);
+            const newMsgId = newMsg.message_id || newMsg.messageId;
+            if (newMsgId) {
+                // Récupérer l'ancien message du menu pour le supprimer
+                const oldMenuId = await getLastMenuId(userId).catch(() => null);
+                if (oldMenuId && String(oldMenuId) !== String(newMsgId)) {
+                    deleteSingleMessage(oldMenuId);
+                }
+                // Tracker le nouveau
+                await addMessageToTrack(userId, newMsgId).catch(() => { });
             }
         }
 
@@ -196,10 +218,7 @@ async function safeEdit(ctx, text, opts = {}) {
             const fb = await ctx.replyWithHTML(text, extra);
             if (fb) {
                 const fbId = fb.message_id || fb.messageId;
-                if (fbId) {
-                    await addMessageToTrack(userId, fbId).catch(() => { });
-                    runCleanup(fbId);
-                }
+                if (fbId) await addMessageToTrack(userId, fbId).catch(() => { });
             }
         } catch (err) { }
     }

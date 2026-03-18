@@ -409,18 +409,10 @@ async function addMessageToTrack(docId, messageId) {
     const user = await getUser(docId);
     if (!user) return;
 
-    // Stratégie : Garder un historique plus large pour garantir le nettoyage
-    let tracked = user.tracked_messages || [];
-    if (!tracked.includes(messageId)) {
-        tracked.push(messageId);
-        // Limiter à 50 messages maximum pour éviter de saturer la DB tout en gardant assez d'historique pour le nettoyage
-        if (tracked.length > 50) {
-            tracked = tracked.slice(-50); 
-        }
-    }
-
+    // Stratégie : On ne garde que le message actif du menu (1 seul).
+    // Plus de liste de 50 messages → plus de suppression massive du chat.
     await supabase.from(COL_USERS).update({
-        tracked_messages: tracked,
+        tracked_messages: [messageId],
         last_menu_id: messageId
     }).eq('id', docId);
 
