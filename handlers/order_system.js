@@ -749,8 +749,7 @@ function setupOrderSystem(bot) {
 
         if (!pModes || pModes.length === 0) {
             pModes = [
-                { id: 'CASH', label: 'Espèces', icon: '💵' },
-                { id: 'CARD', label: 'Carte Bancaire', icon: '💳' }
+                { id: 'CASH', label: 'Espèces', icon: '💵' }
             ];
         }
 

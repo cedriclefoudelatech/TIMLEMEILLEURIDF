@@ -1,5 +1,5 @@
 -- Add payment_modes_config and other missing customizable messages to bot_settings
-ALTER TABLE public.bot_settings ADD COLUMN IF NOT EXISTS payment_modes_config jsonb DEFAULT '[{"id": "CASH", "label": "Espèces", "icon": "💵"}, {"id": "CARD", "label": "Carte Bancaire", "icon": "💳"}]'::jsonb;
+ALTER TABLE public.bot_settings ADD COLUMN IF NOT EXISTS payment_modes_config jsonb DEFAULT '[{"id": "CASH", "label": "Espèces", "icon": "💵"}]'::jsonb;
 
 -- Ensure all current bot texts are columns if they are not yet
 ALTER TABLE public.bot_settings ADD COLUMN IF NOT EXISTS msg_order_received_admin text;

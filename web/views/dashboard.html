@@ -2406,7 +2406,7 @@
                 <textarea id="set_welcome_msg" style="height:100px;"></textarea>
                 <label>Modes de paiement acceptés</label>
                 <input id="set_payment_modes" placeholder="💵 Espèces">
-                <small style="color:#888;">Affiché dans le message de bienvenue. Ex: 💵 Espèces, 💳 CB</small>
+                <small style="color:#888;">Affiché dans le message de bienvenue. Ex: 💵 Espèces</small>
 
                 <label>Message de sélection quantité</label>
                 <input id="set_msg_qty" placeholder="Choisissez la quantité souhaitée :">
@@ -3524,7 +3524,6 @@
                     if (!pModes || pModes.length === 0) {
                         // Defaults
                         addPaymentModeRow({id:'CASH', label:'Espèces', icon:'💵'});
-                        addPaymentModeRow({id:'CARD', label:'Carte Bancaire', icon:'💳'});
                     } else {
                         pModes.forEach(m => addPaymentModeRow(m));
                     }
