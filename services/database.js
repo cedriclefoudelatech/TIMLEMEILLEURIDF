@@ -1206,7 +1206,72 @@ const SETTINGS_DEFAULTS = {
     msg_welcome_back: '',
     msg_order_notif_livreur: '',
     ui_icon_leave_review: '⭐️',
-    ui_icon_view_reviews: '👥'
+    ui_icon_view_reviews: '👥',
+
+    // === BOUTONS DE NAVIGATION ===
+    btn_back_generic: '◀️ Retour',
+    btn_back_to_cart: '◀️ Retour Panier',
+    btn_back_to_qty: '◀️ Retour Quantité',
+    btn_back_to_address: '◀️ Retour Adresse',
+    btn_back_to_options: '◀️ Retour aux options',
+    btn_back_quick_menu: '◀️ Menu',
+    btn_back_to_livreur_menu: '◀️ Menu Livreur',
+    btn_back_main_menu_alt: '◀️ Menu principal',
+    btn_cancel: '◀️ Annuler',
+    btn_modify_address: '◀️ Modifier l\'adresse',
+    btn_modify_delivery: '◀️ Modifier livraison',
+    btn_later: '◀️ Plus tard',
+    btn_next: 'Suivant ➡️',
+    btn_previous: '⬅️ Précédent',
+
+    // === BOUTONS D'ACTION ===
+    btn_clear_cart: '❌ Vider le panier',
+    btn_cancel_alt: '❌ Annuler',
+    btn_cancel_order: '❌ Annuler la commande',
+    btn_cancel_my_order: '❌ Annuler ma commande',
+    btn_abandon_delivery: '❌ Abandonner la livraison',
+    btn_dont_use_credit: '❌ Non, payer plein tarif',
+    btn_send_now: '✅ Envoyer maintenant',
+    btn_set_available: '✅ Passer en Disponible',
+    btn_leave_review_alt: '⭐️ Laisser un avis / Commentaire',
+    btn_leave_review_simple: '⭐️ Laisser un avis',
+    btn_help_support: '❓ Aide & Support',
+    btn_where_is_delivery: '⏳ Où en est ma livraison ?',
+    btn_notify_30min: '⏳ 30 min',
+    btn_notify_10min: '⏳ 10 min',
+
+    // === NOTES / ÉTOILES ===
+    btn_rate_5: '⭐️⭐️⭐️⭐️⭐️ Excellent',
+    btn_rate_4: '⭐️⭐️⭐️⭐️ Très bien',
+    btn_rate_3: '⭐️⭐️⭐️ Bien',
+    btn_rate_1: '⭐️ Moyen / Insatisfait',
+
+    // === MESSAGES D'ERREUR ===
+    msg_session_expired: '❌ Session expirée.',
+    msg_product_not_found: '❌ Produit non trouvé.',
+    msg_order_not_available: '❌ Cette commande n\'est plus disponible.',
+    msg_order_not_found: '❌ Commande introuvable.',
+    msg_order_creation_error: '❌ Erreur lors de la création de la commande...',
+    msg_not_livreur: '❌ Vous n\'êtes pas livreur.',
+    msg_access_denied: '❌ Accès refusé.',
+    msg_error_fetching_orders: '❌ Erreur lors de la récupération de vos commandes.',
+    msg_error_fetching_history: '❌ Erreur lors de la récupération de l\'historique.',
+    msg_position_usage: '❌ Usage: /ma_position [ville]',
+
+    // === MESSAGES VIDES ===
+    msg_catalog_empty: '📭 Le catalogue est actuellement vide.',
+    msg_cart_empty: '📭 Votre panier est vide.',
+    msg_no_reviews_yet: '📭 Aucun avis pour le moment. Soyez le premier !',
+    msg_no_information: '📭 Aucune information à afficher pour le moment.',
+    msg_no_active_deliveries: '📭 Aucune livraison en cours.',
+    msg_empty_delivery_history: '📭 Votre historique de livraison est vide.',
+    msg_no_active_orders: '📭 Vous n\'avez aucune commande active.',
+
+    // === MESSAGES DE CONFIRMATION ===
+    msg_cart_cleared: '✅ Panier vidé !',
+    msg_thanks_for_feedback: '🙏 Merci pour votre note !',
+    msg_location_updated: '📍 Secteur mis à jour',
+    msg_livreur_welcome: '🚴 <b>Bienvenue dans l\'équipe de livraison !</b>'
 };
 
 let _settingsCache = null;

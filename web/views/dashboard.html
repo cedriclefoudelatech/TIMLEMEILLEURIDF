@@ -1856,6 +1856,34 @@
 
         <!-- PRODUCTS -->
         <section class="section" id="section-products">
+            <!-- ONBOARDING GUIDE -->
+            <div id="product-onboarding" class="card" style="margin-bottom:20px; border:1px solid rgba(255,0,80,0.15); background:linear-gradient(135deg, rgba(255,0,80,0.05), rgba(0,191,255,0.03));">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <h3 style="margin:0; font-size:16px;">📖 Guide rapide — Produits</h3>
+                    <button class="btn btn-sm btn-outline" onclick="this.closest('#product-onboarding').style.display='none'; localStorage.setItem('hideProductGuide','1');" style="font-size:11px; padding:4px 10px;">Masquer</button>
+                </div>
+                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:12px; margin-top:14px;">
+                    <div style="background:rgba(255,255,255,0.03); padding:12px; border-radius:10px; border-left:3px solid var(--accent);">
+                        <b style="font-size:13px;">1. Créer un produit</b>
+                        <p style="font-size:11px; opacity:0.7; margin:4px 0 0 0;">Remplissez <b>Nom</b> et <b>Prix</b> (obligatoires) puis ajoutez des photos/vidéos. Les options avancées (unité, promo, offres) sont facultatives.</p>
+                    </div>
+                    <div style="background:rgba(255,255,255,0.03); padding:12px; border-radius:10px; border-left:3px solid #00bfff;">
+                        <b style="font-size:13px;">2. Médias</b>
+                        <p style="font-size:11px; opacity:0.7; margin:4px 0 0 0;">Ajoutez autant de <b>photos et vidéos</b> que vous voulez. La 1ère image sera la miniature visible par le client sur Telegram.</p>
+                    </div>
+                    <div style="background:rgba(255,255,255,0.03); padding:12px; border-radius:10px; border-left:3px solid orange;">
+                        <b style="font-size:13px;">3. Offres spéciales</b>
+                        <p style="font-size:11px; opacity:0.7; margin:4px 0 0 0;"><b>Cadeau gratuit</b> : « 2 achetés = 1 offert ». <b>Prix dégressifs</b> : plus le client achète, moins c'est cher (paliers).</p>
+                    </div>
+                    <div style="background:rgba(255,255,255,0.03); padding:12px; border-radius:10px; border-left:3px solid #4caf50;">
+                        <b style="font-size:13px;">4. Gérer & Trier</b>
+                        <p style="font-size:11px; opacity:0.7; margin:4px 0 0 0;">Dans la <b>Liste</b>, glissez ≡ pour réordonner. Cliquez sur une carte pour modifier. Les badges 🎁📉 s'affichent si activés.</p>
+                    </div>
+                </div>
+                <p style="font-size:10px; opacity:0.4; margin:10px 0 0 0; text-align:center;">💡 Astuce : Tous les textes et boutons visibles par le client sont modifiables dans Paramètres → Textes</p>
+            </div>
+            <script>if(localStorage.getItem('hideProductGuide')==='1'){document.getElementById('product-onboarding').style.display='none';}</script>
+
             <div class="section-header flex flex-mobile-column justify-between items-center" style="margin-bottom:24px; gap:15px;">
                 <div style="display:flex; background:var(--hover); padding:4px; border-radius:12px; gap:4px;">
                     <button class="btn btn-sm btn-outline active" id="btn-tab-prod-add" onclick="switchProductTab('add')">➕ Ajouter</button>
@@ -2666,11 +2694,203 @@
                         <input id="set_btn_client_mode">
                     </div>
                     <div>
-                        <label>Texte : Participation Sondage</label>
+                        <label>Bouton : Retour (générique)</label>
+                        <input id="set_btn_back_generic">
+                    </div>
+                    <div>
+                        <label>Bouton : Menu rapide</label>
+                        <input id="set_btn_back_quick_menu">
+                    </div>
+                    <div>
+                        <label>Bouton : Retour Panier</label>
+                        <input id="set_btn_back_to_cart">
+                    </div>
+                    <div>
+                        <label>Bouton : Retour Quantité</label>
+                        <input id="set_btn_back_to_qty">
+                    </div>
+                    <div>
+                        <label>Bouton : Retour Adresse</label>
+                        <input id="set_btn_back_to_address">
+                    </div>
+                    <div>
+                        <label>Bouton : Retour Options</label>
+                        <input id="set_btn_back_to_options">
+                    </div>
+                    <div>
+                        <label>Bouton : Menu Livreur</label>
+                        <input id="set_btn_back_to_livreur_menu">
+                    </div>
+                    <div>
+                        <label>Bouton : Suivant</label>
+                        <input id="set_btn_next">
+                    </div>
+                    <div>
+                        <label>Bouton : Précédent</label>
+                        <input id="set_btn_previous">
+                    </div>
+                </div>
+
+                <h4 style="color:var(--accent); border-bottom:1px solid var(--border); padding-bottom:5px; margin-top:25px;">Boutons d'Action</h4>
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px; margin-top:10px;">
+                    <div>
+                        <label>Vider le panier</label>
+                        <input id="set_btn_clear_cart">
+                    </div>
+                    <div>
+                        <label>Annuler commande</label>
+                        <input id="set_btn_cancel_order">
+                    </div>
+                    <div>
+                        <label>Annuler ma commande</label>
+                        <input id="set_btn_cancel_my_order">
+                    </div>
+                    <div>
+                        <label>Abandonner livraison</label>
+                        <input id="set_btn_abandon_delivery">
+                    </div>
+                    <div>
+                        <label>Envoyer maintenant</label>
+                        <input id="set_btn_send_now">
+                    </div>
+                    <div>
+                        <label>Aide & Support</label>
+                        <input id="set_btn_help_support">
+                    </div>
+                    <div>
+                        <label>Où est ma livraison</label>
+                        <input id="set_btn_where_is_delivery">
+                    </div>
+                    <div>
+                        <label>Annuler (générique)</label>
+                        <input id="set_btn_cancel">
+                    </div>
+                    <div>
+                        <label>Annuler (❌)</label>
+                        <input id="set_btn_cancel_alt">
+                    </div>
+                    <div>
+                        <label>Payer plein tarif</label>
+                        <input id="set_btn_dont_use_credit">
+                    </div>
+                    <div>
+                        <label>Passer disponible</label>
+                        <input id="set_btn_set_available">
+                    </div>
+                    <div>
+                        <label>Notif 30 min</label>
+                        <input id="set_btn_notify_30min">
+                    </div>
+                    <div>
+                        <label>Notif 10 min</label>
+                        <input id="set_btn_notify_10min">
+                    </div>
+                </div>
+
+                <h4 style="color:var(--accent); border-bottom:1px solid var(--border); padding-bottom:5px; margin-top:25px;">Étoiles / Notes</h4>
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px; margin-top:10px;">
+                    <div>
+                        <label>5 étoiles</label>
+                        <input id="set_btn_rate_5">
+                    </div>
+                    <div>
+                        <label>4 étoiles</label>
+                        <input id="set_btn_rate_4">
+                    </div>
+                    <div>
+                        <label>3 étoiles</label>
+                        <input id="set_btn_rate_3">
+                    </div>
+                    <div>
+                        <label>1 étoile</label>
+                        <input id="set_btn_rate_1">
+                    </div>
+                </div>
+
+                <h4 style="color:var(--accent); border-bottom:1px solid var(--border); padding-bottom:5px; margin-top:25px;">Messages d'Erreur</h4>
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px; margin-top:10px;">
+                    <div>
+                        <label>Session expirée</label>
+                        <input id="set_msg_session_expired">
+                    </div>
+                    <div>
+                        <label>Produit non trouvé</label>
+                        <input id="set_msg_product_not_found">
+                    </div>
+                    <div>
+                        <label>Commande non dispo</label>
+                        <input id="set_msg_order_not_available">
+                    </div>
+                    <div>
+                        <label>Commande introuvable</label>
+                        <input id="set_msg_order_not_found">
+                    </div>
+                    <div>
+                        <label>Erreur création commande</label>
+                        <input id="set_msg_order_creation_error">
+                    </div>
+                    <div>
+                        <label>Pas livreur</label>
+                        <input id="set_msg_not_livreur">
+                    </div>
+                    <div>
+                        <label>Accès refusé</label>
+                        <input id="set_msg_access_denied">
+                    </div>
+                </div>
+
+                <h4 style="color:var(--accent); border-bottom:1px solid var(--border); padding-bottom:5px; margin-top:25px;">Messages États Vides</h4>
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px; margin-top:10px;">
+                    <div>
+                        <label>Catalogue vide</label>
+                        <input id="set_msg_catalog_empty">
+                    </div>
+                    <div>
+                        <label>Panier vide</label>
+                        <input id="set_msg_cart_empty">
+                    </div>
+                    <div>
+                        <label>Aucun avis</label>
+                        <input id="set_msg_no_reviews_yet">
+                    </div>
+                    <div>
+                        <label>Aucune information</label>
+                        <input id="set_msg_no_information">
+                    </div>
+                    <div>
+                        <label>Aucune livraison</label>
+                        <input id="set_msg_no_active_deliveries">
+                    </div>
+                    <div>
+                        <label>Historique vide</label>
+                        <input id="set_msg_empty_delivery_history">
+                    </div>
+                    <div>
+                        <label>Pas de commande active</label>
+                        <input id="set_msg_no_active_orders">
+                    </div>
+                    <div>
+                        <label>Panier vidé !</label>
+                        <input id="set_msg_cart_cleared">
+                    </div>
+                    <div>
+                        <label>Merci pour la note</label>
+                        <input id="set_msg_thanks_for_feedback">
+                    </div>
+                    <div>
+                        <label>Secteur mis à jour</label>
+                        <input id="set_msg_location_updated">
+                    </div>
+                    <div>
+                        <label>Bienvenue livreur</label>
+                        <textarea id="set_msg_livreur_welcome" style="height:60px;"></textarea>
+                    </div>
+                    <div>
+                        <label>Participation Sondage</label>
                         <input id="set_msg_thanks_participation">
                     </div>
                     <div>
-                        <label>Texte : Votre réponse</label>
+                        <label>Votre réponse</label>
                         <input id="set_msg_your_answer">
                     </div>
                 </div>
@@ -3670,6 +3890,25 @@
                     document.getElementById('set_label_reviews').value = s.label_reviews || '';
                     document.getElementById('set_label_users').value = s.label_users || '';
                     document.getElementById('set_default_wa_name').value = s.default_wa_name || '';
+
+                    // Chargement dynamique de tous les nouveaux champs (boutons, messages, etc.)
+                    const dynFields = [
+                        'btn_back_generic','btn_back_quick_menu','btn_back_to_cart','btn_back_to_qty',
+                        'btn_back_to_address','btn_back_to_options','btn_back_to_livreur_menu','btn_next','btn_previous',
+                        'btn_clear_cart','btn_cancel_order','btn_cancel_my_order','btn_abandon_delivery',
+                        'btn_send_now','btn_help_support','btn_where_is_delivery','btn_cancel','btn_cancel_alt',
+                        'btn_dont_use_credit','btn_set_available','btn_notify_30min','btn_notify_10min',
+                        'btn_rate_5','btn_rate_4','btn_rate_3','btn_rate_1',
+                        'msg_session_expired','msg_product_not_found','msg_order_not_available','msg_order_not_found',
+                        'msg_order_creation_error','msg_not_livreur','msg_access_denied',
+                        'msg_catalog_empty','msg_cart_empty','msg_no_reviews_yet','msg_no_information',
+                        'msg_no_active_deliveries','msg_empty_delivery_history','msg_no_active_orders',
+                        'msg_cart_cleared','msg_thanks_for_feedback','msg_location_updated','msg_livreur_welcome'
+                    ];
+                    dynFields.forEach(key => {
+                        const el = document.getElementById('set_' + key);
+                        if (el) el.value = s[key] || '';
+                    });
                 }
             } catch (err) {
                 console.error('[LOAD DATA] Error:', err);
@@ -4836,6 +5075,26 @@
                     msg_thanks_participation: document.getElementById('set_msg_thanks_participation').value,
                     msg_your_answer: document.getElementById('set_msg_your_answer').value
                 };
+
+                // Ajout dynamique de tous les nouveaux champs de contenu
+                const dynFields = [
+                    'btn_back_generic','btn_back_quick_menu','btn_back_to_cart','btn_back_to_qty',
+                    'btn_back_to_address','btn_back_to_options','btn_back_to_livreur_menu','btn_next','btn_previous',
+                    'btn_clear_cart','btn_cancel_order','btn_cancel_my_order','btn_abandon_delivery',
+                    'btn_send_now','btn_help_support','btn_where_is_delivery','btn_cancel','btn_cancel_alt',
+                    'btn_dont_use_credit','btn_set_available','btn_notify_30min','btn_notify_10min',
+                    'btn_rate_5','btn_rate_4','btn_rate_3','btn_rate_1',
+                    'msg_session_expired','msg_product_not_found','msg_order_not_available','msg_order_not_found',
+                    'msg_order_creation_error','msg_not_livreur','msg_access_denied',
+                    'msg_catalog_empty','msg_cart_empty','msg_no_reviews_yet','msg_no_information',
+                    'msg_no_active_deliveries','msg_empty_delivery_history','msg_no_active_orders',
+                    'msg_cart_cleared','msg_thanks_for_feedback','msg_location_updated','msg_livreur_welcome'
+                ];
+                dynFields.forEach(key => {
+                    const el = document.getElementById('set_' + key);
+                    if (el && el.value) s[key] = el.value;
+                });
+
                 await api('/settings', 'POST', s);
                 showToast('Paramètres mis à jour !');
                 // Recharger les settings depuis le serveur pour confirmation

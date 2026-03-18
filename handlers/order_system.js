@@ -65,11 +65,10 @@ function setupOrderSystem(bot) {
 
     async function displayCatalog(ctx) {
         const products = await getProducts();
-        if (!products || products.length === 0) {
-            return safeEdit(ctx, '📭 Le catalogue est actuellement vide.', Markup.inlineKeyboard([[Markup.button.callback('◀️ Retour', 'main_menu')]]));
-        }
-
         const settings = ctx.state?.settings || await getAppSettings();
+        if (!products || products.length === 0) {
+            return safeEdit(ctx, settings.msg_catalog_empty || '📭 Le catalogue est actuellement vide.', Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_generic || '◀️ Retour', 'main_menu')]]));
+        }
         const catalogIcon = settings.ui_icon_catalog || '📦';
         const botName = settings.bot_name || 'Bot';
         const catalogTitle = settings.label_catalog_title || `${catalogIcon} <b>Catalogue ${botName}</b>`;
@@ -98,7 +97,7 @@ function setupOrderSystem(bot) {
         const product = products.find(p => p.id === productId);
         const settings = ctx.state.settings || await getAppSettings();
 
-        if (!product) return safeEdit(ctx, '❌ Produit non trouvé.', [Markup.button.callback(settings.btn_back_menu || '◀️ Retour Menu', 'view_catalog')]);
+        if (!product) return safeEdit(ctx, settings.msg_product_not_found || '❌ Produit non trouvé.', [Markup.button.callback(settings.btn_back_menu || '◀️ Retour Menu', 'view_catalog')]);
 
         let promoText = "";
         if (product.is_bundle) {
@@ -127,7 +126,7 @@ function setupOrderSystem(bot) {
         );
 
         await safeEdit(ctx, text, {
-            ...Markup.inlineKeyboard([buttons, [Markup.button.callback('◀️ Retour', 'view_catalog')]]),
+            ...Markup.inlineKeyboard([buttons, [Markup.button.callback(settings.btn_back_generic || '◀️ Retour', 'view_catalog')]]),
             photo: product.image_url || null
         });
     });
@@ -143,7 +142,7 @@ function setupOrderSystem(bot) {
 
         if (!product) {
             console.error(`❌ Product not found: ${productId}. Available:`, products.map(p => p.id).join(', '));
-            return safeEdit(ctx, '❌ Produit non trouvé.', Markup.inlineKeyboard([[Markup.button.callback('◀️ Retour', 'view_catalog')]]));
+            return safeEdit(ctx, settings.msg_product_not_found || '❌ Produit non trouvé.', Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_generic || '◀️ Retour', 'view_catalog')]]));
         }
 
         // Calcul du prix avec gestion des paliers dégressifs
@@ -191,8 +190,9 @@ function setupOrderSystem(bot) {
 
     async function showAddToCartChoice(ctx, product, qty, totalPrice, unitAmount = null) {
         const userId = ctx.from.id;
+        const settings = ctx.state?.settings || await getAppSettings();
         const pending = pendingOrders.get(userId);
-        if (!pending) return safeEdit(ctx, "❌ Session expirée.", Markup.inlineKeyboard([[Markup.button.callback('◀️ Menu', 'main_menu')]]));
+        if (!pending) return safeEdit(ctx, settings.msg_session_expired || "❌ Session expirée.", Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_quick_menu || '◀️ Menu', 'main_menu')]]));
         if (unitAmount) pending.chosen_unit_amount = unitAmount;
 
         const text = `🛒 <b>Sélection : ${qty}x ${product.name}${unitAmount ? ` (${unitAmount})` : ''}</b>\n` +
@@ -203,7 +203,7 @@ function setupOrderSystem(bot) {
             [Markup.button.callback('🛒 Ajouter au panier', 'add_to_cart')],
             [Markup.button.callback('💳 Régler maintenant', 'checkout_now')],
             [Markup.button.callback('⭐️ Laisser un avis / Commentaire', 'leave_review')],
-            [Markup.button.callback('◀️ Retour', `product_${product.id}`)]
+            [Markup.button.callback(settings.btn_back_generic || '◀️ Retour', `product_${product.id}`)]
         ];
 
         // Snappiness: Pass photo to avoid delete/re-send cycle in safeEdit
@@ -216,8 +216,9 @@ function setupOrderSystem(bot) {
     bot.action('add_to_cart', async (ctx) => {
         await ctx.answerCbQuery('Ajouté au panier ! 🛒');
         const userId = ctx.from.id;
+        const settings = ctx.state?.settings || await getAppSettings();
         const pending = pendingOrders.get(userId);
-        if (!pending) return safeEdit(ctx, "❌ Session expirée.", Markup.inlineKeyboard([[Markup.button.callback('◀️ Menu', 'main_menu')]]));
+        if (!pending) return safeEdit(ctx, settings.msg_session_expired || "❌ Session expirée.", Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_quick_menu || '◀️ Menu', 'main_menu')]]));
 
         let cart = userCarts.get(userId) || [];
         cart.push(pending);
@@ -230,7 +231,7 @@ function setupOrderSystem(bot) {
         const buttons = [
             [Markup.button.callback('🛍️ Continuer mes achats', 'view_catalog')],
             [Markup.button.callback('💳 Voir mon panier / Commander', 'view_cart')],
-            [Markup.button.callback('❌ Vider le panier', 'clear_cart')]
+            [Markup.button.callback(settings.btn_clear_cart || '❌ Vider le panier', 'clear_cart')]
         ];
         await safeEdit(ctx, text, Markup.inlineKeyboard(buttons));
     });
@@ -272,8 +273,8 @@ function setupOrderSystem(bot) {
 
         buttons.push([Markup.button.callback('💳 Commander', 'start_checkout')]);
         buttons.push([Markup.button.callback('🛍️ Continuer mes achats', 'view_catalog')]);
-        buttons.push([Markup.button.callback('❌ Vider le panier', 'clear_cart')]);
-        buttons.push([Markup.button.callback('◀️ Retour Menu', 'main_menu')]);
+        buttons.push([Markup.button.callback(settings.btn_clear_cart || '❌ Vider le panier', 'clear_cart')]);
+        buttons.push([Markup.button.callback(settings.btn_back_quick_menu || '◀️ Retour Menu', 'main_menu')]);
 
         await safeEdit(ctx, summary, Markup.inlineKeyboard(buttons));
     }
@@ -297,12 +298,13 @@ function setupOrderSystem(bot) {
 
     bot.action('clear_cart', async (ctx) => {
         await ctx.answerCbQuery('Panier vidé 🗑️');
+        const settings = ctx.state?.settings || await getAppSettings();
         userCarts.delete(ctx.from.id);
         try {
             await displayCatalog(ctx);
         } catch (e) {
             console.error('Error displaying catalog after clear:', e.message);
-            await safeEdit(ctx, '✅ Panier vidé !', Markup.inlineKeyboard([[Markup.button.callback('🛍️ Voir le Catalogue', 'view_catalog')], [Markup.button.callback('◀️ Menu', 'main_menu')]]));
+            await safeEdit(ctx, settings.msg_cart_cleared || '✅ Panier vidé !', Markup.inlineKeyboard([[Markup.button.callback('🛍️ Voir le Catalogue', 'view_catalog')], [Markup.button.callback(settings.btn_back_quick_menu || '◀️ Menu', 'main_menu')]]));
         }
     });
 
@@ -314,9 +316,10 @@ function setupOrderSystem(bot) {
     async function startCheckout(ctx) {
         const userId = ctx.from.id;
         const cart = userCarts.get(userId) || [];
-        if (cart.length === 0) return safeEdit(ctx, "📭 Votre panier est vide.", Markup.inlineKeyboard([[Markup.button.callback('◀️ Menu', 'main_menu')]]));
+        const settings = ctx.state?.settings || await getAppSettings();
+        if (cart.length === 0) return safeEdit(ctx, settings.msg_cart_empty || "📭 Votre panier est vide.", Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_quick_menu || '◀️ Menu', 'main_menu')]]));
 
-        const settings = ctx.state.settings;
+        // settings already defined above
         const minOrder = settings.fidelity_min_spend || 50;
         let total = cart.reduce((acc, item) => acc + parseFloat(item.totalPrice), 0);
 
@@ -352,8 +355,8 @@ function setupOrderSystem(bot) {
             `⚠️ <i>Le code postal est obligatoire.</i>\n\n` +
             `💬 <i>Exemple : 45 rue de la Paix, 75002 Paris</i>`,
             Markup.inlineKeyboard([
-                [Markup.button.callback('◀️ Retour Panier', 'view_cart')],
-                [Markup.button.callback('❌ Annuler la commande', 'main_menu')]
+                [Markup.button.callback(settings.btn_back_to_cart || '◀️ Retour Panier', 'view_cart')],
+                [Markup.button.callback(settings.btn_cancel_order || '❌ Annuler la commande', 'main_menu')]
             ])
         );
     }
@@ -372,8 +375,8 @@ function setupOrderSystem(bot) {
 
         const rows = [];
         for (let i = 0; i < options.length; i += 2) rows.push(options.slice(i, i + 2));
-        rows.push([Markup.button.callback('◀️ Retour Quantité', `product_${product.id}`)]);
-        rows.push([Markup.button.callback('❌ Annuler', 'view_catalog')]);
+        rows.push([Markup.button.callback(settings.btn_back_to_qty || '◀️ Retour Quantité', `product_${product.id}`)]);
+        rows.push([Markup.button.callback(settings.btn_cancel_alt || '❌ Annuler', 'view_catalog')]);
 
         await safeEdit(ctx, text, {
             ...Markup.inlineKeyboard(rows),
@@ -383,13 +386,14 @@ function setupOrderSystem(bot) {
 
     bot.action(/^unitselect_(.+)_(.+)_(.+)$/, async (ctx) => {
         await ctx.answerCbQuery();
+        const settings = ctx.state?.settings || await getAppSettings();
         const [pId, qtyStr, amountStr] = ctx.match.slice(1);
         const qty = parseInt(qtyStr);
         const amount = parseFloat(amountStr);
         const products = await getProducts();
         const product = products.find(p => p.id === pId);
 
-        if (!product) return safeEdit(ctx, "❌ Produit non trouvé.", Markup.inlineKeyboard([[Markup.button.callback('◀️ Retour', 'view_catalog')]]));
+        if (!product) return safeEdit(ctx, settings.msg_product_not_found || "❌ Produit non trouvé.", Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_generic || '◀️ Retour', 'view_catalog')]]));
 
         const baseVal = parseFloat(product.unit_value) || 1;
         const effectiveQty = (amount / baseVal) * qty;
@@ -420,7 +424,7 @@ function setupOrderSystem(bot) {
     });
 
     async function promptAddress(ctx, product, qty, totalPrice) {
-        const settings = ctx.state.settings;
+        const settings = ctx.state?.settings || await getAppSettings();
         await safeEdit(ctx,
             `✅ <b>${qty}x ${product.name}</b> ajouté au panier.\n` +
             `💰 Total : <b>${totalPrice}€</b>\n\n` +
@@ -428,8 +432,8 @@ function setupOrderSystem(bot) {
             {
                 ...Markup.inlineKeyboard([
                     ...(settings.dashboard_url ? [[Markup.button.webApp("📍 Choisir sur la carte", `${settings.dashboard_url.replace('/dashboard', '/address_picker')}`)]] : []),
-                    [Markup.button.callback('◀️ Retour Quantité', product.unit ? `qty_${product.id}_${qty}` : `product_${product.id}`)],
-                    [Markup.button.callback('❌ Annuler', 'view_catalog')]
+                    [Markup.button.callback(settings.btn_back_to_qty || '◀️ Retour Quantité', product.unit ? `qty_${product.id}_${qty}` : `product_${product.id}`)],
+                    [Markup.button.callback(settings.btn_cancel_alt || '❌ Annuler', 'view_catalog')]
                 ]),
                 photo: product.image_url || null
             }
@@ -537,8 +541,8 @@ function setupOrderSystem(bot) {
                     `Voulez-vous l'appliquer ?`,
                     Markup.inlineKeyboard([
                         [Markup.button.callback(`✅ Oui, déduire ${possibleDiscount.toFixed(2)}€`, 'confirm_order_use_credit_yes')],
-                        [Markup.button.callback('❌ Non, payer plein tarif', 'confirm_order_use_credit_no')],
-                        [Markup.button.callback('◀️ Retour Adresse', 'start_checkout')]
+                        [Markup.button.callback(settings.btn_dont_use_credit || '❌ Non, payer plein tarif', 'confirm_order_use_credit_no')],
+                        [Markup.button.callback(settings.btn_back_to_address || '◀️ Retour Adresse', 'start_checkout')]
                     ])
                 );
             }
@@ -548,12 +552,13 @@ function setupOrderSystem(bot) {
     }
 
     async function askScheduling(ctx) {
+        const settings = ctx.state?.settings || await getAppSettings();
         const text = `🕒 <b>Quand souhaitez-vous être livré ?</b>\n\nChoisissez si vous voulez être livré dès que possible ou planifier un horaire précis.`;
         const buttons = [
             [Markup.button.callback('🚀 Immédiatement', 'scheduling_now')],
             [Markup.button.callback('🕒 Planifier une heure', 'scheduling_plan')],
-            [Markup.button.callback('◀️ Retour Adresse', 'back_to_address')],
-            [Markup.button.callback('❌ Annuler', 'view_catalog')]
+            [Markup.button.callback(settings.btn_back_to_address || '◀️ Retour Adresse', 'back_to_address')],
+            [Markup.button.callback(settings.btn_cancel_alt || '❌ Annuler', 'view_catalog')]
         ];
         await safeEdit(ctx, text, Markup.inlineKeyboard(buttons));
     }
@@ -608,13 +613,14 @@ function setupOrderSystem(bot) {
             buttons.push([Markup.button.callback(label, `sched_date_${dateKey}`)]);
         });
 
-        buttons.push([Markup.button.callback('◀️ Retour aux options', 'back_to_scheduling')]);
-        buttons.push([Markup.button.callback('❌ Annuler', 'main_menu')]);
+        buttons.push([Markup.button.callback(settings.btn_back_to_options || '◀️ Retour aux options', 'back_to_scheduling')]);
+        buttons.push([Markup.button.callback(settings.btn_cancel_alt || '❌ Annuler', 'main_menu')]);
         await safeEdit(ctx, text, Markup.inlineKeyboard(buttons));
     });
 
     bot.action(/^sched_date_(.+)$/, async (ctx) => {
         const date = ctx.match[1];
+        const settings = ctx.state?.settings || await getAppSettings();
         await ctx.answerCbQuery();
         const text = `🕒 <b>À quelle heure ?</b>\n\nSélectionnez un créneau horaire :`;
 
@@ -629,16 +635,17 @@ function setupOrderSystem(bot) {
             const row = slots.slice(i, i + 4).map(s => Markup.button.callback(s, `sched_final_${date}_${s}`));
             buttons.push(row);
         }
-        buttons.push([Markup.button.callback('◀️ Retour', 'scheduling_plan')]);
+        buttons.push([Markup.button.callback(settings.btn_back_generic || '◀️ Retour', 'scheduling_plan')]);
         await safeEdit(ctx, text, Markup.inlineKeyboard(buttons));
     });
 
     bot.action(/^sched_final_(.+)_(.+)$/, async (ctx) => {
         const [date, hour] = [ctx.match[1], ctx.match[2]];
+        const settings = ctx.state?.settings || await getAppSettings();
         await ctx.answerCbQuery();
         const userId = ctx.from.id;
         const pending = pendingOrders.get(userId);
-        if (!pending) return ctx.reply("Session expirée.");
+        if (!pending) return ctx.reply(settings.msg_session_expired || "Session expirée.");
 
         pending.scheduled_at = `${date} ${hour}`;
 
@@ -660,9 +667,10 @@ function setupOrderSystem(bot) {
 
     bot.action('confirm_order_use_credit_yes', async (ctx) => {
         await ctx.answerCbQuery();
+        const settings = ctx.state?.settings || await getAppSettings();
         const userId = ctx.from.id;
         const pending = pendingOrderConfirmation.get(userId);
-        if (!pending) return safeEdit(ctx, "Sesssion expirée ❌", Markup.inlineKeyboard([[Markup.button.callback('◀️ Menu', 'main_menu')]]));
+        if (!pending) return safeEdit(ctx, settings.msg_session_expired || "Sesssion expirée ❌", Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_quick_menu || '◀️ Menu', 'main_menu')]]));
 
         const finalPrice = parseFloat(pending.totalPrice) - pending.possibleDiscount;
         await showCartSummary(ctx, pending.address, finalPrice, pending.possibleDiscount, pending.scheduled_at);
@@ -670,9 +678,10 @@ function setupOrderSystem(bot) {
 
     bot.action('confirm_order_use_credit_no', async (ctx) => {
         await ctx.answerCbQuery();
+        const settings = ctx.state?.settings || await getAppSettings();
         const userId = ctx.from.id;
         const pending = pendingOrderConfirmation.get(userId);
-        if (!pending) return safeEdit(ctx, "Sesssion expirée ❌", Markup.inlineKeyboard([[Markup.button.callback('◀️ Menu', 'main_menu')]]));
+        if (!pending) return safeEdit(ctx, settings.msg_session_expired || "Sesssion expirée ❌", Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_quick_menu || '◀️ Menu', 'main_menu')]]));
 
         await showCartSummary(ctx, pending.address, parseFloat(pending.totalPrice), 0, pending.scheduled_at);
     });
@@ -696,7 +705,7 @@ function setupOrderSystem(bot) {
 
             if (orders.length === 0) {
                 text += '📭 Vous n\'avez pas encore de commandes.';
-                return safeEdit(ctx, text, Markup.inlineKeyboard([[Markup.button.callback('◀️ Menu', 'main_menu')]]));
+                return safeEdit(ctx, text, Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_quick_menu || '◀️ Menu', 'main_menu')]]));
             }
 
             text += `📝 <b>Historique (10 dernières) :</b>\n`;
@@ -707,10 +716,10 @@ function setupOrderSystem(bot) {
                     `💰 ${o.total_price}€ - ${statusLabel} (${date})\n\n`;
             });
 
-            await safeEdit(ctx, text, Markup.inlineKeyboard([[Markup.button.callback('◀️ Menu', 'main_menu')]]));
+            await safeEdit(ctx, text, Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_quick_menu || '◀️ Menu', 'main_menu')]]));
         } catch (e) {
             console.error('Error fetching user orders:', e);
-            await safeEdit(ctx, '❌ Erreur lors de la récupération de vos commandes.', Markup.inlineKeyboard([[Markup.button.callback('◀️ Menu', 'main_menu')]]));
+            await safeEdit(ctx, '❌ Erreur lors de la récupération de vos commandes.', Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_quick_menu || '◀️ Menu', 'main_menu')]]));
         }
     }
 
@@ -758,7 +767,7 @@ function setupOrderSystem(bot) {
         });
 
         keyboard.push([Markup.button.callback('◀️ Modifier livraison', 'back_to_scheduling')]);
-        keyboard.push([Markup.button.callback('❌ Annuler', 'view_catalog')]);
+        keyboard.push([Markup.button.callback(settings.btn_cancel_alt || '❌ Annuler', 'view_catalog')]);
 
         await safeEdit(ctx, text, {
             ...Markup.inlineKeyboard(keyboard)
@@ -766,12 +775,14 @@ function setupOrderSystem(bot) {
     }
 
     bot.action(/^create_order_(.+)$/, async (ctx) => {
+        const settings = ctx.state?.settings || await getAppSettings();
         const fullTag = ctx.match[1]; // e.g. "CASH_normal" or "CARD_discount"
         const parts = fullTag.split('_');
         const useDiscount = parts[parts.length - 1] === 'discount';
         const paymentMethod = parts.slice(0, -1).join('_'); // All but last part
+        const userId = ctx.from.id;
         const pending = useDiscount ? pendingOrderConfirmation.get(userId) : pendingOrders.get(userId);
-        if (!pending) return safeEdit(ctx, '❌ Session expirée.', Markup.inlineKeyboard([[Markup.button.callback('◀️ Menu', 'main_menu')]]));
+        if (!pending) return safeEdit(ctx, settings.msg_session_expired || '❌ Session expirée.', Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_quick_menu || '◀️ Menu', 'main_menu')]]));
 
         const cart = userCarts.get(userId) || [];
         const productList = cart.map(item => `${item.productName} (x${item.qty})${item.chosen_unit_amount ? ` [${item.chosen_unit_amount}]` : ''}`).join(', ');
@@ -810,7 +821,7 @@ function setupOrderSystem(bot) {
         if (createError) {
             console.error("❌ Error creating order:", createError);
             const errMsg = createError.message || JSON.stringify(createError);
-            return safeEdit(ctx, `❌ Erreur lors de la création de la commande.\n\nType: <i>${errMsg}</i>`, Markup.inlineKeyboard([[Markup.button.callback('◀️ Menu', 'main_menu')]]));
+            return safeEdit(ctx, `❌ Erreur lors de la création de la commande.\n\nType: <i>${errMsg}</i>`, Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_quick_menu || '◀️ Menu', 'main_menu')]]));
         }
 
         // Logic for New Clients (0 previous delivered orders)
@@ -828,7 +839,7 @@ function setupOrderSystem(bot) {
         pendingOrderConfirmation.delete(userId);
         awaitingAddressDetails.delete(userId);
 
-        const settings = ctx.state.settings || await getAppSettings();
+        // settings already defined above
         const confirmedMsgBody = settings.msg_order_confirmed_client || `✅ <b>Commande enregistrée !</b>\n\n📦 Produit : {product_list}\n📍 Adresse : {address}\n{delivery_time}\n💰 Total : <b>{total}€</b>\n\n{success_icon} Recherche d'un livreur en cours...`;
         
         const finalConfirmedMsg = confirmedMsgBody
@@ -897,19 +908,20 @@ function setupOrderSystem(bot) {
     // ========== SYSTEME LIVREUR ==========
 
     bot.command('livreur_start', async (ctx) => {
+        const settings = ctx.state?.settings || await getAppSettings();
         await setLivreurStatus(ctx.from.id, 'telegram', true);
         await safeEdit(ctx,
             '🚴 <b>Bienvenue dans l\'équipe de livraison !</b>\n\n' +
             'Vous êtes maintenant enregistré comme livreur.\n\n' +
             '<b>Utilisez le menu ci-dessous pour gérer vos livraisons :</b>',
-            Markup.inlineKeyboard([[Markup.button.callback('◀️ Menu Livreur', 'livreur_menu')]])
+            Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_to_livreur_menu || '◀️ Menu Livreur', 'livreur_menu')]])
         );
     });
 
     // Helper menu livreur additionnel si besoin
     bot.action('tracking_info', async (ctx) => {
         await ctx.answerCbQuery();
-        const settings = await getAppSettings();
+        const settings = ctx.state?.settings || await getAppSettings();
         await safeEdit(ctx,
             `${settings.ui_icon_livreur} <b>Suivi en direct</b>\n\n` +
             `Pour que le client puisse suivre votre arrivée :\n\n` +
@@ -918,21 +930,22 @@ function setupOrderSystem(bot) {
             `3. Choisissez <b>Partager ma position en direct</b> (Live Location)\n` +
             `4. Sélectionnez la durée (ex: 1 heure)\n\n` +
             `Le bot détectera automatiquement vos déplacements pour informer le client.`,
-            Markup.inlineKeyboard([[Markup.button.callback('◀️ Retour', 'livreur_menu')]])
+            Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_generic || '◀️ Retour', 'livreur_menu')]])
         );
     });
 
     bot.command('dispo', async (ctx) => {
+        const settings = ctx.state?.settings || await getAppSettings();
         const user = await getUser(`${ctx.platform}_${ctx.from.id}`);
-        if (!user || !user.is_livreur) return safeEdit(ctx, '❌ Vous n\'êtes pas livreur.', Markup.inlineKeyboard([[Markup.button.callback('◀️ Retour', 'main_menu')]]));
+        if (!user || !user.is_livreur) return safeEdit(ctx, settings.msg_not_livreur || '❌ Vous n\'êtes pas livreur.', Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_generic || '◀️ Retour', 'main_menu')]]));
 
         await safeEdit(ctx,
             `📢 <b>Statut actuel :</b> ${user.is_available ? '✅ DISPONIBLE' : '😴 INDISPONIBLE'}\n\n` +
             `Voulez-vous changer votre statut ?`,
             Markup.inlineKeyboard([
-                [Markup.button.callback('✅ Passer en Disponible', 'set_dispo_true')],
+                [Markup.button.callback(settings.btn_set_available || '✅ Passer en Disponible', 'set_dispo_true')],
                 [Markup.button.callback('😴 Passer en Indisponible', 'set_dispo_false')],
-                [Markup.button.callback('◀️ Menu', 'main_menu')]
+                [Markup.button.callback(settings.btn_back_quick_menu || '◀️ Menu', 'main_menu')]
             ])
         );
     });
@@ -980,14 +993,16 @@ function setupOrderSystem(bot) {
     });
 
     bot.command('ma_position', async (ctx) => {
+        const settings = ctx.state?.settings || await getAppSettings();
         const city = ctx.message.text.split(' ')[1];
-        if (!city) return safeEdit(ctx, '❌ Usage: /ma_position [ville]', Markup.inlineKeyboard([[Markup.button.callback('◀️ Retour', 'livreur_menu')]]));
+        if (!city) return safeEdit(ctx, '❌ Usage: /ma_position [ville]', Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_generic || '◀️ Retour', 'livreur_menu')]]));
 
         await updateLivreurPosition(`${ctx.platform}_${ctx.from.id}`, city.toLowerCase());
-        await safeEdit(ctx, `📍 Secteur mis à jour : ${city.toUpperCase()}`, Markup.inlineKeyboard([[Markup.button.callback('◀️ Menu Livreur', 'livreur_menu')]]));
+        await safeEdit(ctx, `📍 Secteur mis à jour : ${city.toUpperCase()}`, Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_to_livreur_menu || '◀️ Menu Livreur', 'livreur_menu')]]));
     });
 
     bot.action('change_city', async (ctx) => {
+        const settings = ctx.state?.settings || await getAppSettings();
         await ctx.answerCbQuery();
         const sectors = [
             ['📍 Paris / IDF', 'sector_paris_idf'],
@@ -1000,7 +1015,7 @@ function setupOrderSystem(bot) {
         ];
 
         const buttons = sectors.map(s => [Markup.button.callback(s[0], s[1])]);
-        buttons.push([Markup.button.callback('◀️ Retour', 'livreur_menu')]);
+        buttons.push([Markup.button.callback(settings.btn_back_generic || '◀️ Retour', 'livreur_menu')]);
 
         await safeEdit(ctx,
             `📍 <b>SÉLECTION DU SECTEUR</b>\n\nChoisissez votre zone de livraison principale :`,
@@ -1071,12 +1086,13 @@ function setupOrderSystem(bot) {
         }
 
         buttons.push([Markup.button.callback('🔄 Rafraîchir', 'show_available_orders')]);
-        buttons.push([Markup.button.callback('◀️ Retour', 'livreur_menu')]);
+        buttons.push([Markup.button.callback(settings.btn_back_generic || '◀️ Retour', 'livreur_menu')]);
 
         await safeEdit(ctx, text, Markup.inlineKeyboard(buttons));
     });
 
     bot.action('show_planned_orders', async (ctx) => {
+        const settings = ctx.state?.settings || await getAppSettings();
         await ctx.answerCbQuery();
         const orders = await getAvailableOrders();
 
@@ -1095,7 +1111,7 @@ function setupOrderSystem(bot) {
         }
 
         buttons.push([Markup.button.callback('🔄 Rafraîchir', 'show_planned_orders')]);
-        buttons.push([Markup.button.callback('◀️ Retour', 'livreur_menu')]);
+        buttons.push([Markup.button.callback(settings.btn_back_generic || '◀️ Retour', 'livreur_menu')]);
 
         await safeEdit(ctx, text, Markup.inlineKeyboard(buttons));
     });
@@ -1104,10 +1120,10 @@ function setupOrderSystem(bot) {
         await ctx.answerCbQuery();
         const orderId = ctx.match[1];
         const order = await getOrder(orderId);
-        const settings = ctx.state.settings;
+        const settings = ctx.state?.settings || await getAppSettings();
 
         if (!order || order.status !== 'pending') {
-            return safeEdit(ctx, '❌ Cette commande n\'est plus disponible.', Markup.inlineKeyboard([[Markup.button.callback('◀️ Retour', 'show_available_orders')]]));
+            return safeEdit(ctx, settings.msg_order_not_available || '❌ Cette commande n\'est plus disponible.', Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_generic || '◀️ Retour', 'show_available_orders')]]));
         }
 
         const text = `📦 <b>Détails de la mission #${orderId.slice(-5)}</b>\n\n` +
@@ -1119,7 +1135,7 @@ function setupOrderSystem(bot) {
 
         const buttons = [
             [Markup.button.callback('🔥 ACCEPTER LA MISSION 🔥', `take_order_${orderId}`)],
-            [Markup.button.callback('◀️ Annuler', 'show_available_orders')]
+            [Markup.button.callback(settings.btn_cancel || '◀️ Annuler', 'show_available_orders')]
         ];
 
         await safeEdit(ctx, text, Markup.inlineKeyboard(buttons));
@@ -1128,16 +1144,15 @@ function setupOrderSystem(bot) {
     bot.action(/^take_order_(.+)$/, async (ctx) => {
         await ctx.answerCbQuery();
         const orderId = ctx.match[1];
+        const settings = ctx.state?.settings || await getAppSettings();
         const order = await getOrder(orderId);
 
-        if (!order || order.status !== 'pending') return safeEdit(ctx, '❌ Cette commande n\'est plus disponible.', Markup.inlineKeyboard([[Markup.button.callback('◀️ Retour', 'show_available_orders')]]));
+        if (!order || order.status !== 'pending') return safeEdit(ctx, settings.msg_order_not_available || '❌ Cette commande n\'est plus disponible.', Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_generic || '◀️ Retour', 'show_available_orders')]]));
 
         await updateOrderStatus(orderId, 'taken', {
             livreur_id: `${ctx.platform}_${ctx.from.id}`,
             livreur_name: ctx.from.first_name
         });
-
-        const settings = ctx.state.settings;
         await safeEdit(ctx,
             `${settings.ui_icon_success} <b>Commande #${orderId.slice(-5)} acceptée !</b>\n\n` +
             `📦 Produit : <b>${order.product_name}</b>\n` +
@@ -1150,7 +1165,7 @@ function setupOrderSystem(bot) {
                 parse_mode: 'HTML',
                 ...Markup.inlineKeyboard([
                     [Markup.button.callback('⏰ Arrivée -1h', `notify_${orderId}_1h`)],
-                    [Markup.button.callback('⏳ 30 min', `notify_${orderId}_30m`), Markup.button.callback('⏳ 10 min', `notify_${orderId}_10m`)],
+                    [Markup.button.callback(settings.btn_notify_30min || '⏳ 30 min', `notify_${orderId}_30m`), Markup.button.callback(settings.btn_notify_10min || '⏳ 10 min', `notify_${orderId}_10m`)],
                     [Markup.button.callback('⚡ 5 min', `notify_${orderId}_5m`), Markup.button.callback('📍 Arrivé', `notify_${orderId}_here`)],
                     [Markup.button.callback('⚠️ Signaler un RETARD', `delay_report_${orderId}`)],
                     [Markup.button.callback(`${settings.ui_icon_success} MARQUER COMME LIVRÉE`, `finish_${orderId}`)],
@@ -1169,8 +1184,8 @@ function setupOrderSystem(bot) {
                 {
                     ...Markup.inlineKeyboard([
                         [Markup.button.callback('💬 Parler au livreur', `chat_livreur_${orderId}`)],
-                        [Markup.button.callback('❓ Aide & Support', 'help_menu')],
-                        [Markup.button.callback('❌ Annuler ma commande', `cancel_order_client_${orderId}`)]
+                        [Markup.button.callback(settings.btn_help_support || '❓ Aide & Support', 'help_menu')],
+                        [Markup.button.callback(settings.btn_cancel_my_order || '❌ Annuler ma commande', `cancel_order_client_${orderId}`)]
                     ])
                 }
             );
@@ -1270,12 +1285,13 @@ function setupOrderSystem(bot) {
         await ctx.answerCbQuery();
         const orderId = ctx.match[1];
         const order = await getOrder(orderId);
-        if (!order) return safeEdit(ctx, '❌ Commande introuvable.');
+        const settings = ctx.state?.settings || await getAppSettings();
+        if (!order) return safeEdit(ctx, settings.msg_order_not_found || '❌ Commande introuvable.');
 
         await updateOrderStatus(orderId, 'validated', { livreur_id: null, livreur_name: null });
         await safeEdit(ctx, `⚠️ <b>COMMANDE ABANDONNÉE</b>\n\nLa commande #${orderId.slice(-5)} a été remise dans le pool.`, {
             parse_mode: 'HTML',
-            ...Markup.inlineKeyboard([[Markup.button.callback('◀️ Retour Menu', 'livreur_menu')]])
+            ...Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_quick_menu || '◀️ Retour Menu', 'livreur_menu')]])
         });
         notifyAdmins(bot, `⚠️ <b>LIVREUR ABANDON</b>\n\n🆔 Commande : <code>#${orderId.slice(-5)}</code>\n👤 Par : ${ctx.from.first_name}\nL'ordre est de nouveau disponible.`);
     });
@@ -1283,13 +1299,12 @@ function setupOrderSystem(bot) {
     bot.action(/^finish_(.+)$/, async (ctx) => {
         await ctx.answerCbQuery();
         const orderId = ctx.match[1];
+        const settings = ctx.state?.settings || await getAppSettings();
         const order = await getOrder(orderId);
 
         if (!order) {
-            return safeEdit(ctx, `❌ Commande introuvable.`, Markup.inlineKeyboard([[Markup.button.callback('◀️ Retour Menu', 'livreur_menu')]]));
+            return safeEdit(ctx, settings.msg_order_not_found || `❌ Commande introuvable.`, Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_quick_menu || '◀️ Retour Menu', 'livreur_menu')]]));
         }
-
-        const settings = await getAppSettings();
 
         await updateOrderStatus(orderId, 'delivered', {
             livreur_id: `${ctx.platform}_${ctx.from.id}`,
@@ -1299,7 +1314,7 @@ function setupOrderSystem(bot) {
 
         await safeEdit(ctx, `✅ Commande <b>#${orderId.slice(-5)}</b> marquée comme LIVRÉE !\nFélicitations pour votre livraison.`, {
             parse_mode: 'HTML',
-            ...Markup.inlineKeyboard([[Markup.button.callback('◀️ Retour Menu Livreur', 'livreur_menu')]])
+            ...Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_to_livreur_menu || '◀️ Retour Menu Livreur', 'livreur_menu')]])
         });
 
         // Notifier client + Feedback
@@ -1334,7 +1349,7 @@ function setupOrderSystem(bot) {
         await ctx.answerCbQuery('Votre commande a été annulée. ❌', true);
 
         const shortId = orderId.slice(-5);
-        await safeEdit(ctx, `❌ <b>Commande #${shortId} annulée</b>\n\nVotre demande d'annulation a bien été prise en compte.`, Markup.inlineKeyboard([[Markup.button.callback('◀️ Retour Menu', 'main_menu')]]));
+        await safeEdit(ctx, `❌ <b>Commande #${shortId} annulée</b>\n\nVotre demande d'annulation a bien été prise en compte.`, Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_quick_menu || '◀️ Retour Menu', 'main_menu')]]));
 
         // Notifier Admin
         const alertMsg = `⚠️ <b>ANNULATION CLIENT</b>\n\nLa commande <b>#${shortId}</b> a été annulée par le client.\n👤 Client: ${ctx.from.first_name}`;
@@ -1348,17 +1363,18 @@ function setupOrderSystem(bot) {
 
     bot.action(/^feedback_start_(.+)$/, async (ctx) => {
         const orderId = ctx.match[1];
+        const settings = ctx.state?.settings || await getAppSettings();
         await ctx.answerCbQuery();
         await safeEdit(ctx,
             `🌟 <b>Donnez votre avis !</b>\n\n` +
             `Votre satisfaction est notre priorité. Comment s'est passée votre commande ?\n\n` +
             `Choisissez une note ci-dessous :`,
             Markup.inlineKeyboard([
-                [Markup.button.callback('⭐️⭐️⭐️⭐️⭐️ Excellent', `feedback_rate_${orderId}_5`)],
-                [Markup.button.callback('⭐️⭐️⭐️⭐️ Très bien', `feedback_rate_${orderId}_4`)],
-                [Markup.button.callback('⭐️⭐️⭐️ Bien', `feedback_rate_${orderId}_3`)],
-                [Markup.button.callback('⭐️ Moyen / Insatisfait', `feedback_rate_${orderId}_1`)],
-                [Markup.button.callback('◀️ Plus tard', 'main_menu')]
+                [Markup.button.callback(settings.btn_rate_5 || '⭐️⭐️⭐️⭐️⭐️ Excellent', `feedback_rate_${orderId}_5`)],
+                [Markup.button.callback(settings.btn_rate_4 || '⭐️⭐️⭐️⭐️ Très bien', `feedback_rate_${orderId}_4`)],
+                [Markup.button.callback(settings.btn_rate_3 || '⭐️⭐️⭐️ Bien', `feedback_rate_${orderId}_3`)],
+                [Markup.button.callback(settings.btn_rate_1 || '⭐️ Moyen / Insatisfait', `feedback_rate_${orderId}_1`)],
+                [Markup.button.callback(settings.btn_back_generic || '◀️ Plus tard', 'main_menu')]
             ])
         );
     });
@@ -1372,7 +1388,8 @@ function setupOrderSystem(bot) {
             await saveFeedback(orderId, parseInt(pending.rate), comment);
             await sendFeedbackNotifications(orderId, pending.rate, comment, ctx);
         }
-        await safeEdit(ctx, "🙏 Merci pour votre note !", Markup.inlineKeyboard([[Markup.button.callback('◀️ Retour Menu', 'main_menu')]]));
+        const settings = ctx.state?.settings || await getAppSettings();
+        await safeEdit(ctx, settings.msg_thanks_for_feedback || "🙏 Merci pour votre note !", Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_quick_menu || '◀️ Retour Menu', 'main_menu')]]));
     });
 
     bot.action(/^feedback_rate_(.+)_(.+)$/, async (ctx) => {
@@ -1393,21 +1410,23 @@ function setupOrderSystem(bot) {
 
     // --- New Review System ---
     bot.action('leave_review', async (ctx) => {
+        const settings = ctx.state?.settings || await getAppSettings();
         await ctx.answerCbQuery();
         await safeEdit(ctx,
             `🏮 <b>Laissez votre avis !</b>\n\nNotez votre expérience globale avec nous :`,
             Markup.inlineKeyboard([
-                [Markup.button.callback('⭐️⭐️⭐️⭐️⭐️ Excellent', 'review_rate_5')],
-                [Markup.button.callback('⭐️⭐️⭐️⭐️ Très bien', 'review_rate_4')],
-                [Markup.button.callback('⭐️⭐️⭐️ Bien', 'review_rate_3')],
-                [Markup.button.callback('⭐️ Moyen', 'review_rate_1')],
-                [Markup.button.callback('◀️ Retour', 'main_menu')]
+                [Markup.button.callback(settings.btn_rate_5 || '⭐️⭐️⭐️⭐️⭐️ Excellent', 'review_rate_5')],
+                [Markup.button.callback(settings.btn_rate_4 || '⭐️⭐️⭐️⭐️ Très bien', 'review_rate_4')],
+                [Markup.button.callback(settings.btn_rate_3 || '⭐️⭐️⭐️ Bien', 'review_rate_3')],
+                [Markup.button.callback(settings.btn_rate_1 || '⭐️ Moyen', 'review_rate_1')],
+                [Markup.button.callback(settings.btn_back_generic || '◀️ Retour', 'main_menu')]
             ])
         );
     });
 
     bot.action(/^review_rate_(.+)$/, async (ctx) => {
         const rate = parseInt(ctx.match[1]);
+        const settings = ctx.state?.settings || await getAppSettings();
         await ctx.answerCbQuery();
         const userId = `${ctx.platform}_${ctx.from.id}`;
         awaitingReviewText.set(userId, { rate, photos: [], step: 'text' });
@@ -1416,7 +1435,7 @@ function setupOrderSystem(bot) {
             `✍️ <b>Dites-nous en plus !</b>\n\nÉcrivez votre commentaire ci-dessous.\n<i>Vous pourrez ajouter des photos/vidéos ensuite.</i>`,
             Markup.inlineKeyboard([
                 [Markup.button.callback('⏭ Envoyer juste la note', 'review_skip')],
-                [Markup.button.callback('❌ Annuler', 'main_menu')]
+                [Markup.button.callback(settings.btn_cancel_alt || '❌ Annuler', 'main_menu')]
             ])
         );
     });
@@ -1525,6 +1544,7 @@ function setupOrderSystem(bot) {
 
     bot.action(/^view_reviews(?:_(\d+))?$/, async (ctx) => {
         await ctx.answerCbQuery();
+        const settings = ctx.state?.settings || await getAppSettings();
         const { getPublicReviews } = require('../services/database');
         const { esc } = require('../services/utils');
 
@@ -1532,7 +1552,7 @@ function setupOrderSystem(bot) {
         const reviews = await getPublicReviews(10); // Get up to 10 latest
 
         if (reviews.length === 0) {
-            return safeEdit(ctx, "📭 Aucun avis pour le moment. Soyez le premier !", Markup.inlineKeyboard([[Markup.button.callback('⭐️ Laisser un avis', 'leave_review')], [Markup.button.callback('◀️ Menu', 'main_menu')]]));
+            return safeEdit(ctx, settings.msg_no_reviews_yet || "📭 Aucun avis pour le moment. Soyez le premier !", Markup.inlineKeyboard([[Markup.button.callback('⭐️ Laisser un avis', 'leave_review')], [Markup.button.callback(settings.btn_back_quick_menu || '◀️ Menu', 'main_menu')]]));
         }
 
         const r = reviews[index];
@@ -1562,16 +1582,14 @@ function setupOrderSystem(bot) {
         }
 
         const navButtons = [];
-        if (index > 0) navButtons.push(Markup.button.callback('⬅️ Précédent', `view_reviews_${index - 1}`));
-        if (index < reviews.length - 1) navButtons.push(Markup.button.callback('Suivant ➡️', `view_reviews_${index + 1}`));
+        if (index > 0) navButtons.push(Markup.button.callback(settings.btn_previous || '⬅️ Précédent', `view_reviews_${index - 1}`));
+        if (index < reviews.length - 1) navButtons.push(Markup.button.callback(settings.btn_next || 'Suivant ➡️', `view_reviews_${index + 1}`));
 
         const keyboard = [
             navButtons,
             [Markup.button.callback('⭐️ Laisser un avis', 'leave_review')],
-            [Markup.button.callback('◀️ Retour Menu', 'main_menu')]
+            [Markup.button.callback(settings.btn_back_quick_menu || '◀️ Retour Menu', 'main_menu')]
         ];
-
-        const settings = ctx.state?.settings || await getAppSettings();
         await safeEdit(ctx, text, {
             photo: photo,
             video: video,
@@ -1583,12 +1601,11 @@ function setupOrderSystem(bot) {
         await ctx.answerCbQuery();
         const { getBroadcastHistory } = require('../services/database');
         const settings = ctx.state?.settings || await getAppSettings();
-
         const index = parseInt(ctx.match[1] || 0);
         const broadcasts = await getBroadcastHistory(50, false); // 50 derniers (inclus expirés pour le sondage)
 
         if (broadcasts.length === 0) {
-            return safeEdit(ctx, "📭 Aucune information à afficher pour le moment.", Markup.inlineKeyboard([[Markup.button.callback('◀️ Menu', 'main_menu')]]));
+            return safeEdit(ctx, settings.msg_no_information || "📭 Aucune information à afficher pour le moment.", Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_quick_menu || '◀️ Menu', 'main_menu')]]));
         }
 
         const b = broadcasts[index];
@@ -1656,13 +1673,13 @@ function setupOrderSystem(bot) {
         }
 
         const navButtons = [];
-        if (index > 0) navButtons.push(Markup.button.callback('⬅️ Précédent', `view_broadcasts_${index - 1}`));
-        if (index < broadcasts.length - 1) navButtons.push(Markup.button.callback('Suivant ➡️', `view_broadcasts_${index + 1}`));
+        if (index > 0) navButtons.push(Markup.button.callback(settings.btn_previous || '⬅️ Précédent', `view_broadcasts_${index - 1}`));
+        if (index < broadcasts.length - 1) navButtons.push(Markup.button.callback(settings.btn_next || 'Suivant ➡️', `view_broadcasts_${index + 1}`));
 
         const keyboard = [
             ...pollRows,
             navButtons,
-            [Markup.button.callback('◀️ Retour Menu', 'main_menu')]
+            [Markup.button.callback(settings.btn_back_quick_menu || '◀️ Retour Menu', 'main_menu')]
         ];
 
         await safeEdit(ctx, text, {
@@ -1783,9 +1800,10 @@ function setupOrderSystem(bot) {
                     }
 
                     const count = (data.photos || []).length;
+                    const reviewSettings = ctx.state?.settings || await getAppSettings();
                     const mediaButtons = [
                         [Markup.button.callback(`📸 Ajouter une autre (${count} ajoutée${count > 1 ? 's' : ''})`, 'review_add_media_hint')],
-                        [Markup.button.callback('✅ Envoyer maintenant', 'review_submit')]
+                        [Markup.button.callback(reviewSettings.btn_send_now || '✅ Envoyer maintenant', 'review_submit')]
                     ];
                     await safeEdit(ctx,
                         `✅ <b>${count} média${count > 1 ? 's' : ''} ajouté${count > 1 ? 's' : ''} !</b>\n\nEnvoyez d'autres photos/vidéos ou cliquez sur <b>Envoyer maintenant</b>.`,
@@ -1942,9 +1960,9 @@ function setupOrderSystem(bot) {
         awaitingDelayReason.delete(uid);
         awaitingChatReply.delete(uid);
 
-        const settings = await getAppSettings();
+        const settings = ctx.state?.settings || await getAppSettings();
         const user = await getUser(`${ctx.platform}_${ctx.from.id}`);
-        if (!user || !user.is_livreur) return safeEdit(ctx, '❌ Accès refusé.', Markup.inlineKeyboard([[Markup.button.callback('◀️ Menu', 'main_menu')]]));
+        if (!user || !user.is_livreur) return safeEdit(ctx, settings.msg_access_denied || '❌ Accès refusé.', Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_quick_menu || '◀️ Menu', 'main_menu')]]));
 
         const { getLivreurMenuKeyboard } = require('./start');
         const city = user.current_city || user.data?.current_city || 'Non défini';
@@ -1974,28 +1992,29 @@ function setupOrderSystem(bot) {
 
     bot.action('active_deliveries', async (ctx) => {
         await ctx.answerCbQuery();
+        const settings = ctx.state?.settings || await getAppSettings();
         const { getLivreurOrders } = require('../services/database');
         const orders = await getLivreurOrders(`${ctx.platform}_${ctx.from.id}`);
 
         if (orders.length === 0) {
-            return safeEdit(ctx, '📭 Aucune livraison en cours.', Markup.inlineKeyboard([[Markup.button.callback('◀️ Retour', 'livreur_menu')]]));
+            return safeEdit(ctx, settings.msg_no_active_deliveries || '📭 Aucune livraison en cours.', Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_generic || '◀️ Retour', 'livreur_menu')]]));
         }
 
-        const settings = await getAppSettings();
         let text = `🚚 <b>Livraisons en cours</b>\n\nCliquez sur une livraison pour la gérer :\n`;
         const buttons = orders.map(o => [Markup.button.callback(`#${o.id.slice(-5)} - ${o.product_name} (${o.address.substring(0, 15)}...)`, `view_active_${o.id}`)]);
-        buttons.push([Markup.button.callback('◀️ Retour', 'livreur_menu')]);
+        buttons.push([Markup.button.callback(settings.btn_back_generic || '◀️ Retour', 'livreur_menu')]);
 
         await safeEdit(ctx, text, Markup.inlineKeyboard(buttons));
     });
 
     bot.action(/^view_active_(.+)$/, async (ctx) => {
         await ctx.answerCbQuery();
+        const settings = ctx.state?.settings || await getAppSettings();
         const orderId = ctx.match[1];
         const order = await getOrder(orderId);
-        if (!order) return safeEdit(ctx, '❌ Commande non trouvée.', Markup.inlineKeyboard([[Markup.button.callback('◀️ Retour', 'main_menu')]]));
+        if (!order) return safeEdit(ctx, settings.msg_order_not_found || '❌ Commande non trouvée.', Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_generic || '◀️ Retour', 'main_menu')]]));
 
-        const settings = await getAppSettings();
+        // settings already defined above
         let detailText = `📦 <b>Détails Livraison #${orderId.slice(-5)}</b>\n\n` +
             `📍 Adresse : <code>${order.address}</code>\n` +
             `💰 À encaisser : <b>${order.total_price}€</b>\n\n`;
@@ -2012,12 +2031,12 @@ function setupOrderSystem(bot) {
                 parse_mode: 'HTML',
                 ...Markup.inlineKeyboard([
                     [Markup.button.callback('⏰ Arrivée -1h', `notify_${orderId}_1h`)],
-                    [Markup.button.callback('⏳ 30 min', `notify_${orderId}_30m`), Markup.button.callback('⏳ 10 min', `notify_${orderId}_10m`)],
+                    [Markup.button.callback(settings.btn_notify_30min || '⏳ 30 min', `notify_${orderId}_30m`), Markup.button.callback(settings.btn_notify_10min || '⏳ 10 min', `notify_${orderId}_10m`)],
                     [Markup.button.callback('⚡ 5 min', `notify_${orderId}_5m`), Markup.button.callback('📍 Arrivé', `notify_${orderId}_here`)],
                     [Markup.button.callback('💬 Parler au client', `chat_livreur_${orderId}`)],
                     [Markup.button.callback(`${settings.ui_icon_success} MARQUER COMME LIVRÉE`, `finish_${orderId}`)],
-                    [Markup.button.callback('❌ Abandonner la livraison', `abandon_${orderId}`)],
-                    [Markup.button.callback('◀️ Retour', 'active_deliveries')]
+                    [Markup.button.callback(settings.btn_abandon_delivery || '❌ Abandonner la livraison', `abandon_${orderId}`)],
+                    [Markup.button.callback(settings.btn_back_generic || '◀️ Retour', 'active_deliveries')]
                 ])
             }
         );
@@ -2027,10 +2046,11 @@ function setupOrderSystem(bot) {
     bot.command('menu', async (ctx) => displayCatalog(ctx));
     bot.command('orders', async (ctx) => {
         if (ctx.callbackQuery) await ctx.answerCbQuery();
+        const settings = ctx.state?.settings || await getAppSettings();
         const activeOrders = await getClientActiveOrders(`${ctx.platform}_${ctx.from.id}`);
-        if (activeOrders.length === 0) return safeEdit(ctx, '📭 Vous n\'avez aucune commande active.', Markup.inlineKeyboard([[Markup.button.callback('◀️ Retour', 'main_menu')]]));
+        if (activeOrders.length === 0) return safeEdit(ctx, settings.msg_no_active_orders || '📭 Vous n\'avez aucune commande active.', Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_generic || '◀️ Retour', 'main_menu')]]));
         const buttons = activeOrders.map(o => [Markup.button.callback(`📦 Commande #${o.id.slice(-5)} (${o.status})`, `view_order_${o.id}`)]);
-        buttons.push([Markup.button.callback('◀️ Retour', 'main_menu')]);
+        buttons.push([Markup.button.callback(settings.btn_back_generic || '◀️ Retour', 'main_menu')]);
         await safeEdit(ctx, '🔔 <b>Vos commandes actives :</b>', Markup.inlineKeyboard(buttons));
     });
 
@@ -2047,11 +2067,11 @@ function setupOrderSystem(bot) {
 
             const buttons = [];
             if (activeOrders.length > 0) {
-                buttons.push([Markup.button.callback('⏳ Où en est ma livraison ?', 'help_where_is_my_order')]);
+                buttons.push([Markup.button.callback(settings.btn_where_is_delivery || '⏳ Où en est ma livraison ?', 'help_where_is_my_order')]);
             }
 
             buttons.push([Markup.button.callback('📞 Parler à l\'Admin', 'help_chat_admin')]);
-            buttons.push([Markup.button.callback('◀️ Retour Menu', 'main_menu')]);
+            buttons.push([Markup.button.callback(settings.btn_back_quick_menu || '◀️ Retour Menu', 'main_menu')]);
 
             await safeEdit(ctx, text, Markup.inlineKeyboard(buttons));
         } catch (e) {
@@ -2159,6 +2179,7 @@ function setupOrderSystem(bot) {
 
     bot.action('my_deliveries', async (ctx) => {
         await ctx.answerCbQuery();
+        const settings = ctx.state?.settings || await getAppSettings();
         const userId = `${ctx.platform}_${ctx.from.id}`;
         const { getLivreurHistory } = require('../services/database');
 
@@ -2168,7 +2189,7 @@ function setupOrderSystem(bot) {
             console.log(`[LIVREUR] ${deliveries.length} livraisons trouvées.`);
 
             if (deliveries.length === 0) {
-                return safeEdit(ctx, `📭 Votre historique de livraison est vide.`, Markup.inlineKeyboard([[Markup.button.callback('◀️ Retour', 'livreur_menu')]]));
+                return safeEdit(ctx, settings.msg_empty_delivery_history || `📭 Votre historique de livraison est vide.`, Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_generic || '◀️ Retour', 'livreur_menu')]]));
             }
 
             let text = `📊 <b>Mon historique de livraisons</b>\n\n`;
@@ -2184,10 +2205,10 @@ function setupOrderSystem(bot) {
 
             text += `💰 <b>Total cumulé livré : ${totalEarned.toFixed(2)}€</b>`;
 
-            await safeEdit(ctx, text, Markup.inlineKeyboard([[Markup.button.callback('◀️ Retour', 'livreur_menu')]]));
+            await safeEdit(ctx, text, Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_generic || '◀️ Retour', 'livreur_menu')]]));
         } catch (e) {
             console.error('Error fetching delivery history:', e);
-            await safeEdit(ctx, '❌ Erreur lors de la récupération de l\'historique.', Markup.inlineKeyboard([[Markup.button.callback('◀️ Retour', 'livreur_menu')]]));
+            await safeEdit(ctx, '❌ Erreur lors de la récupération de l\'historique.', Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_generic || '◀️ Retour', 'livreur_menu')]]));
         }
     });
 
