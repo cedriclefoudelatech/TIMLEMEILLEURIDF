@@ -191,7 +191,9 @@ async function safeEdit(ctx, text, opts = {}) {
                     newMsg = await ctx.replyWithHTML(text, extra);
                 }
             } catch (err) {
-                console.error('[SAFE-EDIT] Send failed:', err.message);
+                console.error(`[SAFE-EDIT] Send media failed (photo=${photo ? 'yes' : 'no'}, video=${video ? 'yes' : 'no'}):`, err.message);
+                // Fallback texte pur — le produit s'affiche quand même sans image
+                photo = null; video = null;
                 newMsg = await ctx.replyWithHTML(text, extra);
             }
 
@@ -220,7 +222,9 @@ async function safeEdit(ctx, text, opts = {}) {
                     newMsg = await ctx.replyWithHTML(text, extra);
                 }
             } catch (err) {
-                console.error('[SAFE-EDIT] Media failed:', err.message);
+                console.error(`[SAFE-EDIT] Media failed (photo=${photo ? 'yes' : 'no'}, video=${video ? 'yes' : 'no'}):`, err.message);
+                // Fallback texte pur
+                photo = null; video = null;
                 newMsg = await ctx.replyWithHTML(text, extra);
             }
         } else {

@@ -48,7 +48,7 @@ const loginLimiter = rateLimit({
     message: { error: 'Trop de tentatives. Réessayez dans 15 minutes.' },
     standardHeaders: true,
     legacyHeaders: false,
-    keyGenerator: (req) => req.ip || 'unknown',
+    validate: { xForwardedForHeader: false, default: true },
     handler: (req, res, next, options) => {
         console.warn(`[AUTH] Rate limit atteint pour IP: ${req.ip}`);
         res.status(429).json(options.message);
@@ -387,11 +387,20 @@ function createServer() {
             const ext = path.extname(file.name) || (file.mimetype.includes('video') ? '.mp4' : '.jpg');
             const fileName = `${Date.now()}-${Math.round(Math.random() * 1E9)}${ext}`;
 
-            debugLog(`[UPLOAD] Upload Supabase Storage: ${fileName} (${file.mimetype})`);
+            debugLog(`[UPLOAD] Upload Supabase Storage: ${fileName} (${file.mimetype}, size=${file.size})`);
 
             // Upload direct vers Supabase Storage (seule source de vérité — pas de fallback local)
             const { supabase } = require('./config/supabase');
-            const fileBuf = file.data; // express-fileupload met le buffer dans .data
+            // Avec useTempFiles: true, file.data peut être vide — lire depuis le fichier temp
+            let fileBuf = file.data;
+            if ((!fileBuf || fileBuf.length === 0) && file.tempFilePath) {
+                fileBuf = fs.readFileSync(file.tempFilePath);
+                debugLog(`[UPLOAD] Read from tempFile: ${file.tempFilePath} (${fileBuf.length} bytes)`);
+            }
+            if (!fileBuf || fileBuf.length === 0) {
+                debugLog(`[UPLOAD-FAIL] Buffer vide pour ${file.name}`);
+                return res.status(400).json({ error: 'Fichier vide — upload impossible' });
+            }
 
             const { error } = await supabase.storage
                 .from('uploads')
@@ -407,7 +416,12 @@ function createServer() {
 
             const { data: publicData } = supabase.storage.from('uploads').getPublicUrl(fileName);
             const finalUrl = publicData.publicUrl;
-            debugLog(`[UPLOAD-OK] ${finalUrl}`);
+            debugLog(`[UPLOAD-OK] ${finalUrl} (${fileBuf.length} bytes)`);
+
+            // Nettoyage du fichier temp
+            if (file.tempFilePath) {
+                fs.unlink(file.tempFilePath, () => {});
+            }
 
             res.json({ success: true, url: finalUrl });
         } catch (e) {
