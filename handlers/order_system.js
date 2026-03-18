@@ -25,6 +25,43 @@ const awaitingReviewText = createPersistentMap('awaitingReview');
 // État éphémère (pas besoin de persister)
 const userLastActivity = new Map();
 
+/**
+ * Helper to extract a single valid media URL from product data.
+ * Handles JSON arrays, plain strings, and trims whitespace.
+ */
+function getMediaUrl(product) {
+    if (!product) return null;
+    let url = product.image_url;
+    if (!url) return null;
+
+    // Strip quotes if they were added during raw storage
+    if (typeof url === 'string') {
+        url = url.trim();
+        if (url.startsWith('"') && url.endsWith('"')) url = url.substring(1, url.length - 1);
+    }
+
+    // Handle JSON array format
+    if (typeof url === 'string' && url.startsWith('[') && url.endsWith(']')) {
+        try {
+            const arr = JSON.parse(url);
+            if (Array.isArray(arr) && (arr.length > 0)) {
+                const first = arr[0];
+                return typeof first === 'string' ? first : (first.url || first.image_url);
+            }
+        } catch (e) { }
+    }
+    
+    // Handle single JSON object format (fallback)
+    if (typeof url === 'string' && url.startsWith('{') && url.endsWith('}')) {
+        try {
+            const obj = JSON.parse(url);
+            return obj.url || obj.image_url || null;
+        } catch (e) {}
+    }
+
+    return url || null;
+}
+
 async function initOrderState() {
     await Promise.all([
         userCarts.load(), pendingOrders.load(), awaitingAddressDetails.load(),
@@ -128,16 +165,7 @@ function setupOrderSystem(bot) {
         );
 
         // Détermination du média à afficher (support multiple)
-        let mediaUrl = product.image_url || null;
-        if (mediaUrl && typeof mediaUrl === 'string' && mediaUrl.startsWith('[') && mediaUrl.endsWith(']')) {
-            try {
-                const arr = JSON.parse(mediaUrl);
-                if (arr && arr.length > 0) {
-                    const firstItem = arr[0];
-                    mediaUrl = typeof firstItem === 'string' ? firstItem : firstItem.url;
-                }
-            } catch (e) { }
-        }
+        const mediaUrl = getMediaUrl(product);
 
         await safeEdit(ctx, text, {
             ...Markup.inlineKeyboard([buttons, [Markup.button.callback(settings.btn_back_generic || '◀️ Retour', 'view_catalog')]]),
@@ -223,7 +251,7 @@ function setupOrderSystem(bot) {
         // Snappiness: Pass photo to avoid delete/re-send cycle in safeEdit
         await safeEdit(ctx, text, {
             ...Markup.inlineKeyboard(buttons),
-            photo: product.image_url
+            photo: getMediaUrl(product)
         });
     }
 
@@ -398,7 +426,7 @@ function setupOrderSystem(bot) {
 
         await safeEdit(ctx, text, {
             ...Markup.inlineKeyboard(rows),
-            photo: product.image_url
+            photo: getMediaUrl(product)
         });
     }
 

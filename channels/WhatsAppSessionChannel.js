@@ -243,9 +243,25 @@ class WhatsAppSessionChannel extends Channel {
         try {
             let result;
             if (options.source || options.media_url) {
+                const fs = require('fs');
+                let mediaSource = options.source;
+                let mediaUrl = options.media_url;
+
+                // Si c'est un chemin local et qu'on n'a pas encore de buffer (source)
+                if (!mediaSource && mediaUrl && typeof mediaUrl === 'string' && !mediaUrl.startsWith('http') && !mediaUrl.startsWith('data:')) {
+                    if (fs.existsSync(mediaUrl)) {
+                        try {
+                            mediaSource = fs.readFileSync(mediaUrl);
+                            mediaUrl = null;
+                        } catch (e) {
+                            console.error(`[WA-Send] Error reading local file ${mediaUrl}:`, e.message);
+                        }
+                    }
+                }
+
                 const mediaType = options.media_type === 'video' ? 'video' : 'image';
                 const msgPayload = {
-                    [mediaType]: options.source ? options.source : { url: options.media_url },
+                    [mediaType]: mediaSource ? mediaSource : { url: mediaUrl },
                     caption: cleanText
                 };
                 result = await this.sock.sendMessage(jid, msgPayload);
@@ -303,9 +319,23 @@ class WhatsAppSessionChannel extends Channel {
         // 1. Tentative envoi avec média (si présent)
         if (options.source || options.media_url) {
             try {
+                const fs = require('fs');
+                let mediaSource = options.source;
+                let mediaUrl = options.media_url;
+
+                // Détecter chemin local absolute pour WhatsApp
+                if (!mediaSource && mediaUrl && typeof mediaUrl === 'string' && !mediaUrl.startsWith('http') && !mediaUrl.startsWith('data:')) {
+                    if (fs.existsSync(mediaUrl)) {
+                        try {
+                            mediaSource = fs.readFileSync(mediaUrl);
+                            mediaUrl = null;
+                        } catch (e) { }
+                    }
+                }
+
                 const mediaType = options.media_type === 'video' ? 'video' : 'image';
                 const msgPayload = {
-                    [mediaType]: options.source ? options.source : { url: options.media_url },
+                    [mediaType]: mediaSource ? mediaSource : { url: mediaUrl },
                     caption: textMenu || ""
                 };
                 const result = await this.sock.sendMessage(jid, msgPayload);
