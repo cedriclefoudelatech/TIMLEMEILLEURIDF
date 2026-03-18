@@ -94,10 +94,14 @@ async function sendMessageToUser(userId, message, options = {}) {
         // Telegram branch — essayer le registre, puis fallback sur getBotInstance
         let realBot = getTgBot();
         if (!realBot || !realBot.telegram) {
+            console.log(`[Notification] getTgBot() = ${realBot ? 'has bot but no .telegram' : 'null'}, trying server fallback...`);
             try {
                 const { getBotInstance } = require('../server');
                 realBot = getBotInstance();
-            } catch (e) { /* server.js pas encore chargé */ }
+                console.log(`[Notification] server.getBotInstance() = ${realBot ? (realBot.telegram ? 'OK' : 'has bot but no .telegram') : 'null'}`);
+            } catch (e) {
+                console.error(`[Notification] server fallback failed: ${e.message}`);
+            }
         }
         if (!realBot || !realBot.telegram) {
             console.error(`[Notification] Bot Telegram inactif, impossible d'envoyer à ${userId}`);

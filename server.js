@@ -831,4 +831,4 @@ function createServer() {
     return app;
 }
 
-module.exports = { createServer, setBotInstance };
+module.exports = { createServer, setBotInstance, getBotInstance };

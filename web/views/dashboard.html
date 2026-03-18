@@ -3514,6 +3514,9 @@
                     const products = await api('/products', 'GET', null, silent);
                     window._cachedProducts = products;
 
+                    // Charger le dropdown fournisseurs pour le formulaire produit
+                    await loadSupplierDropdown();
+
                     // Update Bundle Select
                     const bundleSelect = document.getElementById('bundle_offered_id');
                     if (bundleSelect) {
@@ -5405,6 +5408,7 @@
                 await api('/suppliers', 'POST', data, true);
                 closeSupplierForm();
                 await loadSuppliers();
+                await loadSupplierDropdown(); // Rafraîchir le dropdown produit
             } catch(e) { alert('Erreur: ' + e.message); }
         }
 
@@ -5413,6 +5417,7 @@
             try {
                 await api('/suppliers/' + id, 'DELETE', null, true);
                 await loadSuppliers();
+                await loadSupplierDropdown(); // Rafraîchir le dropdown produit
             } catch(e) { alert('Erreur: ' + e.message); }
         }
 
