@@ -14,6 +14,9 @@
     "supabase",
     "admin"
   ],
+  "engines": {
+    "node": ">=20"
+  },
   "author": "",
   "license": "ISC",
   "dependencies": {
