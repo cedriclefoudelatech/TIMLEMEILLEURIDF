@@ -12,14 +12,7 @@ const qrcodeImage = require('qrcode');
 
 
 
-// Logs circulaires pour debug en live via /wa-logs
-const waLogs = [];
-function waLog(msg) {
-    const line = `[${new Date().toISOString()}] ${msg}`;
-    waLogs.push(line);
-    if (waLogs.length > 200) waLogs.shift();
-    console.log(line);
-}
+const { waLogs, waLog } = require('../services/wa_log_shared');
 
 class WhatsAppSessionChannel extends Channel {
     constructor(config) {

@@ -1,11 +1,7 @@
 const { registry } = require('../channels/ChannelRegistry');
 const { registerUser, getAppSettings } = require('./database');
 const { createPersistentMap } = require('./persistent_map');
-const { WhatsAppSessionChannel } = require('../channels/WhatsAppSessionChannel');
-const waLog = (msg) => {
-    try { const logs = WhatsAppSessionChannel.getLogs(); logs.push(`[${new Date().toISOString()}] ${msg}`); if (logs.length > 200) logs.shift(); } catch(e) {}
-    console.log(msg);
-};
+const { waLog } = require('./wa_log_shared');
 
 class Dispatcher {
     constructor() {
