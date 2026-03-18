@@ -6,7 +6,19 @@ const { registry } = require('../channels/ChannelRegistry');
  */
 function getTgBot() {
     const tg = registry.query('telegram');
-    return tg ? tg.getBotInstance() : null;
+    if (!tg) {
+        console.warn('[getTgBot] registry.query("telegram") returned null');
+        return null;
+    }
+    if (!tg.getBotInstance) {
+        console.warn('[getTgBot] Channel has no getBotInstance method');
+        return null;
+    }
+    const bot = tg.getBotInstance();
+    if (!bot || !bot.telegram) {
+        console.warn(`[getTgBot] getBotInstance() returned ${bot ? 'bot without .telegram' : 'null'}`);
+    }
+    return bot;
 }
 
 async function notifyAdmins(bot, message) {
