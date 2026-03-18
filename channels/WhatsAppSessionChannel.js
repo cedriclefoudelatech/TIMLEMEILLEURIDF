@@ -127,16 +127,23 @@ class WhatsAppSessionChannel extends Channel {
 
 
         this.sock.ev.on('messages.upsert', async (m) => {
-            console.log(`[WA-Debug] Event messages.upsert type=${m.type}, count=${m.messages?.length}`);
-            if (m.type !== 'notify') return;
+            waLog(`[WA-MSG] messages.upsert type=${m.type}, count=${m.messages?.length}`);
+            if (m.type !== 'notify') {
+                waLog(`[WA-MSG] SKIP: type=${m.type} (not notify)`);
+                return;
+            }
             const selfJid = this.sock.user?.id;
+            waLog(`[WA-MSG] selfJid=${selfJid}`);
 
             for (const msg of m.messages) {
                 const remoteJid = msg.key.remoteJid;
                 const isMe = msg.key.fromMe;
 
                 // Ignorer les messages de protocole sans contenu utile
-                if (!msg.message || msg.message?.protocolMessage || msg.message?.senderKeyDistributionMessage) continue;
+                if (!msg.message || msg.message?.protocolMessage || msg.message?.senderKeyDistributionMessage) {
+                    waLog(`[WA-MSG] SKIP protocol/empty from ${remoteJid}`);
+                    continue;
+                }
 
                 const selfJidClean = selfJid?.split(':')[0];
                 const remoteJidClean = remoteJid?.split('@')[0].split(':')[0];
@@ -145,15 +152,15 @@ class WhatsAppSessionChannel extends Channel {
                 // Détecter si le message vient d'un BOT (Baileys ou autre bot instance)
                 const isBotId = msg.key.id.startsWith('BAE5') || msg.key.id.startsWith('3EB0') || msg.key.id.length > 20;
 
-                console.log(`[WA-Debug] MSG: fromMe=${isMe}, isBotId=${isBotId}, remoteJid=${remoteJid}, toSelf=${isMessageToSelf}`);
+                waLog(`[WA-MSG] fromMe=${isMe}, isBotId=${isBotId}, remoteJid=${remoteJid}, toSelf=${isMessageToSelf}, msgKeys=${Object.keys(msg.message || {}).join(',')}`);
 
                 // Empêcher les boucles : on ignore tout ce qui est marqué fromMe SAUF si c'est nous qui écrivons manuellement (pas un ID de bot)
-                if (isMe && isBotId) continue;
+                if (isMe && isBotId) { waLog(`[WA-MSG] SKIP: fromMe+botId`); continue; }
                 // Si c'est un message "To Self" (notre propre compte), on accepte seulement si c'est un message manuel (pas du bot)
                 if (isMe && !isBotId && isMessageToSelf) {
-                    // C'est l'utilisateur humain qui écrit à son propre bot, on continue
+                    waLog(`[WA-MSG] ACCEPT: self-message from human`);
                 } else if (isMe) {
-                    // C'est un message envoyé par le bot vers quelqu'un d'autre ou par nous manuellement vers quelqu'un d'autre
+                    waLog(`[WA-MSG] SKIP: fromMe outbound`);
                     continue;
                 }
 
@@ -171,8 +178,10 @@ class WhatsAppSessionChannel extends Channel {
                     video = [{ file_id: msg.key.id, isWa: true, msg: msg }];
                 }
 
+                waLog(`[WA-MSG] text="${text}", photo=${!!photo}, video=${!!video}, handler=${!!this.messageHandler}`);
+
                 if (this.messageHandler && (text || photo || video)) {
-                    console.log(`[WA-In] Text: "${text}" | Photo: ${!!photo} | Video: ${!!video} | Action: ${isAction} | From: ${remoteJid}`);
+                    waLog(`[WA-In] Processing: "${text}" from ${remoteJid}`);
                     await this.messageHandler({
                         from: remoteJid,
                         name: name,
