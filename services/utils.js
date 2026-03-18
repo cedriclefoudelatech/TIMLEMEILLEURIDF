@@ -225,7 +225,7 @@ async function safeEdit(ctx, text, opts = {}) {
         }
 
     } catch (e) {
-        console.error('❌ safeEdit Fatal:', e.message);
+        console.error('❌ safeEdit Fatal:', e.message, e.stack?.split('\n').slice(0,3).join(' | '));
         try {
             const fb = await ctx.replyWithHTML(text, extra);
             if (fb) {

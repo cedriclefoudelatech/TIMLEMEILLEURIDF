@@ -1,6 +1,11 @@
 const { registry } = require('../channels/ChannelRegistry');
 const { registerUser, getAppSettings } = require('./database');
 const { createPersistentMap } = require('./persistent_map');
+const { WhatsAppSessionChannel } = require('../channels/WhatsAppSessionChannel');
+const waLog = (msg) => {
+    try { const logs = WhatsAppSessionChannel.getLogs(); logs.push(`[${new Date().toISOString()}] ${msg}`); if (logs.length > 200) logs.shift(); } catch(e) {}
+    console.log(msg);
+};
 
 class Dispatcher {
     constructor() {
@@ -410,26 +415,26 @@ class Dispatcher {
 
         // 5. WhatsApp: Fallback numérique seulement si non traité par le reste
         if (ctx.channel.type === 'whatsapp' && /^\d+$/.test(lowerText)) {
-            console.log(`[${platform}] 🔢 PRÉ-FALLBACK: _handled=${ctx._handled}, texte="${lowerText}"`);
+            waLog(`[${platform}] 🔢 PRÉ-FALLBACK: _handled=${ctx._handled}, texte="${lowerText}"`);
         }
         if (ctx.channel.type === 'whatsapp' && /^\d+$/.test(lowerText) && !ctx._handled) {
             const index = parseInt(lowerText) - 1;
             const lastButtons = this.userLastButtons.get(ctx.from.id);
-            console.log(`[${platform}] 🔢 Raccourci numérique "${lowerText}" → index ${index}`);
-            console.log(`[${platform}] 🗂️ Boutons mémorisés: ${lastButtons ? lastButtons.map(b=>b.id).join(', ') : 'AUCUN'}`);
+            waLog(`[${platform}] 🔢 Raccourci numérique "${lowerText}" → index ${index}`);
+            waLog(`[${platform}] 🗂️ Boutons mémorisés: ${lastButtons ? lastButtons.map(b=>b.id).join(', ') : 'AUCUN'}`);
 
             if (lastButtons && lastButtons[index]) {
                 const btn = lastButtons[index];
                 const trigger = btn.id || btn.callback_data;
-                console.log(`[${platform}] ✅ Déclenchement: "${trigger}"`);
+                waLog(`[${platform}] ✅ Déclenchement: "${trigger}"`);
                 if (trigger) await this._routeAction(ctx, trigger);
             } else if (!lastButtons) {
-                console.log(`[${platform}] ❌ Pas de boutons mémorisés pour ${ctx.from.id} — envoyer /start d'abord`);
+                waLog(`[${platform}] ❌ Pas de boutons mémorisés pour ${ctx.from.id} — envoyer /start d'abord`);
             } else {
-                console.log(`[${platform}] ❌ Index ${index} hors limite (${lastButtons.length} boutons disponibles)`);
+                waLog(`[${platform}] ❌ Index ${index} hors limite (${lastButtons.length} boutons disponibles)`);
             }
         }
-        console.log(`[${platform}] _handled: ${ctx._handled}`);
+        waLog(`[${platform}] _handled: ${ctx._handled}`);
     }
 
     async _routeAction(ctx, data) {
@@ -438,7 +443,7 @@ class Dispatcher {
                 try {
                     await fn(ctx);
                 } catch(e) {
-                    console.error(`[ROUTE-ERROR] Handler "${data}" a planté:`, e.message, e.stack?.split('\n')[1]);
+                    waLog(`[ROUTE-ERROR] Handler "${data}" a planté: ${e.message} ${e.stack?.split('\n')[1] || ''}`);
                 }
                 return true;
             } else if (trigger instanceof RegExp) {
@@ -448,7 +453,7 @@ class Dispatcher {
                     try {
                         await fn(ctx);
                     } catch(e) {
-                        console.error(`[ROUTE-ERROR] Handler regex "${trigger}" a planté:`, e.message, e.stack?.split('\n')[1]);
+                        waLog(`[ROUTE-ERROR] Handler regex "${trigger}" a planté: ${e.message} ${e.stack?.split('\n')[1] || ''}`);
                     }
                     return true;
                 }
