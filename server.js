@@ -386,6 +386,7 @@ function createServer() {
     app.post('/api/upload', authMiddleware, async (req, res) => {
         try {
             if (!req.files || !req.files.file) {
+                console.log('[UPLOAD] req.files:', req.files ? Object.keys(req.files) : 'null');
                 return res.status(400).json({ error: 'Aucun fichier téléchargé' });
             }
 
@@ -393,18 +394,45 @@ function createServer() {
             const ext = path.extname(file.name) || (file.mimetype.includes('video') ? '.mp4' : '.jpg');
             const fileName = `${Date.now()}-${Math.round(Math.random() * 1E9)}${ext}`;
 
-            debugLog(`[UPLOAD] Upload Supabase Storage: ${fileName} (${file.mimetype}, size=${file.size})`);
+            console.log(`[UPLOAD] Fichier reçu: ${file.name} (mime=${file.mimetype}, size=${file.size}, dataLen=${file.data?.length || 0}, tempFile=${file.tempFilePath || 'none'})`);
 
             // Upload direct vers Supabase Storage (seule source de vérité — pas de fallback local)
             const { supabase } = require('./config/supabase');
-            // Avec useTempFiles: true, file.data peut être vide — lire depuis le fichier temp
-            let fileBuf = file.data;
-            if ((!fileBuf || fileBuf.length === 0) && file.tempFilePath) {
-                fileBuf = fs.readFileSync(file.tempFilePath);
-                debugLog(`[UPLOAD] Read from tempFile: ${file.tempFilePath} (${fileBuf.length} bytes)`);
+
+            // Avec useTempFiles: true, file.data est un Buffer vide — on DOIT lire le tempFile
+            let fileBuf = null;
+
+            // Priorité 1 : lire depuis le fichier temporaire (plus fiable avec useTempFiles)
+            if (file.tempFilePath) {
+                try {
+                    fileBuf = fs.readFileSync(file.tempFilePath);
+                    console.log(`[UPLOAD] Lu depuis tempFile: ${file.tempFilePath} (${fileBuf.length} bytes)`);
+                } catch (readErr) {
+                    console.error(`[UPLOAD] Erreur lecture tempFile: ${readErr.message}`);
+                }
             }
+
+            // Priorité 2 : utiliser file.data si le tempFile n'a rien donné
+            if ((!fileBuf || fileBuf.length === 0) && file.data && file.data.length > 0) {
+                fileBuf = file.data;
+                console.log(`[UPLOAD] Utilisation file.data: ${fileBuf.length} bytes`);
+            }
+
+            // Priorité 3 : si file.mv existe, utiliser pour copier puis lire
+            if ((!fileBuf || fileBuf.length === 0) && typeof file.mv === 'function') {
+                const tmpPath = `/tmp/upload_fallback_${Date.now()}${ext}`;
+                try {
+                    await file.mv(tmpPath);
+                    fileBuf = fs.readFileSync(tmpPath);
+                    fs.unlinkSync(tmpPath);
+                    console.log(`[UPLOAD] Lu via file.mv fallback: ${fileBuf.length} bytes`);
+                } catch (mvErr) {
+                    console.error(`[UPLOAD] Erreur mv fallback: ${mvErr.message}`);
+                }
+            }
+
             if (!fileBuf || fileBuf.length === 0) {
-                debugLog(`[UPLOAD-FAIL] Buffer vide pour ${file.name}`);
+                console.error(`[UPLOAD-FAIL] Buffer vide pour ${file.name} (size=${file.size})`);
                 return res.status(400).json({ error: 'Fichier vide — upload impossible' });
             }
 
@@ -416,13 +444,13 @@ function createServer() {
                 });
 
             if (error) {
-                debugLog(`[UPLOAD-FAIL] Supabase Storage: ${error.message}`);
+                console.error(`[UPLOAD-FAIL] Supabase Storage: ${error.message}`);
                 return res.status(500).json({ error: `Upload échoué: ${error.message}` });
             }
 
             const { data: publicData } = supabase.storage.from('uploads').getPublicUrl(fileName);
             const finalUrl = publicData.publicUrl;
-            debugLog(`[UPLOAD-OK] ${finalUrl} (${fileBuf.length} bytes)`);
+            console.log(`[UPLOAD-OK] ${finalUrl} (${fileBuf.length} bytes)`);
 
             // Nettoyage du fichier temp
             if (file.tempFilePath) {
@@ -431,7 +459,7 @@ function createServer() {
 
             res.json({ success: true, url: finalUrl });
         } catch (e) {
-            debugLog(`[UPLOAD-FATAL] ${e.message}`);
+            console.error(`[UPLOAD-FATAL] ${e.message}\n${e.stack}`);
             res.status(500).json({ error: e.message });
         }
     });
