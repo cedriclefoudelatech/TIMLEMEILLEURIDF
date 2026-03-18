@@ -56,6 +56,7 @@ class TelegramChannel extends Channel {
         });
 
         this.bot.on('callback_query', async (ctx) => {
+            console.log(`[TG-CB] Callback reçu: "${ctx.callbackQuery.data}" de ${ctx.from.id}`);
             if (this.messageHandler) {
                 await this.messageHandler({
                     from: ctx.from.id,
@@ -65,6 +66,8 @@ class TelegramChannel extends Channel {
                     isAction: true,
                     ctx: ctx
                 });
+            } else {
+                console.error('[TG-CB] ERREUR: Pas de messageHandler !');
             }
         });
     }
