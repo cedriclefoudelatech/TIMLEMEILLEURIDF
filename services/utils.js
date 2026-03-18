@@ -204,6 +204,12 @@ async function safeEdit(ctx, text, opts = {}) {
                 if (photo || video) {
                     if (photo) newMsg = await ctx.replyWithPhoto(photo, { caption: text, ...extra });
                     else newMsg = await ctx.replyWithVideo(video, { caption: text, ...extra });
+                    // Le Dispatcher retourne { success: false } au lieu de throw — détecter ça
+                    if (newMsg && newMsg.success === false && !newMsg.message_id && !newMsg.messageId) {
+                        console.warn(`[SAFE-EDIT] Media retourné success:false, fallback texte`);
+                        photo = null; video = null;
+                        newMsg = await ctx.replyWithHTML(text, extra);
+                    }
                 } else {
                     newMsg = await ctx.replyWithHTML(text, extra);
                 }
