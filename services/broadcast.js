@@ -22,6 +22,13 @@ const DELAY_BETWEEN_BATCHES_MS = 1200;
 let _bot = null;
 function setBroadcastBot(bot) { _bot = bot; }
 
+function _isBroadcastPrivileged(user) {
+    if (user?.is_livreur) return true;
+    const cleanId = String(user?.platform_id || '').match(/\d+/g)?.[0] || '';
+    const adminIds = String(process.env.ADMIN_TELEGRAM_ID || '').match(/\d+/g) || [];
+    return adminIds.includes(cleanId);
+}
+
 async function broadcastMessage(platform, message, options = {}) {
     const {
         mediaFiles = [],
@@ -336,6 +343,7 @@ async function sendToUser(user, message, unifiedMediaList = [], options = {}) {
 
     // On nettoie le chatId pour Telegram (retirer le préfixe 'telegram_' si présent)
     const chatId = String(user.platform_id || '').replace('telegram_', '');
+    const _protect = !_isBroadcastPrivileged(user);
     // Captions are limited to 1024 chars in Telegram
     const maxCaption = 1020;
     const caption = message ? (message.length > maxCaption ? message.substring(0, maxCaption - 3) + '...' : message) : '';
@@ -379,13 +387,14 @@ async function sendToUser(user, message, unifiedMediaList = [], options = {}) {
                 mediaGroup[0].parse_mode = 'HTML';
             }
 
+            const mgOpts = _protect ? { protect_content: true } : {};
             let msgs;
             try {
-                msgs = await _bot.telegram.sendMediaGroup(chatId, mediaGroup);
+                msgs = await _bot.telegram.sendMediaGroup(chatId, mediaGroup, mgOpts);
             } catch (err) {
                 if (err.description?.includes('can\'t parse entities') && mediaGroup[0]) {
                     delete mediaGroup[0].parse_mode;
-                    msgs = await _bot.telegram.sendMediaGroup(chatId, mediaGroup);
+                    msgs = await _bot.telegram.sendMediaGroup(chatId, mediaGroup, mgOpts);
                 } else throw err;
             }
 
@@ -416,10 +425,10 @@ async function sendToUser(user, message, unifiedMediaList = [], options = {}) {
             debugLog(`[BC-SEND] Single ${mData.type.toUpperCase()} -> ${chatId}`);
             let msg;
             if (mData.type === 'video') {
-                msg = await safeSend('sendVideo', mediaObj, { caption: caption, supports_streaming: true, ...(keyboard ? keyboard : {}) });
+                msg = await safeSend('sendVideo', mediaObj, { caption: caption, supports_streaming: true, ...(_protect ? { protect_content: true } : {}), ...(keyboard ? keyboard : {}) });
                 if (msg.video && !mData.file_id) mData.file_id = msg.video.file_id;
             } else {
-                msg = await safeSend('sendPhoto', mediaObj, { caption: caption, ...(keyboard ? keyboard : {}) });
+                msg = await safeSend('sendPhoto', mediaObj, { caption: caption, ...(_protect ? { protect_content: true } : {}), ...(keyboard ? keyboard : {}) });
                 if (msg.photo && !mData.file_id) mData.file_id = msg.photo[msg.photo.length - 1].file_id;
             }
             if (msg && (user.id || user.doc_id)) {
@@ -434,7 +443,7 @@ async function sendToUser(user, message, unifiedMediaList = [], options = {}) {
                 return { success: true }; // On skip les messages vides sans erreur
             }
             try {
-                const msg = await _bot.telegram.sendMessage(chatId, message, { parse_mode: 'HTML', ...(keyboard ? keyboard : {}) });
+                const msg = await _bot.telegram.sendMessage(chatId, message, { parse_mode: 'HTML', ...(_protect ? { protect_content: true } : {}), ...(keyboard ? keyboard : {}) });
                 if (msg && (user.id || user.doc_id)) {
                     const { addMessageToTrack } = require('./database');
                     await addMessageToTrack(user.id || user.doc_id, msg.message_id).catch(() => { });
@@ -442,7 +451,7 @@ async function sendToUser(user, message, unifiedMediaList = [], options = {}) {
             } catch (err) {
                 if (err.description?.includes('can\'t parse entities')) {
                     debugLog(`[BC-RETRY] Plain text fallback for: ${chatId}`);
-                    const msg = await _bot.telegram.sendMessage(chatId, message, (keyboard ? keyboard : {}));
+                    const msg = await _bot.telegram.sendMessage(chatId, message, { ...(_protect ? { protect_content: true } : {}), ...(keyboard ? keyboard : {}) });
                     if (msg && (user.id || user.doc_id)) {
                         const { addMessageToTrack } = require('./database');
                         await addMessageToTrack(user.id || user.doc_id, msg.message_id).catch(() => { });
