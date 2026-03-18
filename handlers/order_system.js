@@ -1410,16 +1410,43 @@ function setupOrderSystem(bot) {
         const rate = parseInt(ctx.match[1]);
         await ctx.answerCbQuery();
         const userId = `${ctx.platform}_${ctx.from.id}`;
-        awaitingReviewText.set(userId, { rate });
+        awaitingReviewText.set(userId, { rate, photos: [], step: 'text' });
 
         await safeEdit(ctx,
-            `✍️ <b>Dites-nous en plus !</b>\n\nÉcrivez votre commentaire (et ajoutez une photo si vous voulez) :`,
+            `✍️ <b>Dites-nous en plus !</b>\n\nÉcrivez votre commentaire ci-dessous.\n<i>Vous pourrez ajouter des photos/vidéos ensuite.</i>`,
             Markup.inlineKeyboard([
                 [Markup.button.callback('⏭ Envoyer juste la note', 'review_skip')],
                 [Markup.button.callback('❌ Annuler', 'main_menu')]
             ])
         );
     });
+
+    // Fonction utilitaire pour uploader un média de review
+    async function _uploadReviewMedia(ctx, userId, mediaItem, isVideo = false) {
+        const ext = isVideo ? '.mp4' : '.jpg';
+        if (ctx.platform === 'whatsapp' && mediaItem.isWa) {
+            try {
+                const { uploadMediaBuffer } = require('../services/database');
+                const buffer = await ctx.channel.downloadMedia(mediaItem.msg);
+                if (buffer) return await uploadMediaBuffer(buffer, `rev_${Date.now()}${ext}`);
+            } catch (e) { console.error('[REVIEW-MEDIA-WA]', e.message); }
+        } else if (ctx.platform === 'telegram') {
+            try {
+                const fileId = isVideo
+                    ? (Array.isArray(mediaItem) ? mediaItem[0]?.file_id : mediaItem?.file_id)
+                    : (Array.isArray(mediaItem) ? mediaItem[mediaItem.length - 1]?.file_id : mediaItem?.file_id);
+                if (fileId) {
+                    const link = await ctx.telegram.getFileLink(fileId);
+                    return await uploadMediaFromUrl(link.href, `rev_${Date.now()}${ext}`);
+                }
+            } catch (e) {
+                console.warn('[REVIEW-MEDIA-TG] Upload failed, using file_id:', e.message);
+                const mediaArr = Array.isArray(mediaItem) ? mediaItem : [mediaItem];
+                return mediaArr[mediaArr.length - 1]?.file_id || null;
+            }
+        }
+        return null;
+    }
 
     bot.action('review_skip', async (ctx) => {
         await ctx.answerCbQuery();
@@ -1434,23 +1461,63 @@ function setupOrderSystem(bot) {
                 user_id: userId,
                 username: ctx.from.username || '?',
                 first_name: ctx.from.first_name || 'Anonyme',
-                text: "Note envoyée sans commentaire",
+                text: data.text || "Note envoyée sans commentaire",
                 rating: parseInt(data.rate),
-                photos: [],
+                photos: data.photos || [],
                 is_public: true
             });
 
             const settings = await getAppSettings();
             const stars = '⭐'.repeat(data.rate);
-            notifyAdmins(bot, `🌟 <b>NOUVEL AVIS GÉNÉRAL !</b>\n\n👤 Client : ${ctx.from.first_name}\n🌟 Note : ${stars}\n💬 Commentaire : (Sans commentaire)`);
+            const mediaCount = (data.photos || []).length;
+            notifyAdmins(bot, `🌟 <b>NOUVEL AVIS GÉNÉRAL !</b>\n\n👤 Client : ${ctx.from.first_name}\n🌟 Note : ${stars}\n💬 Commentaire : ${data.text || '(Sans commentaire)'}${mediaCount > 0 ? `\n🖼 ${mediaCount} média(s) joint(s)` : ''}`);
 
-            await safeEdit(ctx, '✅ <b>Merci !</b> Votre note a été enregistrée. 🏮', {
+            await safeEdit(ctx, settings.msg_review_thanks || '✅ <b>Merci !</b> Votre note a été enregistrée. 🏮', {
                 parse_mode: 'HTML',
                 ...Markup.inlineKeyboard([[Markup.button.callback('◀️ Retour Menu', 'main_menu')]])
             });
         } else {
             await safeEdit(ctx, '❌ Session expirée.', Markup.inlineKeyboard([[Markup.button.callback('◀️ Menu', 'main_menu')]]));
         }
+    });
+
+    // Hint button — just tells user to send a photo/video directly
+    bot.action('review_add_media_hint', async (ctx) => {
+        await ctx.answerCbQuery('📸 Envoyez une photo ou vidéo directement dans le chat !', { show_alert: true });
+    });
+
+    // Finaliser l'avis après avoir ajouté les médias
+    bot.action('review_submit', async (ctx) => {
+        await ctx.answerCbQuery();
+        const userId = `${ctx.platform}_${ctx.from.id}`;
+        const data = awaitingReviewText.get(userId);
+
+        if (!data) {
+            return safeEdit(ctx, '❌ Session expirée.', Markup.inlineKeyboard([[Markup.button.callback('◀️ Menu', 'main_menu')]]));
+        }
+
+        awaitingReviewText.delete(userId);
+        const { saveReview, getAppSettings } = require('../services/database');
+        const settings = await getAppSettings();
+
+        await saveReview({
+            user_id: userId,
+            username: ctx.from.username || '?',
+            first_name: ctx.from.first_name || 'Anonyme',
+            text: data.text || "Note envoyée sans commentaire",
+            rating: parseInt(data.rate),
+            photos: data.photos || [],
+            is_public: true
+        });
+
+        const stars = '⭐'.repeat(data.rate);
+        const mediaCount = (data.photos || []).length;
+        notifyAdmins(bot, `🌟 <b>NOUVEL AVIS GÉNÉRAL !</b>\n\n👤 Client : ${ctx.from.first_name}\n🌟 Note : ${stars}\n💬 ${data.text || '(Sans commentaire)'}${mediaCount > 0 ? `\n🖼 ${mediaCount} média(s)` : ''}`);
+
+        await safeEdit(ctx, settings.msg_review_thanks || '✅ <b>Merci !</b> Votre avis a été publié anonymement. 🏮', {
+            parse_mode: 'HTML',
+            ...Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_menu || '◀️ Retour Menu', 'main_menu')]])
+        });
     });
 
     // State for review pagination
@@ -1658,57 +1725,84 @@ function setupOrderSystem(bot) {
             return;
         }
 
-        // 2. Generic Review (Not tied to order, or from main menu)
+        // 2. Generic Review (Not tied to order, or from main menu) — Multi-step flow
         if (awaitingReviewText.has(userId)) {
             const data = awaitingReviewText.get(userId);
-            const text = ctx.message.text || ctx.message.caption || "(Avis sans texte)";
             const photo = ctx.message.photo ? (Array.isArray(ctx.message.photo) ? ctx.message.photo[ctx.message.photo.length - 1] : ctx.message.photo) : null;
-            awaitingReviewText.delete(userId);
+            const video = ctx.message.video || null;
+            const hasMedia = !!(photo || video);
+            const incomingText = ctx.message.text || ctx.message.caption || null;
 
-            let photoUrls = [];
-            if (photo) {
-                if (ctx.platform === 'whatsapp' && photo.isWa) {
-                    try {
-                        const { uploadMediaBuffer } = require('../services/database');
-                        const buffer = await ctx.channel.downloadMedia(photo.msg);
-                        if (buffer) {
-                             const permanentUrl = await uploadMediaBuffer(buffer, `rev_${Date.now()}.jpg`);
-                             photoUrls.push(permanentUrl);
-                        }
-                    } catch (e) { console.error('[WA-REVIEW-GEN] Photo processing failed:', e.message); }
-                } else if (ctx.telegram) {
-                    try {
-                        const link = await ctx.telegram.getFileLink(photo.file_id || photo);
-                        const permanentUrl = await uploadMediaFromUrl(link.href, `rev_${Date.now()}.jpg`);
-                        photoUrls.push(permanentUrl);
-                    } catch (e) {
-                        console.warn('[REVIEW-GEN] Upload failed, using file_id:', e.message);
-                        photoUrls.push(photo.file_id || photo);
+            // STEP 1: Awaiting text comment
+            if (!data.step || data.step === 'text') {
+                const reviewText = incomingText || "(Avis sans texte)";
+                data.text = reviewText;
+                data.step = 'media';
+                awaitingReviewText.set(userId, data);
+
+                const mediaButtons = [
+                    [Markup.button.callback('📸 Ajouter une photo/vidéo', 'review_add_media_hint')],
+                    [Markup.button.callback('✅ Envoyer maintenant', 'review_submit')]
+                ];
+                await safeEdit(ctx,
+                    `✅ <b>Commentaire enregistré !</b>\n\n💬 "${reviewText}"\n\n📎 Vous pouvez maintenant ajouter des photos ou vidéos, ou envoyer directement votre avis.`,
+                    { parse_mode: 'HTML', ...Markup.inlineKeyboard(mediaButtons) }
+                );
+                return;
+            }
+
+            // STEP 2: Awaiting media (or submit)
+            if (data.step === 'media') {
+                if (hasMedia) {
+                    // Upload the media and accumulate
+                    const isVideo = !!video;
+                    const mediaItem = video || photo;
+                    const url = await _uploadReviewMedia(ctx, userId, mediaItem, isVideo);
+                    if (url) {
+                        data.photos = data.photos || [];
+                        data.photos.push(url);
+                        awaitingReviewText.set(userId, data);
                     }
+
+                    const count = (data.photos || []).length;
+                    const mediaButtons = [
+                        [Markup.button.callback(`📸 Ajouter une autre (${count} ajoutée${count > 1 ? 's' : ''})`, 'review_add_media_hint')],
+                        [Markup.button.callback('✅ Envoyer maintenant', 'review_submit')]
+                    ];
+                    await safeEdit(ctx,
+                        `✅ <b>${count} média${count > 1 ? 's' : ''} ajouté${count > 1 ? 's' : ''} !</b>\n\nEnvoyez d'autres photos/vidéos ou cliquez sur <b>Envoyer maintenant</b>.`,
+                        { parse_mode: 'HTML', ...Markup.inlineKeyboard(mediaButtons) }
+                    );
+                    return;
+                } else if (incomingText) {
+                    // User typed text in media step — treat as "submit" intent
+                    // Fall through to finalise below
                 }
             }
 
-            // generic review save
-            await saveReview({
+            // Finalise: save review with all accumulated data
+            awaitingReviewText.delete(userId);
+            const { saveReview: saveReviewFn, getAppSettings: getAppSettingsFn } = require('../services/database');
+            const reviewSettings = await getAppSettingsFn();
+
+            await saveReviewFn({
                 user_id: userId,
                 username: ctx.from.username || '?',
                 first_name: ctx.from.first_name || 'Anonyme',
-                text,
+                text: data.text || "(Avis sans texte)",
                 rating: parseInt(data.rate),
-                photos: photoUrls,
+                photos: data.photos || [],
                 is_public: true
             });
 
-            // Notify Admin
-            const settings = await getAppSettings();
             const stars = '⭐'.repeat(data.rate);
-            const msg = `🌟 <b>NOUVEL AVIS GÉNÉRAL !</b>\n\n👤 Client : ${ctx.from.first_name}\n🌟 Note : ${stars}\n💬 Commentaire : ${text}` +
-                (photoUrls.length > 0 ? `\n🖼 Image : <a href="${photoUrls[0]}">Voir</a>` : "");
-            notifyAdmins(bot, msg);
+            const mediaCount = (data.photos || []).length;
+            const adminMsg = `🌟 <b>NOUVEL AVIS GÉNÉRAL !</b>\n\n👤 Client : ${ctx.from.first_name}\n🌟 Note : ${stars}\n💬 Commentaire : ${data.text || '(Sans commentaire)'}${mediaCount > 0 ? `\n🖼 ${mediaCount} média(s) joint(s)` : ''}`;
+            notifyAdmins(bot, adminMsg);
 
-            await safeEdit(ctx, settings.msg_review_thanks || '✅ <b>Merci !</b> Votre avis a été publié anonymement. 🏮', {
+            await safeEdit(ctx, reviewSettings.msg_review_thanks || '✅ <b>Merci !</b> Votre avis a été publié anonymement. 🏮', {
                 parse_mode: 'HTML',
-                ...Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_menu || '◀️ Retour Menu', 'main_menu')]])
+                ...Markup.inlineKeyboard([[Markup.button.callback(reviewSettings.btn_back_menu || '◀️ Retour Menu', 'main_menu')]])
             });
             return;
         }

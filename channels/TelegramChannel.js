@@ -111,11 +111,11 @@ class TelegramChannel extends Channel {
             }
 
             // Vérifier si le texte contient du HTML intentionnel
-            const hasHtmlTags = text.match(/<[a-z/][\s\S]*>/i);
+            const hasHtmlTags = text && text.match(/<[a-z/][\s\S]*>/i);
 
-            let finalMsg = text;
+            let finalMsg = text || '';
             if (!hasHtmlTags) {
-                finalMsg = (text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                finalMsg = finalMsg.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
             }
 
             const extra = { parse_mode: 'HTML' };
@@ -123,40 +123,40 @@ class TelegramChannel extends Channel {
             else if (options.inline_keyboard || options.keyboard) extra.reply_markup = options;
             if (options.protect_content) extra.protect_content = true;
 
-            await this.bot.telegram.sendMessage(chatId, finalMsg, extra);
-            return { success: true };
+            const result = await this.bot.telegram.sendMessage(chatId, finalMsg, extra);
+            return { success: true, messageId: result?.message_id, message_id: result?.message_id };
         } catch (error) {
-            console.error(`[TG] Erreur d'envoi à ${chatId}:`, error);
+            console.error(`[TG] Erreur d'envoi à ${chatId}:`, error.message);
             return this._handleError(error);
         }
     }
 
     async sendPhoto(chatId, url, caption, options = {}) {
         try {
-            const extra = { parse_mode: 'HTML', caption: caption };
+            const extra = { parse_mode: 'HTML', caption: caption || '' };
             if (options.reply_markup) extra.reply_markup = options.reply_markup;
             else if (options.inline_keyboard || options.keyboard) extra.reply_markup = options;
             if (options.protect_content) extra.protect_content = true;
 
-            await this.bot.telegram.sendPhoto(chatId, this._resolveMedia(url), extra);
-            return { success: true };
+            const result = await this.bot.telegram.sendPhoto(chatId, this._resolveMedia(url), extra);
+            return { success: true, messageId: result?.message_id, message_id: result?.message_id };
         } catch (error) {
-            console.error(`[TG] Erreur photo à ${chatId}:`, error);
+            console.error(`[TG] Erreur photo à ${chatId}:`, error.message);
             return this._handleError(error);
         }
     }
 
     async sendVideo(chatId, url, caption, options = {}) {
         try {
-            const extra = { parse_mode: 'HTML', caption: caption };
+            const extra = { parse_mode: 'HTML', caption: caption || '' };
             if (options.reply_markup) extra.reply_markup = options.reply_markup;
             else if (options.inline_keyboard || options.keyboard) extra.reply_markup = options;
             if (options.protect_content) extra.protect_content = true;
 
-            await this.bot.telegram.sendVideo(chatId, this._resolveMedia(url), extra);
-            return { success: true };
+            const result = await this.bot.telegram.sendVideo(chatId, this._resolveMedia(url), extra);
+            return { success: true, messageId: result?.message_id, message_id: result?.message_id };
         } catch (error) {
-            console.error(`[TG] Erreur vidéo à ${chatId}:`, error);
+            console.error(`[TG] Erreur vidéo à ${chatId}:`, error.message);
             return this._handleError(error);
         }
     }
@@ -174,26 +174,41 @@ class TelegramChannel extends Channel {
                 }
                 return item;
             });
-            await this.bot.telegram.sendMediaGroup(chatId, telegramMedia);
-            return { success: true };
+            const results = await this.bot.telegram.sendMediaGroup(chatId, telegramMedia);
+            const firstId = Array.isArray(results) ? results[0]?.message_id : results?.message_id;
+            return { success: true, messageId: firstId, message_id: firstId };
         } catch (error) {
-            console.error(`[TG] Erreur MediaGroup à ${chatId}:`, error);
+            console.error(`[TG] Erreur MediaGroup à ${chatId}:`, error.message);
             return this._handleError(error);
         }
     }
 
-    async sendInteractive(userId, text, buttons = []) {
+    async sendInteractive(userId, text, buttons = [], options = {}) {
         // En Telegram, interactiveButtons = Inline Keyboard
         const keyboard = buttons.map((b) => {
             // Sécurité: si c'est un lien URL
             if (b.url) return [Markup.button.url(b.title, b.url)];
+            // Si c'est un webApp
+            if (b.web_app) return [Markup.button.webApp(b.title, b.web_app)];
             // Sinon c'est un callback
             return [Markup.button.callback(b.title, b.id)];
         });
 
-        return this.sendMessage(userId, text, {
-            reply_markup: { inline_keyboard: keyboard }
-        });
+        const sendOpts = {
+            reply_markup: { inline_keyboard: keyboard },
+            protect_content: options.protect_content || false
+        };
+
+        // Si un média est fourni dans les options, on l'envoie avec le clavier
+        if (options.media_url) {
+            if (options.media_type === 'video') {
+                return this.sendVideo(userId, options.media_url, text, sendOpts);
+            } else {
+                return this.sendPhoto(userId, options.media_url, text, sendOpts);
+            }
+        }
+
+        return this.sendMessage(userId, text, sendOpts);
     }
 
     _handleError(error) {

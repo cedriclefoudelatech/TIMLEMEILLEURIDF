@@ -165,6 +165,11 @@ async function safeEdit(ctx, text, opts = {}) {
             try {
                 if (photo) newMsg = await ctx.replyWithPhoto(photo, { caption: text, ...extra });
                 else newMsg = await ctx.replyWithVideo(video, { caption: text, ...extra });
+                // Si le média a échoué (returned falsy or no messageId) → fallback texte
+                if (newMsg && !newMsg.message_id && !newMsg.messageId && newMsg.success === false) {
+                    console.warn('[SAFE-EDIT] Media renvoyé mais marqué failed, fallback texte');
+                    newMsg = await ctx.replyWithHTML(text, extra);
+                }
             } catch (err) {
                 console.error('[SAFE-EDIT] Media Send FAILED:', err.message, '| photo was:', photo ? String(photo).substring(0, 100) : null);
                 newMsg = await ctx.replyWithHTML(text, extra);
@@ -174,11 +179,14 @@ async function safeEdit(ctx, text, opts = {}) {
         }
 
         if (newMsg) {
-            // Sur WA message_id est dans res, sur TG c'est direct
+            // Sur WA message_id est dans res, sur TG c'est direct (messageId depuis sendMessage/sendPhoto)
             const msgId = newMsg.message_id || newMsg.messageId;
             if (msgId) {
                 await addMessageToTrack(userId, msgId).catch(() => { });
                 runCleanup(msgId);
+            } else if (currentMsg && currentMsg.message_id) {
+                // Fallback: si pas de messageId retourné mais on a le msg précédent, nettoyer quand même
+                runCleanup(null);
             }
         }
 

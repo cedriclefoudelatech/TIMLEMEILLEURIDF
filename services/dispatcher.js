@@ -322,7 +322,7 @@ class Dispatcher {
     _convertExtra(extra) {
         const options = {};
         let buttons = [];
-        
+
         if (extra.reply_markup) {
             if (extra.reply_markup.inline_keyboard) {
                 buttons = extra.reply_markup.inline_keyboard.flat();
@@ -335,14 +335,16 @@ class Dispatcher {
             options.buttons = buttons.map(b => ({
                 id: b.callback_data,
                 title: b.text,
-                url: b.url
+                url: b.url,
+                web_app: b.web_app
             }));
             console.log(`[Dispatcher] Extracted ${options.buttons.length} buttons`);
         }
-        
+
         if (extra.parse_mode === 'HTML') options.parse_mode = 'HTML';
         if (extra.photo) options.media_url = extra.photo;
         if (extra.caption) options.caption = extra.caption;
+        if (extra.protect_content) options.protect_content = true;
         return options;
     }
 

@@ -1182,7 +1182,33 @@ const SETTINGS_DEFAULTS = {
     maintenance_contact: 'https://t.me/Lejardinidf',
     btn_back_menu: '◀️ Retour Menu',
     btn_back_menu_nav: '◀️ Retour Menu',
+    btn_cart_resume: '➡️ 🛒 REPRENDRE MON PANIER',
+    btn_client_mode: '🛒 Mode Client (commander)',
+    btn_livreur_space: '🚴 Espace Livreur',
     msg_order_confirmed_client: '',
+    msg_order_received_admin: '',
+    msg_status_taken: '🚚 Votre commande est en route !',
+    msg_status_delivered: '✅ Livraison confirmée ! Merci pour votre commande.',
+    msg_delay_report: '⏳ Un retard est à signaler pour votre commande.',
+    msg_arrival_soon: '🛵 Votre livreur arrive bientôt !',
+    msg_review_prompt: '⭐ Êtes-vous satisfait de votre commande ?',
+    msg_review_thanks: '🙏 Merci pour votre avis !',
+    msg_thanks_participation: 'Merci pour votre participation !',
+    msg_your_answer: 'Votre réponse',
+    btn_leave_review: '⭐ Laisser un avis',
+    btn_view_reviews: '👥 Voir les avis',
+    btn_confirm_review: '✅ Confirmer',
+    label_support: 'Aide & Support',
+    ui_icon_support: '❓',
+    label_reviews: 'Avis',
+    label_users: 'Utilisateurs',
+    label_catalog_title: '',
+    label_info: 'Informations',
+    welcome_photo: '',
+    accent_color: '#4CAF50',
+    languages: 'fr',
+    payment_modes_config: '[]',
+    default_wa_name: 'Utilisateur',
     enable_abandoned_cart_notifications: false,
     msg_abandoned_cart: ''
 };
@@ -1260,8 +1286,19 @@ async function updateAppSettings(settings) {
 
     const { error } = await supabase.from(COL_SETTINGS).update(filtered).eq('id', 'default');
     if (error) {
-        console.error('❌ Error updating settings:', error);
-        throw error;
+        console.error('❌ Error updating settings:', error.message, '— Trying partial save...');
+        // Fallback: save only core fields that always exist
+        const coreFields = ['bot_name', 'welcome_message', 'admin_password', 'admin_telegram_id',
+            'dashboard_url', 'payment_modes', 'maintenance_mode', 'maintenance_message'];
+        const coreFiltered = {};
+        for (const key of coreFields) {
+            if (filtered[key] !== undefined) coreFiltered[key] = filtered[key];
+        }
+        const { error: e2 } = await supabase.from(COL_SETTINGS).update(coreFiltered).eq('id', 'default');
+        if (e2) {
+            throw new Error(`Erreur sauvegarde: ${error.message}`);
+        }
+        console.warn('⚠️ Partial settings save done. Some columns may need SQL migration.');
     }
     _settingsCache = null; // Invalidate cache
 }
