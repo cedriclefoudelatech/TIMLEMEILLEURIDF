@@ -175,58 +175,59 @@ function setupOrderSystem(bot) {
             Markup.button.callback(`${qty}`, `qty_${productId}_${qty}`)
         );
 
-        // Détermination du média à afficher (support multiple)
+        // Détermination du média à afficher
         const allMedia = getAllMediaUrls(product);
-        const keyboard = Markup.inlineKeyboard([buttons, [Markup.button.callback(settings.btn_back_generic || '◀️ Retour', 'view_catalog')]]);
+        const firstMedia = allMedia.length > 0 ? allMedia[0].url : null;
 
-        if (allMedia.length > 1 && ctx.platform === 'telegram' && ctx.telegram) {
-            // Multi-images : envoyer un media group + message texte avec boutons
-            const userId = `${ctx.platform}_${ctx.from.id}`;
-            const chatId = ctx.chat.id;
-            const currentMsg = ctx.callbackQuery?.message;
+        // Boutons : quantités + optionnel "voir toutes les photos" + retour
+        const btnRows = [buttons];
+        if (allMedia.length > 1) {
+            btnRows.push([Markup.button.callback(`📸 Voir les ${allMedia.length} photos/vidéos`, `show_all_media_${productId}`)]);
+        }
+        btnRows.push([Markup.button.callback(settings.btn_back_generic || '◀️ Retour', 'view_catalog')]);
+        const keyboard = Markup.inlineKeyboard(btnRows);
 
-            // Supprimer l'ancien message du menu
-            if (currentMsg) {
-                try { await ctx.telegram.deleteMessage(chatId, currentMsg.message_id).catch(() => {}); } catch(e) {}
-            }
+        // Toujours edit-in-place avec la première image (pas de delete+send)
+        await safeEdit(ctx, text, {
+            ...keyboard,
+            photo: firstMedia
+        });
+    });
 
-            try {
-                // Media group (max 10 images, pas de boutons possible)
-                const mediaGroup = allMedia.slice(0, 10).map((m, i) => ({
-                    type: m.type === 'video' ? 'video' : 'photo',
-                    media: m.url,
-                    ...(i === 0 ? { caption: text, parse_mode: 'HTML' } : {})
-                }));
-                const mgMsgs = await ctx.telegram.sendMediaGroup(chatId, mediaGroup);
+    // Handler : Voir toutes les photos/vidéos d'un produit
+    bot.action(/^show_all_media_(.+)$/, async (ctx) => {
+        await ctx.answerCbQuery('📸 Chargement des médias...');
+        const productId = ctx.match[1];
+        const products = await getProducts();
+        const product = products.find(p => p.id === productId);
+        if (!product) return;
 
-                // Message texte avec les boutons de quantité
-                const btnMsg = await ctx.replyWithHTML('👆 <i>Choisissez une quantité :</i>', { ...keyboard });
+        const allMedia = getAllMediaUrls(product);
+        if (allMedia.length <= 1) return;
 
-                // Tracker tous les messages pour le cleanup
-                const { addMessageToTrack } = require('../services/database');
-                const { trackIntermediateMessage } = require('../services/utils');
-                if (mgMsgs && Array.isArray(mgMsgs)) {
-                    for (const msg of mgMsgs) {
-                        trackIntermediateMessage(userId, msg.message_id);
-                        await addMessageToTrack(userId, msg.message_id, false).catch(() => {});
-                    }
+        const userId = `${ctx.platform}_${ctx.from.id}`;
+        const chatId = ctx.chat.id;
+
+        try {
+            // Envoyer le media group (toutes les images/vidéos)
+            const mediaGroup = allMedia.slice(0, 10).map((m, i) => ({
+                type: m.type === 'video' ? 'video' : 'photo',
+                media: m.url,
+                ...(m.type === 'video' ? { supports_streaming: true } : {})
+            }));
+            const mgMsgs = await ctx.telegram.sendMediaGroup(chatId, mediaGroup);
+
+            // Tracker les messages du media group pour le cleanup
+            const { addMessageToTrack } = require('../services/database');
+            const { trackIntermediateMessage } = require('../services/utils');
+            if (mgMsgs && Array.isArray(mgMsgs)) {
+                for (const msg of mgMsgs) {
+                    trackIntermediateMessage(userId, msg.message_id);
+                    await addMessageToTrack(userId, msg.message_id, false).catch(() => {});
                 }
-                // Le message avec boutons est le "menu" actif
-                const btnMsgId = btnMsg?.message_id || btnMsg?.messageId;
-                if (btnMsgId) {
-                    await addMessageToTrack(userId, btnMsgId, true).catch(() => {});
-                }
-            } catch (mgErr) {
-                console.error('[PRODUCT] MediaGroup failed, fallback single:', mgErr.message);
-                // Fallback : afficher juste la première image
-                await safeEdit(ctx, text, { ...keyboard, photo: allMedia[0].url });
             }
-        } else {
-            // 1 seule image ou pas d'image : comportement normal
-            await safeEdit(ctx, text, {
-                ...keyboard,
-                photo: allMedia.length > 0 ? allMedia[0].url : null
-            });
+        } catch (e) {
+            console.error('[PRODUCT] show_all_media failed:', e.message);
         }
     });
 
