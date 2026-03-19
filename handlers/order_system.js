@@ -8,7 +8,8 @@ const {
     getAndClearPendingFeedback, saveFeedback, addMessageToTrack,
     saveReview, uploadMediaFromUrl,
     getSupplierByTelegramId, getSupplierProducts, getSupplierOrders, markOrderSupplierReady,
-    getSupplier, markOrderSupplierNotified
+    getSupplier, markOrderSupplierNotified,
+    getOrdersByUser
 } = require('../services/database');
 const { safeEdit, debugLog, trackIntermediateMessage, setActiveMediaGroup, clearActiveMediaGroup, getActiveMediaGroup, esc } = require('../services/utils');
 const { createPersistentMap } = require('../services/persistent_map');
@@ -923,11 +924,16 @@ function setupOrderSystem(bot) {
             return safeEdit(ctx, `❌ Erreur lors de la création de la commande.\n\nType: <i>${errMsg}</i>`, Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_quick_menu || '◀️ Menu', 'main_menu')]]));
         }
 
-        // Logic for New Clients (0 previous delivered orders)
-        if (ctx.state.user && (parseInt(ctx.state.user.order_count) || 0) === 0) {
-            const adminContact = (ctx.state?.settings || await getAppSettings()).private_contact_url || 'https://t.me/Lejardinidf';
-            const welcomeMsg = `👋 <b>Bienvenue pour votre première commande !</b>\n\nPour valider votre compte et accélérer votre livraison, merci de contacter l'administrateur : @Lejardinidf\n\n📱 Contact : ${adminContact}`;
-            ctx.reply(welcomeMsg, { parse_mode: 'HTML' }).catch(() => { });
+        // Logic for New Clients — check actual orders in DB
+        try {
+            const previousOrders = await getOrdersByUser(userId);
+            if (!previousOrders || previousOrders.length <= 1) {
+                const adminContact = (ctx.state?.settings || await getAppSettings()).private_contact_url || 'https://t.me/Lejardinidf';
+                const welcomeMsg = `👋 <b>Bienvenue pour votre première commande !</b>\n\nPour valider votre compte et accélérer votre livraison, merci de contacter l'administrateur :\n\n📱 Contact : ${adminContact}`;
+                ctx.reply(welcomeMsg, { parse_mode: 'HTML' }).catch(() => { });
+            }
+        } catch (e) {
+            console.error('[Checkout] First order check failed:', e.message);
         }
 
         const successText = (ctx.state?.settings || await getAppSettings()).msg_order_success || `✅ <b>Commande #${order.id.slice(-5)} envoyée !</b>\n\nUn livreur va vous contacter dès qu'elle sera prise en charge.`;
@@ -999,14 +1005,22 @@ function setupOrderSystem(bot) {
             [Markup.button.callback('⚙️ GÉRER COMMANDE', `admin_order_view_${order.id}`)]
         ];
 
-        await notifyAdmins(bot, adminAlert, Markup.inlineKeyboard(adminButtons));
+        try {
+            console.log('[Checkout] Envoi notification admin...');
+            await notifyAdmins(null, adminAlert, { reply_markup: Markup.inlineKeyboard(adminButtons).reply_markup });
+            console.log('[Checkout] Notification admin envoyée');
+        } catch (err) {
+            console.error("[Checkout] Admin notification failed:", err.message);
+        }
 
         // Notifier TOUS les livreurs via le service central
-        await notifyLivreurs(bot, notificationText, {
-            ...Markup.inlineKeyboard([[Markup.button.callback('📦 Voir les commandes', 'show_available_orders')]])
-        }).catch(err => {
-            console.error("Livreur notification failed:", err.message);
-        });
+        try {
+            console.log('[Checkout] Envoi notification livreurs...');
+            await notifyLivreurs(null, notificationText, { reply_markup: Markup.inlineKeyboard([[Markup.button.callback('📦 Voir les commandes', 'show_available_orders')]]).reply_markup });
+            console.log('[Checkout] Notification livreurs envoyée');
+        } catch (err) {
+            console.error("[Checkout] Livreur notification failed:", err.message);
+        }
 
         // Notifier le fournisseur si le produit a un supplier_id
         try {
