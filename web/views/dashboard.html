@@ -3514,7 +3514,10 @@
                     renderUsersTable(users);
                 }
                 if (id === 'products') {
-                    const products = await api('/products', 'GET', null, silent);
+                    const [products] = await Promise.all([
+                        api('/products', 'GET', null, silent),
+                        loadSupplierDropdown()
+                    ]);
                     window._cachedProducts = products;
 
                     // Charger le dropdown fournisseurs pour le formulaire produit
