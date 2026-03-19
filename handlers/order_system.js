@@ -959,67 +959,78 @@ function setupOrderSystem(bot) {
             Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_menu || '◀️ Retour Menu', 'main_menu')]])
         );
 
-        // Notify Admin / Livreurs
-        const payIcon = pModes.find(m => m.id === paymentMethod)?.icon || '💰';
-        const payLabel = pModes.find(m => m.id === paymentMethod)?.label || paymentMethod;
-
-        const defaultLivreurNotif = `🆕 <b>NOUVELLE COMMANDE !</b>\n\n` +
-            `📦 {product_list}\n` +
-            `📍 {address}\n` +
-            `{scheduled}\n` +
-            `💰 <b>{total}€ ({pay_icon} {pay_label})</b>\n\n` +
-            `<i>Ouvrez votre espace livreur pour la prendre.</i>`;
-        
-        const notificationText = (settings.msg_order_notif_livreur || defaultLivreurNotif)
-            .replace('{product_list}', esc(productList))
-            .replace('{address}', esc(pending.address))
-            .replace('{scheduled}', (pending.scheduled_at ? `🕒 <b>Prévu pour : ${esc(pending.scheduled_at)}</b>` : `🕒 Dès que possible`))
-            .replace('{total}', finalPrice.toFixed(2))
-            .replace('{pay_icon}', payIcon)
-            .replace('{pay_label}', payLabel);
-
-        const defaultAdminAlert = `🚨 <b>NOUVELLE COMMANDE !</b>\n\n` +
-            `📱 <b>Source :</b> {platform}\n` +
-            `👤 Client : {client_name} (@{username})\n` +
-            `📦 Produit : {product_list}\n` +
-            `📍 Adresse : {address}\n` +
-            `{scheduled}\n` +
-            `💰 Total : {total}€ ({pay_icon} {pay_label})\n` +
-            `🔑 ID : <code>{order_id}</code>\n\n` +
-            `Choisissez un livreur ou gérez la commande :`;
-
-        const adminAlert = (settings.msg_order_received_admin || defaultAdminAlert)
-            .replace('{platform}', (ctx.platform === 'whatsapp' ? 'WhatsApp' : 'Telegram'))
-            .replace('{client_name}', esc(ctx.from.first_name))
-            .replace('{username}', (ctx.from.username ? esc(ctx.from.username) : 'Inconnu'))
-            .replace('{product_list}', esc(productList))
-            .replace('{address}', esc(pending.address))
-            .replace('{scheduled}', (pending.scheduled_at ? `🕒 <b>PLANIFIÉ : ${esc(pending.scheduled_at)}</b>` : `🚀 <b>ASAP</b>`))
-            .replace('{total}', finalPrice.toFixed(2))
-            .replace('{pay_icon}', payIcon)
-            .replace('{pay_label}', payLabel)
-            .replace('{order_id}', order.id);
-
-        const adminButtons = [
-            [Markup.button.callback('🤝 ASSIGNER LIVREUR', `admin_order_assign_list_${order.id}`)],
-            [Markup.button.callback('⚙️ GÉRER COMMANDE', `admin_order_view_${order.id}`)]
-        ];
-
+        // === BLOC NOTIFICATIONS (isolé pour ne jamais bloquer le checkout) ===
+        console.log('[Checkout] Déclenchement notifications asynchrones...');
         try {
-            console.log('[Checkout] Envoi notification admin...');
-            await notifyAdmins(null, adminAlert, { reply_markup: Markup.inlineKeyboard(adminButtons).reply_markup });
-            console.log('[Checkout] Notification admin envoyée');
-        } catch (err) {
-            console.error("[Checkout] Admin notification failed:", err.message);
-        }
+            // Résoudre les modes de paiement dans le bon scope
+            let pModes = [];
+            try {
+                pModes = typeof settings.payment_modes_config === 'string' ? JSON.parse(settings.payment_modes_config) : (settings.payment_modes_config || []);
+            } catch (e) { }
+            if (!pModes || pModes.length === 0) pModes = [{ id: 'CASH', label: 'Espèces', icon: '💵' }];
 
-        // Notifier TOUS les livreurs via le service central
-        try {
-            console.log('[Checkout] Envoi notification livreurs...');
-            await notifyLivreurs(null, notificationText, { reply_markup: Markup.inlineKeyboard([[Markup.button.callback('📦 Voir les commandes', 'show_available_orders')]]).reply_markup });
-            console.log('[Checkout] Notification livreurs envoyée');
-        } catch (err) {
-            console.error("[Checkout] Livreur notification failed:", err.message);
+            const payIcon = pModes.find(m => m.id === paymentMethod)?.icon || '💰';
+            const payLabel = pModes.find(m => m.id === paymentMethod)?.label || paymentMethod;
+
+            const defaultLivreurNotif = `🆕 <b>NOUVELLE COMMANDE !</b>\n\n` +
+                `📦 {product_list}\n` +
+                `📍 {address}\n` +
+                `{scheduled}\n` +
+                `💰 <b>{total}€ ({pay_icon} {pay_label})</b>\n\n` +
+                `<i>Ouvrez votre espace livreur pour la prendre.</i>`;
+
+            const notificationText = (settings.msg_order_notif_livreur || defaultLivreurNotif)
+                .replace('{product_list}', esc(productList))
+                .replace('{address}', esc(pending.address))
+                .replace('{scheduled}', (pending.scheduled_at ? `🕒 <b>Prévu pour : ${esc(pending.scheduled_at)}</b>` : `🕒 Dès que possible`))
+                .replace('{total}', finalPrice.toFixed(2))
+                .replace('{pay_icon}', payIcon)
+                .replace('{pay_label}', payLabel);
+
+            const defaultAdminAlert = `🚨 <b>NOUVELLE COMMANDE !</b>\n\n` +
+                `📱 <b>Source :</b> {platform}\n` +
+                `👤 Client : {client_name} (@{username})\n` +
+                `📦 Produit : {product_list}\n` +
+                `📍 Adresse : {address}\n` +
+                `{scheduled}\n` +
+                `💰 Total : {total}€ ({pay_icon} {pay_label})\n` +
+                `🔑 ID : <code>{order_id}</code>\n\n` +
+                `Choisissez un livreur ou gérez la commande :`;
+
+            const adminAlert = (settings.msg_order_received_admin || defaultAdminAlert)
+                .replace('{platform}', (ctx.platform === 'whatsapp' ? 'WhatsApp' : 'Telegram'))
+                .replace('{client_name}', esc(ctx.from.first_name))
+                .replace('{username}', (ctx.from.username ? esc(ctx.from.username) : 'Inconnu'))
+                .replace('{product_list}', esc(productList))
+                .replace('{address}', esc(pending.address))
+                .replace('{scheduled}', (pending.scheduled_at ? `🕒 <b>PLANIFIÉ : ${esc(pending.scheduled_at)}</b>` : `🚀 <b>ASAP</b>`))
+                .replace('{total}', finalPrice.toFixed(2))
+                .replace('{pay_icon}', payIcon)
+                .replace('{pay_label}', payLabel)
+                .replace('{order_id}', order.id);
+
+            const adminButtons = [
+                [Markup.button.callback('🤝 ASSIGNER LIVREUR', `admin_order_assign_list_${order.id}`)],
+                [Markup.button.callback('⚙️ GÉRER COMMANDE', `admin_order_view_${order.id}`)]
+            ];
+
+            try {
+                console.log('[Checkout] Envoi notification admin...');
+                await notifyAdmins(null, adminAlert, { reply_markup: Markup.inlineKeyboard(adminButtons).reply_markup });
+                console.log('[Checkout] Notification admin envoyée');
+            } catch (err) {
+                console.error("[Checkout] Admin notification failed:", err.message);
+            }
+
+            try {
+                console.log('[Checkout] Envoi notification livreurs...');
+                await notifyLivreurs(null, notificationText, { reply_markup: Markup.inlineKeyboard([[Markup.button.callback('📦 Voir les commandes', 'show_available_orders')]]).reply_markup });
+                console.log('[Checkout] Notification livreurs envoyée');
+            } catch (err) {
+                console.error("[Checkout] Livreur notification failed:", err.message);
+            }
+        } catch (notifErr) {
+            console.error('[Checkout] ❌ BLOC NOTIFICATION ENTIER échoué:', notifErr.message);
         }
 
         // Notifier le fournisseur si le produit a un supplier_id
