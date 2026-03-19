@@ -167,77 +167,37 @@ function setupOrderSystem(bot) {
             });
         }
 
-        let text = `📦 <b>${product.name}</b>\n\n` +
-            `💰 Prix : <b>${product.price}€</b>\n` +
-            promoText +
-            `📝 Description : ${product.description || 'Aucune'}\n\n` +
-            `Combien en voulez-vous ?`;
+        let text = `${settings.ui_icon_catalog || '🛒'} <b>${product.name}</b>\n` +
+            `💰 Prix unité : <b>${product.price}€</b>\n` +
+            (promoText ? `${promoText}\n` : "") +
+            (product.description ? `\n<i>${product.description}</i>\n` : "") +
+            `\nChoisissez la quantité :`;
 
-        const buttons = [1, 2, 3, 4, 5].map(qty =>
+        const qtyOptions = [1, 2, 3, 4, 5, 10];
+        const buttons = qtyOptions.map(qty =>
             Markup.button.callback(`${qty}`, `qty_${productId}_${qty}`)
         );
-
-        // Détermination du média à afficher
-        const allMedia = getAllMediaUrls(product);
-        const keyboard = Markup.inlineKeyboard([buttons, [Markup.button.callback(settings.btn_back_generic || '◀️ Retour', 'view_catalog')]]);
+        
+        const rows = [];
+        for (let i = 0; i < buttons.length; i += 3) {
+            rows.push(buttons.slice(i, i + 3));
+        }
+        rows.push([Markup.button.callback('❌ Annuler', 'view_catalog')]);
+        const keyboard = Markup.inlineKeyboard(rows);
 
         const userId = `${ctx.platform}_${ctx.from.id}`;
-        const existingMg = getActiveMediaGroup(userId);
+        // On désactive le media group complexe pour privilégier l'affichage photo+caption professionnel
+        clearActiveMediaGroup(userId);
+        
+        const allMedia = getAllMediaUrls(product);
+        const firstPhoto = allMedia.length > 0 ? allMedia[0].url : null;
+        const isVideo = allMedia.length > 0 && allMedia[0].type === 'video';
 
-        if (allMedia.length > 1 && ctx.platform === 'telegram' && ctx.telegram) {
-            if (existingMg.length > 0) {
-                // RETOUR vers le produit : media group déjà visible → juste éditer le texte+boutons
-                await safeEdit(ctx, text, { ...keyboard });
-            } else {
-                // PREMIÈRE VISITE : créer media group + texte/boutons
-                const chatId = ctx.chat.id;
-                const currentMsg = ctx.callbackQuery?.message;
-
-                // Supprimer l'ancien message (le catalogue)
-                if (currentMsg) {
-                    try { await ctx.telegram.deleteMessage(chatId, currentMsg.message_id).catch(() => {}); } catch(e) {}
-                }
-
-                try {
-                    // Envoyer le media group
-                    const mediaGroup = allMedia.slice(0, 10).map((m, i) => ({
-                        type: m.type === 'video' ? 'video' : 'photo',
-                        media: m.url,
-                        ...(i === 0 ? { caption: `📦 <b>${product.name}</b>`, parse_mode: 'HTML' } : {}),
-                        ...(m.type === 'video' ? { supports_streaming: true } : {})
-                    }));
-                    const mgMsgs = await ctx.telegram.sendMediaGroup(chatId, mediaGroup);
-
-                    // Protéger le media group du cleanup
-                    const mgIds = (mgMsgs || []).map(m => m.message_id).filter(Boolean);
-                    setActiveMediaGroup(userId, mgIds);
-
-                    // Tracker les messages du media group
-                    for (const id of mgIds) {
-                        trackIntermediateMessage(userId, id);
-                        await addMessageToTrack(userId, id, false).catch(() => {});
-                    }
-
-                    // Message texte + boutons (seul ce message sera édité par la suite)
-                    const btnMsg = await ctx.replyWithHTML(text, { ...keyboard });
-                    const btnMsgId = btnMsg?.message_id || btnMsg?.messageId;
-                    if (btnMsgId) {
-                        await addMessageToTrack(userId, btnMsgId, true).catch(() => {});
-                    }
-                } catch (mgErr) {
-                    console.error('[PRODUCT] MediaGroup failed, fallback single:', mgErr.message);
-                    clearActiveMediaGroup(userId);
-                    await safeEdit(ctx, text, { ...keyboard, photo: allMedia[0].url });
-                }
-            }
-        } else {
-            // 1 seule image ou pas d'image : edit-in-place classique
-            clearActiveMediaGroup(userId);
-            await safeEdit(ctx, text, {
-                ...keyboard,
-                photo: allMedia.length > 0 ? allMedia[0].url : null
-            });
-        }
+        await safeEdit(ctx, text, {
+            ...keyboard,
+            photo: isVideo ? null : firstPhoto,
+            video: isVideo ? firstPhoto : null
+        });
     });
 
     bot.action(/^qty_(.+)_(.+)$/, async (ctx) => {
