@@ -10,7 +10,7 @@ const {
     getSupplierByTelegramId, getSupplierProducts, getSupplierOrders, markOrderSupplierReady,
     getSupplier, markOrderSupplierNotified
 } = require('../services/database');
-const { safeEdit, debugLog, trackIntermediateMessage, setActiveMediaGroup, clearActiveMediaGroup, getActiveMediaGroup } = require('../services/utils');
+const { safeEdit, debugLog, trackIntermediateMessage, setActiveMediaGroup, clearActiveMediaGroup, getActiveMediaGroup, esc } = require('../services/utils');
 const { createPersistentMap } = require('../services/persistent_map');
 const { notifyAdmins, notifyLivreurs, sendTelegramMessage } = require('../services/notifications');
 
@@ -94,10 +94,10 @@ function setupOrderSystem(bot) {
 
             const stars = '⭐'.repeat(parseInt(rate));
             const feedbackMsg = `💬 <b>NOUVEAU FEEDBACK !</b>\n\n` +
-                `👤 Client : ${ctx.from.first_name}\n` +
-                `🔑 Commande ID : <code>${orderId}</code>\n` +
+                `👤 Client : ${esc(ctx.from.first_name)}\n` +
+                `🔑 Commande ID : <code>${esc(orderId)}</code>\n` +
                 `🌟 Note : ${stars} (${rate}/5)\n` +
-                `📝 Commentaire : <i>${text}</i>`;
+                `📝 Commentaire : <i>${esc(text)}</i>`;
 
             // Notifier les admins via service central
             await notifyAdmins(bot, feedbackMsg);
@@ -986,9 +986,9 @@ function setupOrderSystem(bot) {
             `<i>Ouvrez votre espace livreur pour la prendre.</i>`;
         
         const notificationText = (settings.msg_order_notif_livreur || defaultLivreurNotif)
-            .replace('{product_list}', productList)
-            .replace('{address}', pending.address)
-            .replace('{scheduled}', (pending.scheduled_at ? `🕒 <b>Prévu pour : ${pending.scheduled_at}</b>` : `🕒 Dès que possible`))
+            .replace('{product_list}', esc(productList))
+            .replace('{address}', esc(pending.address))
+            .replace('{scheduled}', (pending.scheduled_at ? `🕒 <b>Prévu pour : ${esc(pending.scheduled_at)}</b>` : `🕒 Dès que possible`))
             .replace('{total}', finalPrice.toFixed(2))
             .replace('{pay_icon}', payIcon)
             .replace('{pay_label}', payLabel);
@@ -1005,11 +1005,11 @@ function setupOrderSystem(bot) {
 
         const adminAlert = (settings.msg_order_received_admin || defaultAdminAlert)
             .replace('{platform}', (ctx.platform === 'whatsapp' ? 'WhatsApp' : 'Telegram'))
-            .replace('{client_name}', ctx.from.first_name)
-            .replace('{username}', (ctx.from.username || 'Inconnu'))
-            .replace('{product_list}', productList)
-            .replace('{address}', pending.address)
-            .replace('{scheduled}', (pending.scheduled_at ? `🕒 <b>PLANIFIÉ : ${pending.scheduled_at}</b>` : `🚀 <b>ASAP</b>`))
+            .replace('{client_name}', esc(ctx.from.first_name))
+            .replace('{username}', (ctx.from.username ? esc(ctx.from.username) : 'Inconnu'))
+            .replace('{product_list}', esc(productList))
+            .replace('{address}', esc(pending.address))
+            .replace('{scheduled}', (pending.scheduled_at ? `🕒 <b>PLANIFIÉ : ${esc(pending.scheduled_at)}</b>` : `🚀 <b>ASAP</b>`))
             .replace('{total}', finalPrice.toFixed(2))
             .replace('{pay_icon}', payIcon)
             .replace('{pay_label}', payLabel)
@@ -1035,8 +1035,8 @@ function setupOrderSystem(bot) {
                     const supplier = await getSupplier(product.supplier_id);
                     if (supplier && supplier.telegram_id) {
                         const supplierMsg = (settings.msg_supplier_new_order || '📦 <b>Nouvelle commande !</b>') +
-                            `\n\n📦 Produit : ${product.name} x${item.qty || 1}\n` +
-                            `📍 Adresse : ${pending.address}\n` +
+                            `\n\n📦 Produit : ${esc(product.name)} x${item.qty || 1}\n` +
+                            `📍 Adresse : ${esc(pending.address)}\n` +
                             `🔑 Commande : #${order.id.slice(-5)}`;
                         await sendTelegramMessage(supplier.telegram_id, supplierMsg);
                         await markOrderSupplierNotified(order.id);
@@ -1673,7 +1673,7 @@ function setupOrderSystem(bot) {
 
         const stars = '⭐'.repeat(data.rate);
         const mediaCount = (data.photos || []).length;
-        await notifyAdmins(bot, `🌟 <b>NOUVEL AVIS GÉNÉRAL !</b>\n\n👤 Client : ${ctx.from.first_name}\n🌟 Note : ${stars}\n💬 ${data.text || '(Sans commentaire)'}${mediaCount > 0 ? `\n🖼 ${mediaCount} média(s)` : ''}`);
+        await notifyAdmins(bot, `🌟 <b>NOUVEL AVIS GÉNÉRAL !</b>\n\n👤 Client : ${esc(ctx.from.first_name)}\n🌟 Note : ${stars}\n💬 ${esc(data.text || '(Sans commentaire)')}${mediaCount > 0 ? `\n🖼 ${mediaCount} média(s)` : ''}`);
 
         await safeEdit(ctx, settings.msg_review_thanks || '✅ <b>Merci !</b> Votre avis a été publié anonymement. 🏮', {
             parse_mode: 'HTML',
@@ -2273,7 +2273,7 @@ function setupOrderSystem(bot) {
         const settings = await getAppSettings();
         
         // Notification Admin
-        await notifyAdmins(bot, `💬 <b>CONTACT ADMIN SOLICITÉ</b>\n\n👤 Client : ${ctx.from.first_name} (@${ctx.from.username || 'Inconnu'})\nID : <code>${ctx.from.id}</code>`);
+        await notifyAdmins(bot, `💬 <b>CONTACT ADMIN SOLICITÉ</b>\n\n👤 Client : ${esc(ctx.from.first_name)} (@${esc(ctx.from.username || 'Inconnu')})\nID : <code>${ctx.from.id}</code>`);
 
         if (settings.private_contact_url) {
             return safeEdit(ctx, `💬 <b>Besoin d'un admin ?</b>\n\nContact direct : <a href="${settings.private_contact_url}">${settings.private_contact_url}</a>\n\nCliquez aussi sur le bouton ci-dessous :`,
