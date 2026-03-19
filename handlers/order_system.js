@@ -13,7 +13,7 @@ const {
 } = require('../services/database');
 const { safeEdit, debugLog, trackIntermediateMessage, setActiveMediaGroup, clearActiveMediaGroup, getActiveMediaGroup, esc } = require('../services/utils');
 const { createPersistentMap } = require('../services/persistent_map');
-const { notifyAdmins, notifyLivreurs, sendTelegramMessage } = require('../services/notifications');
+const { notifyAdmins, notifyLivreurs, notifySuppliers, sendTelegramMessage } = require('../services/notifications');
 
 // ======= ÉTAT PERSISTANT (survit aux redémarrages via Supabase) =======
 const userCarts = createPersistentMap('userCarts');
@@ -959,100 +959,76 @@ function setupOrderSystem(bot) {
             Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_menu || '◀️ Retour Menu', 'main_menu')]])
         );
 
-        // === BLOC NOTIFICATIONS (isolé pour ne jamais bloquer le checkout) ===
-        console.log('[Checkout] Déclenchement notifications asynchrones...');
+        // Notify Admin / Livreurs - Résolution des modes de paiement
+        let pModes = [];
         try {
-            // Résoudre les modes de paiement dans le bon scope
-            let pModes = [];
-            try {
-                pModes = typeof settings.payment_modes_config === 'string' ? JSON.parse(settings.payment_modes_config) : (settings.payment_modes_config || []);
-            } catch (e) { }
-            if (!pModes || pModes.length === 0) pModes = [{ id: 'CASH', label: 'Espèces', icon: '💵' }];
+            pModes = typeof settings.payment_modes_config === 'string' ? JSON.parse(settings.payment_modes_config) : (settings.payment_modes_config || []);
+        } catch(e) { }
+        if (!pModes || pModes.length === 0) pModes = [{ id: 'CASH', label: 'Espèces', icon: '💵' }];
 
-            const payIcon = pModes.find(m => m.id === paymentMethod)?.icon || '💰';
-            const payLabel = pModes.find(m => m.id === paymentMethod)?.label || paymentMethod;
+        const payIcon = pModes.find(m => m.id === paymentMethod)?.icon || '💰';
+        const payLabel = pModes.find(m => m.id === paymentMethod)?.label || paymentMethod;
 
-            const defaultLivreurNotif = `🆕 <b>NOUVELLE COMMANDE !</b>\n\n` +
-                `📦 {product_list}\n` +
-                `📍 {address}\n` +
-                `{scheduled}\n` +
-                `💰 <b>{total}€ ({pay_icon} {pay_label})</b>\n\n` +
-                `<i>Ouvrez votre espace livreur pour la prendre.</i>`;
+        const defaultLivreurNotif = `🆕 <b>NOUVELLE COMMANDE !</b>\n\n` +
+            `📦 {product_list}\n` +
+            `📍 {address}\n` +
+            `{scheduled}\n` +
+            `💰 <b>{total}€ ({pay_icon} {pay_label})</b>\n\n` +
+            `<i>Ouvrez votre espace livreur pour la prendre.</i>`;
 
-            const notificationText = (settings.msg_order_notif_livreur || defaultLivreurNotif)
-                .replace('{product_list}', esc(productList))
-                .replace('{address}', esc(pending.address))
-                .replace('{scheduled}', (pending.scheduled_at ? `🕒 <b>Prévu pour : ${esc(pending.scheduled_at)}</b>` : `🕒 Dès que possible`))
-                .replace('{total}', finalPrice.toFixed(2))
-                .replace('{pay_icon}', payIcon)
-                .replace('{pay_label}', payLabel);
+        const notificationText = (settings.msg_order_notif_livreur || defaultLivreurNotif)
+            .replace('{product_list}', esc(productList))
+            .replace('{address}', esc(pending.address))
+            .replace('{scheduled}', (pending.scheduled_at ? `🕒 <b>Prévu pour : ${esc(pending.scheduled_at)}</b>` : `🕒 Dès que possible`))
+            .replace('{total}', finalPrice.toFixed(2))
+            .replace('{pay_icon}', payIcon)
+            .replace('{pay_label}', payLabel);
 
-            const defaultAdminAlert = `🚨 <b>NOUVELLE COMMANDE !</b>\n\n` +
-                `📱 <b>Source :</b> {platform}\n` +
-                `👤 Client : {client_name} (@{username})\n` +
-                `📦 Produit : {product_list}\n` +
-                `📍 Adresse : {address}\n` +
-                `{scheduled}\n` +
-                `💰 Total : {total}€ ({pay_icon} {pay_label})\n` +
-                `🔑 ID : <code>{order_id}</code>\n\n` +
-                `Choisissez un livreur ou gérez la commande :`;
+        const defaultAdminAlert = `🚨 <b>NOUVELLE COMMANDE !</b>\n\n` +
+            `📱 <b>Source :</b> {platform}\n` +
+            `👤 Client : {client_name} (@{username})\n` +
+            `📦 Produit : {product_list}\n` +
+            `📍 Adresse : {address}\n` +
+            `{scheduled}\n` +
+            `💰 Total : {total}€ ({pay_icon} {pay_label})\n` +
+            `🔑 ID : <code>{order_id}</code>\n\n` +
+            `Choisissez un livreur ou gérez la commande :`;
 
-            const adminAlert = (settings.msg_order_received_admin || defaultAdminAlert)
-                .replace('{platform}', (ctx.platform === 'whatsapp' ? 'WhatsApp' : 'Telegram'))
-                .replace('{client_name}', esc(ctx.from.first_name))
-                .replace('{username}', (ctx.from.username ? esc(ctx.from.username) : 'Inconnu'))
-                .replace('{product_list}', esc(productList))
-                .replace('{address}', esc(pending.address))
-                .replace('{scheduled}', (pending.scheduled_at ? `🕒 <b>PLANIFIÉ : ${esc(pending.scheduled_at)}</b>` : `🚀 <b>ASAP</b>`))
-                .replace('{total}', finalPrice.toFixed(2))
-                .replace('{pay_icon}', payIcon)
-                .replace('{pay_label}', payLabel)
-                .replace('{order_id}', order.id);
+        const adminAlert = (settings.msg_order_received_admin || defaultAdminAlert)
+            .replace('{platform}', (ctx.platform === 'whatsapp' ? 'WhatsApp' : 'Telegram'))
+            .replace('{client_name}', esc(ctx.from.first_name))
+            .replace('{username}', (ctx.from.username ? esc(ctx.from.username) : 'Inconnu'))
+            .replace('{product_list}', esc(productList))
+            .replace('{address}', esc(pending.address))
+            .replace('{scheduled}', (pending.scheduled_at ? `🕒 <b>PLANIFIÉ : ${esc(pending.scheduled_at)}</b>` : `🚀 <b>ASAP</b>`))
+            .replace('{total}', finalPrice.toFixed(2))
+            .replace('{pay_icon}', payIcon)
+            .replace('{pay_label}', payLabel)
+            .replace('{order_id}', order?.id || 'NO_ID');
 
-            const adminButtons = [
-                [Markup.button.callback('🤝 ASSIGNER LIVREUR', `admin_order_assign_list_${order.id}`)],
-                [Markup.button.callback('⚙️ GÉRER COMMANDE', `admin_order_view_${order.id}`)]
-            ];
+        const adminButtons = [
+            [Markup.button.callback('🤝 ASSIGNER LIVREUR', `admin_order_assign_list_${order.id}`)],
+            [Markup.button.callback('⚙️ GÉRER COMMANDE', `admin_order_view_${order.id}`)]
+        ];
 
-            try {
-                console.log('[Checkout] Envoi notification admin...');
-                await notifyAdmins(null, adminAlert, { reply_markup: Markup.inlineKeyboard(adminButtons).reply_markup });
-                console.log('[Checkout] Notification admin envoyée');
-            } catch (err) {
-                console.error("[Checkout] Admin notification failed:", err.message);
-            }
+        // Notifier et traiter en arrière-plan (NE PAS BLOQUER LE CLIENT)
+        console.log('[Checkout] Déclenchement notifications asynchrones...');
 
-            try {
-                console.log('[Checkout] Envoi notification livreurs...');
-                await notifyLivreurs(null, notificationText, { reply_markup: Markup.inlineKeyboard([[Markup.button.callback('📦 Voir les commandes', 'show_available_orders')]]).reply_markup });
-                console.log('[Checkout] Notification livreurs envoyée');
-            } catch (err) {
-                console.error("[Checkout] Livreur notification failed:", err.message);
-            }
-        } catch (notifErr) {
-            console.error('[Checkout] ❌ BLOC NOTIFICATION ENTIER échoué:', notifErr.message);
-        }
+        // Notification Admin
+        notifyAdmins(bot, adminAlert, { reply_markup: Markup.inlineKeyboard(adminButtons).reply_markup }).catch(err => {
+            console.error("[Checkout] Admin notification failed:", err.message);
+        });
+
+        // Notification Livreurs
+        notifyLivreurs(bot, notificationText, { reply_markup: Markup.inlineKeyboard([[Markup.button.callback('📦 Voir les commandes', 'show_available_orders')]]).reply_markup }).catch(err => {
+            console.error("[Checkout] Livreur notification failed:", err.message);
+        });
 
         // Notifier le fournisseur si le produit a un supplier_id
-        try {
-            // Utiliser le panier (cart) plutôt que pending.items (qui n'existe pas)
-            const cartItems = cart.length > 0 ? cart : (pending ? [pending] : []);
-            const products = await getProducts();
-            for (const item of cartItems) {
-                const product = products.find(p => p.id === item.productId || p.name === item.productName);
-                if (product && product.supplier_id) {
-                    const supplier = await getSupplier(product.supplier_id);
-                    if (supplier && supplier.telegram_id) {
-                        const supplierMsg = (settings.msg_supplier_new_order || '📦 <b>Nouvelle commande !</b>') +
-                            `\n\n📦 Produit : ${esc(product.name)} x${item.qty || 1}\n` +
-                            `📍 Adresse : ${esc(pending.address)}\n` +
-                            `🔑 Commande : #${order.id.slice(-5)}`;
-                        await sendTelegramMessage(supplier.telegram_id, supplierMsg);
-                        await markOrderSupplierNotified(order.id);
-                    }
-                }
-            }
-        } catch (e) { console.error('[SUPPLIER-NOTIFY] Error:', e.message); }
+        const cartItems = cart.length > 0 ? cart : [pending];
+        notifySuppliers(bot, cartItems, order.id, pending.address, settings).catch(err => {
+            console.error("Supplier notification failed:", err.message);
+        });
     });
 
     // ========== SYSTEME LIVREUR ==========
