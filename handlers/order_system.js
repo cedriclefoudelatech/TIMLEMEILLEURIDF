@@ -2396,7 +2396,23 @@ function setupOrderSystem(bot) {
             [Markup.button.callback('📋 Commandes en cours', 'supplier_orders')],
             [Markup.button.callback('📦 Mes produits', 'supplier_products')],
             [Markup.button.callback(settings.btn_supplier_my_sales || '📊 Mes ventes', 'supplier_sales')],
+            [Markup.button.callback('❓ Comment ça marche ?', 'supplier_guide')],
             [Markup.button.callback(settings.btn_back_menu || '◀️ Retour Menu', 'main_menu')]
+        ]));
+    });
+
+    bot.action('supplier_guide', async (ctx) => {
+        await ctx.answerCbQuery();
+        const text = `📘 <b>Guide Fournisseur</b>\n\n` +
+            `Voici comment gérer votre activité sur le bot :\n\n` +
+            `1️⃣ <b>Commandes :</b> Dès qu'un client commande un de vos produits, vous recevez une notification ici.\n\n` +
+            `2️⃣ <b>Préparation :</b> Allez dans "Commandes en cours" pour voir les détails. Cliquez sur <b>"Prêt ✅"</b> dès que le produit est prêt à être récupéré.\n\n` +
+            `3️⃣ <b>Ventes & Revenus :</b> Consultez "Mes ventes" pour voir votre chiffre d'affaires total et vos commissions accumulées.\n\n` +
+            `4️⃣ <b>Produits :</b> Vérifiez la liste de vos produits assignés dans "Mes produits".\n\n` +
+            `<i>Besoin d'aide ? Contactez l'administrateur.</i>`;
+
+        await safeEdit(ctx, text, Markup.inlineKeyboard([
+            [Markup.button.callback('◀️ Retour Espace Fournisseur', 'supplier_menu')]
         ]));
     });
 
