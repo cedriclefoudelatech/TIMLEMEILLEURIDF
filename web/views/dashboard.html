@@ -2338,7 +2338,12 @@
             <div class="card" style="margin-bottom:20px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
                     <h1 style="margin:0;">🏪 Fournisseurs</h1>
-                    <button class="btn btn-primary" onclick="openSupplierForm()">➕ Ajouter</button>
+                    <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                        <button class="btn btn-outline" onclick="switchSupplierTab('list')" id="tabBtnList" style="font-weight:600; background:rgba(106,90,205,0.15);">📋 Liste</button>
+                        <button class="btn btn-outline" onclick="switchSupplierTab('marketplace')" id="tabBtnMarketplace">🏪 Marketplace</button>
+                        <button class="btn btn-outline" onclick="switchSupplierTab('mpOrders')" id="tabBtnMpOrders">📋 Commandes</button>
+                        <button class="btn btn-primary" onclick="openSupplierForm()">➕ Ajouter</button>
+                    </div>
                 </div>
             </div>
 
@@ -2384,8 +2389,41 @@
             </div>
 
             <!-- Supplier List -->
-            <div class="card">
+            <div class="card" id="supplierListCard">
                 <div id="suppliersList"></div>
+            </div>
+
+            <!-- ===== MARKETPLACE TAB ===== -->
+            <div id="marketplaceTab" style="display:none;">
+                <div class="card" style="margin-bottom:20px; border-left:4px solid #6a5acd;">
+                    <h3>🏪 Marketplace Fournisseurs</h3>
+                    <p style="font-size:13px;">Produits gérés directement par les fournisseurs depuis Telegram. Parcourez les magasins et passez vos commandes.</p>
+                </div>
+
+                <!-- Filtre par fournisseur -->
+                <div class="card" style="margin-bottom:15px;">
+                    <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                        <label style="font-weight:600;">🔍 Filtrer par magasin :</label>
+                        <select id="mpFilterSupplier" class="form-control" style="max-width:250px;" onchange="loadMarketplaceProducts()">
+                            <option value="">Tous les fournisseurs</option>
+                        </select>
+                        <span id="mpProductCount" style="font-size:13px; color:var(--text-muted);"></span>
+                    </div>
+                </div>
+
+                <!-- Grille de produits marketplace -->
+                <div id="mpProductsGrid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:15px;"></div>
+            </div>
+
+            <!-- ===== COMMANDES MARKETPLACE TAB ===== -->
+            <div id="mpOrdersTab" style="display:none;">
+                <div class="card" style="margin-bottom:20px; border-left:4px solid #e67e22;">
+                    <h3>📋 Commandes Marketplace</h3>
+                    <p style="font-size:13px;">Historique de vos commandes passées aux fournisseurs.</p>
+                </div>
+                <div class="card">
+                    <div id="mpOrdersList"></div>
+                </div>
             </div>
         </div>
 
@@ -5472,6 +5510,183 @@
                 switchSection('suppliers');
             } catch(e) { showToast('Erreur: ' + e.message, 'error'); }
         }
+
+        // ========== MARKETPLACE FUNCTIONS ==========
+        let mpProductsData = [];
+        let mpOrdersData = [];
+
+        function switchSupplierTab(tab) {
+            const listEls = ['supplierFormCard', 'supplierGuideCard', 'supplierListCard'];
+            const mpTab = document.getElementById('marketplaceTab');
+            const mpOrdersTab = document.getElementById('mpOrdersTab');
+
+            // Hide all
+            listEls.forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
+            if (mpTab) mpTab.style.display = 'none';
+            if (mpOrdersTab) mpOrdersTab.style.display = 'none';
+
+            // Show selected
+            if (tab === 'list') listEls.forEach(id => { const el = document.getElementById(id); if (el && id !== 'supplierFormCard') el.style.display = ''; });
+            if (tab === 'marketplace' && mpTab) mpTab.style.display = '';
+            if (tab === 'mpOrders' && mpOrdersTab) mpOrdersTab.style.display = '';
+
+            // Update tab button styles
+            ['tabBtnList', 'tabBtnMarketplace', 'tabBtnMpOrders'].forEach(id => {
+                const btn = document.getElementById(id);
+                if (btn) {
+                    btn.style.fontWeight = '400';
+                    btn.style.background = 'transparent';
+                }
+            });
+            const activeBtn = { list: 'tabBtnList', marketplace: 'tabBtnMarketplace', mpOrders: 'tabBtnMpOrders' }[tab];
+            const activeBtnEl = document.getElementById(activeBtn);
+            if (activeBtnEl) { activeBtnEl.style.fontWeight = '600'; activeBtnEl.style.background = 'rgba(106,90,205,0.15)'; }
+
+            // Load data
+            if (tab === 'marketplace') loadMarketplaceProducts();
+            if (tab === 'mpOrders') loadMarketplaceOrders();
+        }
+
+        async function loadMarketplaceProducts() {
+            const filterSupplier = document.getElementById('mpFilterSupplier')?.value || '';
+            const url = filterSupplier ? `/api/marketplace/products?supplier_id=${filterSupplier}` : '/api/marketplace/products';
+            try {
+                mpProductsData = await api(url, 'GET', null, true) || [];
+                renderMarketplaceProducts();
+                // Populate supplier filter
+                const select = document.getElementById('mpFilterSupplier');
+                if (select && select.options.length <= 1) {
+                    const suppliers = await api('/api/suppliers', 'GET', null, true) || [];
+                    suppliers.forEach(s => {
+                        if (!Array.from(select.options).find(o => o.value === s.id)) {
+                            const opt = document.createElement('option');
+                            opt.value = s.id;
+                            opt.textContent = s.name;
+                            select.appendChild(opt);
+                        }
+                    });
+                }
+            } catch(e) { console.error('loadMarketplaceProducts:', e); }
+        }
+
+        function renderMarketplaceProducts() {
+            const grid = document.getElementById('mpProductsGrid');
+            const countEl = document.getElementById('mpProductCount');
+            if (!grid) return;
+
+            if (countEl) countEl.textContent = `${mpProductsData.length} produit(s)`;
+
+            if (mpProductsData.length === 0) {
+                grid.innerHTML = '<div class="card" style="grid-column:1/-1; text-align:center; padding:40px;"><p style="color:var(--text-muted);">📭 Aucun produit marketplace.<br><small>Les fournisseurs peuvent ajouter des produits via le bot Telegram.</small></p></div>';
+                return;
+            }
+
+            grid.innerHTML = mpProductsData.map(p => {
+                const statusColor = p.is_available && p.stock > 0 ? '#27ae60' : '#e74c3c';
+                const statusText = p.is_available && p.stock > 0 ? 'En vente' : 'Indisponible';
+                const imgHtml = p.image_url ? `<img src="${p.image_url}" style="width:100%; height:140px; object-fit:cover; border-radius:8px 8px 0 0;" onerror="this.style.display='none'">` : `<div style="height:80px; background:linear-gradient(135deg, #6a5acd22, #9370db22); border-radius:8px 8px 0 0; display:flex; align-items:center; justify-content:center; font-size:32px;">📦</div>`;
+                return `
+                    <div class="card" style="padding:0; overflow:hidden;">
+                        ${imgHtml}
+                        <div style="padding:12px;">
+                            <div style="display:flex; justify-content:space-between; align-items:start;">
+                                <h4 style="margin:0 0 4px;">${p.name}</h4>
+                                <span style="background:${statusColor}22; color:${statusColor}; padding:2px 8px; border-radius:10px; font-size:11px; white-space:nowrap;">${statusText}</span>
+                            </div>
+                            <div style="font-size:22px; font-weight:700; color:var(--accent); margin:6px 0;">${p.price}€</div>
+                            <div style="display:flex; gap:8px; font-size:12px; color:var(--text-muted); margin-bottom:6px;">
+                                <span>📦 Stock: <b>${p.stock || 0}</b></span>
+                                ${p.category ? '<span>🏷 ' + p.category + '</span>' : ''}
+                            </div>
+                            ${p.description ? '<p style="font-size:12px; color:var(--text-muted); margin:4px 0 8px;">' + p.description.substring(0, 80) + '</p>' : ''}
+                            <div style="display:flex; gap:6px; margin-top:8px;">
+                                <button class="btn btn-sm btn-outline" onclick="editMpProduct('${p.id}')" title="Modifier">✏️</button>
+                                <button class="btn btn-sm btn-outline" style="color:red;" onclick="deleteMpProduct('${p.id}')" title="Supprimer">🗑</button>
+                            </div>
+                        </div>
+                    </div>`;
+            }).join('');
+        }
+
+        async function editMpProduct(id) {
+            const p = mpProductsData.find(x => x.id === id);
+            if (!p) return;
+            const newPrice = prompt('Nouveau prix :', p.price);
+            if (newPrice === null) return;
+            const newStock = prompt('Nouveau stock :', p.stock);
+            if (newStock === null) return;
+            try {
+                await api('/api/marketplace/products', 'POST', {
+                    id: p.id,
+                    price: parseFloat(newPrice) || p.price,
+                    stock: parseInt(newStock) || p.stock,
+                    is_available: parseInt(newStock) > 0
+                }, true);
+                showToast('✅ Produit mis à jour', 'success');
+                loadMarketplaceProducts();
+            } catch(e) { showToast('Erreur: ' + e.message, 'error'); }
+        }
+
+        async function deleteMpProduct(id) {
+            if (!confirm('Supprimer ce produit marketplace ?')) return;
+            try {
+                await api('/api/marketplace/products/' + id, 'DELETE', null, true);
+                showToast('🗑 Produit supprimé', 'success');
+                loadMarketplaceProducts();
+            } catch(e) { showToast('Erreur: ' + e.message, 'error'); }
+        }
+
+        async function loadMarketplaceOrders() {
+            try {
+                mpOrdersData = await api('/api/marketplace/orders', 'GET', null, true) || [];
+                renderMarketplaceOrders();
+            } catch(e) { console.error('loadMarketplaceOrders:', e); }
+        }
+
+        function renderMarketplaceOrders() {
+            const el = document.getElementById('mpOrdersList');
+            if (!el) return;
+
+            if (mpOrdersData.length === 0) {
+                el.innerHTML = '<p style="text-align:center; color:var(--text-muted); padding:20px;">📭 Aucune commande marketplace.</p>';
+                return;
+            }
+
+            el.innerHTML = `<div style="overflow-x:auto;"><table style="width:100%; border-collapse:collapse;">
+                <thead><tr style="border-bottom:2px solid var(--border); text-align:left;">
+                    <th style="padding:8px;">ID</th>
+                    <th style="padding:8px;">Fournisseur</th>
+                    <th style="padding:8px;">Produits</th>
+                    <th style="padding:8px;">Total</th>
+                    <th style="padding:8px;">Statut</th>
+                    <th style="padding:8px;">Date</th>
+                    <th style="padding:8px;">Actions</th>
+                </tr></thead>
+                <tbody>${mpOrdersData.map(o => {
+                    const statusColors = { pending: '#f39c12', accepted: '#3498db', ready: '#27ae60', collected: '#95a5a6', cancelled: '#e74c3c' };
+                    const statusLabels = { pending: '⏳ En attente', accepted: '✅ Acceptée', ready: '📦 Prête', collected: '🏁 Récupérée', cancelled: '❌ Annulée' };
+                    const items = Array.isArray(o.products) ? o.products.map(p => p.name + ' x' + p.qty).join(', ') : 'N/A';
+                    const date = o.created_at ? new Date(o.created_at).toLocaleDateString('fr-FR', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' }) : '';
+                    return '<tr style="border-bottom:1px solid var(--border);">' +
+                        '<td style="padding:8px; font-family:monospace;">#' + o.id.slice(-6) + '</td>' +
+                        '<td style="padding:8px;">' + (o.supplier_name || o.supplier_id?.slice(0,8) || '?') + '</td>' +
+                        '<td style="padding:8px; font-size:12px;">' + items + '</td>' +
+                        '<td style="padding:8px; font-weight:600;">' + o.total_price + '€</td>' +
+                        '<td style="padding:8px;"><span style="background:' + (statusColors[o.status]||'#999') + '22; color:' + (statusColors[o.status]||'#999') + '; padding:2px 8px; border-radius:10px; font-size:11px;">' + (statusLabels[o.status] || o.status) + '</span></td>' +
+                        '<td style="padding:8px; font-size:12px;">' + date + '</td>' +
+                        '<td style="padding:8px;">' + (o.status === 'ready' ? '<button class="btn btn-sm" style="background:#27ae60; color:#fff; border:none;" onclick="collectMpOrder(\'' + o.id + '\')">🏁 Récupérée</button>' : '') + '</td>' +
+                    '</tr>';
+                }).join('')}</tbody></table></div>`;
+        }
+
+        async function collectMpOrder(orderId) {
+            try {
+                await api('/api/marketplace/orders/' + orderId + '/status', 'POST', { status: 'collected' }, true);
+                showToast('✅ Commande récupérée', 'success');
+                loadMarketplaceOrders();
+            } catch(e) { showToast('Erreur: ' + e.message, 'error'); }
+        }
+        // ========== FIN MARKETPLACE FUNCTIONS ==========
 
         // --- PREMIUM TIMING LOGIC (Popover + Custom Selection) ---
         let selectedDates = { start: null, end: null };

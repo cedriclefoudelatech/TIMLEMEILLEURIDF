@@ -14,7 +14,11 @@ const {
     getBroadcastHistory, deleteBroadcast, getDetailedLivreurActivity,
     nukeDatabase, decryptUser, supabase, COL_USERS,
     registerUser, getLivreurHistory, getReviews, deleteReview, deleteOrder,
-    getSuppliers, getSupplier, saveSupplier, deleteSupplier, getSupplierProducts, getSupplierOrders
+    getSuppliers, getSupplier, saveSupplier, deleteSupplier, getSupplierProducts, getSupplierOrders,
+    // Marketplace
+    getMarketplaceProducts, getMarketplaceProduct, getAvailableMarketplaceProducts,
+    saveMarketplaceProduct, deleteMarketplaceProduct, updateMarketplaceStock,
+    createMarketplaceOrder, getMarketplaceOrders, getMarketplaceOrder, updateMarketplaceOrderStatus
 } = require('./services/database');
 const { broadcastMessage } = require('./services/broadcast');
 const fs = require('fs');
@@ -816,6 +820,71 @@ function createServer() {
     app.get('/api/suppliers/:id/orders', authMiddleware, async (req, res) => {
         try { res.json(await getSupplierOrders(req.params.id)); }
         catch (e) { res.status(500).json({ error: e.message }); }
+    });
+
+    // ====== MARKETPLACE ======
+    // Tous les produits marketplace (optionnel: ?supplier_id=xxx)
+    app.get('/api/marketplace/products', authMiddleware, async (req, res) => {
+        try { res.json(await getMarketplaceProducts(req.query.supplier_id || null)); }
+        catch (e) { res.status(500).json({ error: e.message }); }
+    });
+
+    // Produits disponibles seulement
+    app.get('/api/marketplace/products/available', authMiddleware, async (req, res) => {
+        try { res.json(await getAvailableMarketplaceProducts(req.query.supplier_id || null)); }
+        catch (e) { res.status(500).json({ error: e.message }); }
+    });
+
+    // Un produit marketplace
+    app.get('/api/marketplace/products/:id', authMiddleware, async (req, res) => {
+        try { res.json(await getMarketplaceProduct(req.params.id)); }
+        catch (e) { res.status(500).json({ error: e.message }); }
+    });
+
+    // Créer/modifier un produit marketplace
+    app.post('/api/marketplace/products', authMiddleware, async (req, res) => {
+        try {
+            const result = await saveMarketplaceProduct(req.body);
+            res.json({ success: true, product: result });
+        } catch (e) { res.status(500).json({ error: e.message }); }
+    });
+
+    // Supprimer un produit marketplace
+    app.delete('/api/marketplace/products/:id', authMiddleware, async (req, res) => {
+        try {
+            await deleteMarketplaceProduct(req.params.id);
+            res.json({ success: true });
+        } catch (e) { res.status(500).json({ error: e.message }); }
+    });
+
+    // Mettre à jour le stock
+    app.post('/api/marketplace/products/:id/stock', authMiddleware, async (req, res) => {
+        try {
+            await updateMarketplaceStock(req.params.id, req.body.stock);
+            res.json({ success: true });
+        } catch (e) { res.status(500).json({ error: e.message }); }
+    });
+
+    // Commandes marketplace
+    app.get('/api/marketplace/orders', authMiddleware, async (req, res) => {
+        try { res.json(await getMarketplaceOrders(req.query.supplier_id || null, parseInt(req.query.limit) || 50)); }
+        catch (e) { res.status(500).json({ error: e.message }); }
+    });
+
+    // Créer une commande marketplace
+    app.post('/api/marketplace/orders', authMiddleware, async (req, res) => {
+        try {
+            const result = await createMarketplaceOrder(req.body);
+            res.json({ success: true, order: result });
+        } catch (e) { res.status(500).json({ error: e.message }); }
+    });
+
+    // Mettre à jour le statut d'une commande marketplace
+    app.post('/api/marketplace/orders/:id/status', authMiddleware, async (req, res) => {
+        try {
+            await updateMarketplaceOrderStatus(req.params.id, req.body.status);
+            res.json({ success: true });
+        } catch (e) { res.status(500).json({ error: e.message }); }
     });
 
     app.use('/api/*', (req, res) => {

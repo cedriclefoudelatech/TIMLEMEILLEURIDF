@@ -871,6 +871,19 @@ function setupOrderSystem(bot) {
         const discount = useDiscount ? pending.possibleDiscount : 0;
         const finalPrice = parseFloat(pending.totalPrice) - discount;
 
+        // Identification du fournisseur (depuis le premier produit du panier)
+        let orderSupplierId = null;
+        if (cart.length > 0) {
+            const products = await getProducts();
+            for (const item of cart) {
+                const p = products.find(prod => String(prod.id) === String(item.productId));
+                if (p && p.supplier_id) {
+                    orderSupplierId = p.supplier_id;
+                    break;
+                }
+            }
+        }
+
         // Tentative d'extraction de la ville depuis l'adresse
         let city = null;
         const addr = (pending.address || '').toLowerCase();
@@ -894,7 +907,8 @@ function setupOrderSystem(bot) {
             platform: ctx.platform,
             status: 'pending',
             discount_applied: discount,
-            scheduled_at: pending.scheduled_at || null
+            scheduled_at: pending.scheduled_at || null,
+            supplier_id: orderSupplierId // Ajout du fournisseur ici !
         };
 
         const { order, error: createError } = await createOrder(orderData);
@@ -2393,8 +2407,9 @@ function setupOrderSystem(bot) {
         if (pendingCount > 0) text += `🔔 <b>${pendingCount} commande(s) en attente !</b>\n`;
 
         await safeEdit(ctx, text, Markup.inlineKeyboard([
+            [Markup.button.callback('🏪 Mon Magasin (Marketplace)', 'mp_my_shop')],
             [Markup.button.callback('📋 Commandes en cours', 'supplier_orders')],
-            [Markup.button.callback('📦 Mes produits', 'supplier_products')],
+            [Markup.button.callback('📦 Mes produits assignés', 'supplier_products')],
             [Markup.button.callback(settings.btn_supplier_my_sales || '📊 Mes ventes', 'supplier_sales')],
             [Markup.button.callback('❓ Comment ça marche ?', 'supplier_guide')],
             [Markup.button.callback(settings.btn_back_menu || '◀️ Retour Menu', 'main_menu')]

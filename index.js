@@ -23,6 +23,7 @@ const { notifyAdmins } = require('./services/notifications');
 const { setupStartHandler, initStartState, getMainMenuKeyboard, getLivreurMenuKeyboard } = require('./handlers/start');
 const { setupAdminHandlers } = require('./handlers/admin');
 const { setupOrderSystem, initOrderState, checkAbandonedCarts } = require('./handlers/order_system');
+const { setupMarketplaceHandlers, initMarketplaceState } = require('./handlers/supplier_marketplace');
 
 const PORT = process.env.PORT || 3000;
 console.log(`[System] Final PORT determined: ${PORT}`);
@@ -109,6 +110,11 @@ async function main() {
     setupAdminHandlers(dispatcher);
     setupOrderSystem(dispatcher);
 
+    // Marketplace fournisseurs
+    const { handleMarketplaceText, handleMarketplacePhoto } = setupMarketplaceHandlers(dispatcher);
+    await initMarketplaceState();
+    console.log('🏪 Marketplace fournisseurs initialisée');
+
     // Sondages (Actions & Messages)
     dispatcher.action(/^poll_free_([\w-]+)(?:_(\d+))?$/, async (ctx) => {
         const bcId = ctx.match[1];
@@ -167,7 +173,7 @@ async function main() {
                     const userName = ctx.from.first_name || 'Utilisateur';
                     await recordPollFreeResponse(bcId, userId, userName, text);
                     const replyText = `✅ <b>Votre réponse a été enregistrée :</b>\n\n<i>"${text}"</i>\n\nMerci pour votre participation !`;
-                    
+
                     if (bcIndex !== undefined) {
                         await ctx.reply(replyText);
                         return ctx.reply("🔄 Menu Principal", await getMainMenuKeyboard(ctx, ctx.state.settings, ctx.state.user));
@@ -180,9 +186,19 @@ async function main() {
                 }
             }
         }
+        // Marketplace text handler (flows ajout/édition produit fournisseur)
+        const mpResult = handleMarketplaceText(ctx);
+        if (mpResult !== false) { await mpResult; return; }
+
         await next();
     });
 
+    // Marketplace photo handler
+    dispatcher.on('photo', async (ctx, next) => {
+        const mpPhotoResult = handleMarketplacePhoto(ctx);
+        if (mpPhotoResult !== false) { await mpPhotoResult; return; }
+        await next();
+    });
 
     // 2. Initialisation des Canaux
     const replicaIndex = process.env.RAILWAY_REPLICA_INDEX || '0';

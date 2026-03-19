@@ -86,6 +86,7 @@ async function showAdminMenu(ctx, isEdit = false) {
         [Markup.button.callback('🚴 Gestion Livreurs', 'admin_livreurs')],
         [Markup.button.callback('👥 Gestion Utilisateurs', 'admin_users')],
         [Markup.button.callback('🛒 Gestion Produits', 'admin_products')],
+        [Markup.button.callback('🏪 Marketplace Fournisseurs', 'mp_browse')],
         [Markup.button.callback('📢 Diffusion Message', 'admin_broadcast')],
         [Markup.button.callback('✨ Fonctionnalités', 'admin_features'), Markup.button.callback('⚙️ Paramètres', 'admin_settings')],
         [Markup.button.callback('◀️ Quitter la console', 'main_menu')]

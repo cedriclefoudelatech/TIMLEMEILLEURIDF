@@ -10,6 +10,8 @@ const COL_PRODUCTS = 'bot_products';
 const COL_ORDERS = 'bot_orders';
 const COL_DAILY_STATS = 'bot_daily_stats';
 const COL_REVIEWS = 'bot_reviews';
+const COL_SUPPLIER_PRODUCTS = 'supplier_marketplace';
+const COL_SUPPLIER_ORDERS = 'supplier_market_orders';
 
 function ts() { return new Date().toISOString(); }
 
@@ -1864,6 +1866,108 @@ async function markOrderSupplierReady(orderId, prepTime = null) {
     await supabase.from(COL_ORDERS).update(update).eq('id', orderId);
 }
 
+// ====== MARKETPLACE / FOURNISSEURS ======
+
+async function getMarketplaceProducts(supplierId = null) {
+    let query = supabase.from(COL_SUPPLIER_PRODUCTS).select('*').order('created_at', { ascending: false });
+    if (supplierId) query = query.eq('supplier_id', supplierId);
+    const { data } = await query;
+    return data || [];
+}
+
+async function getMarketplaceProduct(id) {
+    const { data } = await supabase.from(COL_SUPPLIER_PRODUCTS).select('*').eq('id', id).limit(1);
+    return data?.[0] || null;
+}
+
+async function getAvailableMarketplaceProducts(supplierId = null) {
+    let query = supabase.from(COL_SUPPLIER_PRODUCTS).select('*').eq('is_available', true).gt('stock', 0).order('created_at', { ascending: false });
+    if (supplierId) query = query.eq('supplier_id', supplierId);
+    const { data } = await query;
+    return data || [];
+}
+
+async function saveMarketplaceProduct(product) {
+    if (product.id) {
+        product.updated_at = ts();
+        const { data } = await supabase.from(COL_SUPPLIER_PRODUCTS).update(product).eq('id', product.id).select();
+        return data?.[0] || product;
+    } else {
+        product.id = `mp_${Date.now()}_${Math.round(Math.random() * 1E6)}`;
+        product.created_at = ts();
+        product.updated_at = ts();
+        if (product.is_available === undefined) product.is_available = true;
+        if (product.stock === undefined) product.stock = 0;
+        const { data, error } = await supabase.from(COL_SUPPLIER_PRODUCTS).insert([product]).select();
+        if (error) { console.error('saveMarketplaceProduct error:', error); throw error; }
+        return data?.[0] || product;
+    }
+}
+
+async function deleteMarketplaceProduct(id) {
+    await supabase.from(COL_SUPPLIER_PRODUCTS).delete().eq('id', id);
+}
+
+async function updateMarketplaceStock(productId, newStock) {
+    const is_available = newStock > 0;
+    await supabase.from(COL_SUPPLIER_PRODUCTS).update({ stock: newStock, is_available, updated_at: ts() }).eq('id', productId);
+}
+
+// --- Commandes marketplace (admin -> fournisseur) ---
+
+async function createMarketplaceOrder(orderData) {
+    const id = `mpo_${Date.now()}_${Math.round(Math.random() * 1E6)}`;
+    const order = {
+        id,
+        supplier_id: orderData.supplier_id,
+        admin_id: orderData.admin_id || 'admin',
+        products: JSON.stringify(orderData.products), // [{product_id, name, price, qty}]
+        total_price: orderData.total_price || 0,
+        status: 'pending', // pending -> accepted -> ready -> collected -> cancelled
+        notes: orderData.notes || '',
+        created_at: ts(),
+        updated_at: ts()
+    };
+    const { data, error } = await supabase.from(COL_SUPPLIER_ORDERS).insert([order]).select();
+    if (error) { console.error('createMarketplaceOrder error:', error); throw error; }
+
+    // Décrémenter le stock des produits commandés
+    if (Array.isArray(orderData.products)) {
+        for (const item of orderData.products) {
+            const prod = await getMarketplaceProduct(item.product_id);
+            if (prod) {
+                const newStock = Math.max(0, (prod.stock || 0) - (item.qty || 1));
+                await updateMarketplaceStock(item.product_id, newStock);
+            }
+        }
+    }
+
+    return data?.[0] || order;
+}
+
+async function getMarketplaceOrders(supplierId = null, limit = 50) {
+    let query = supabase.from(COL_SUPPLIER_ORDERS).select('*').order('created_at', { ascending: false }).limit(limit);
+    if (supplierId) query = query.eq('supplier_id', supplierId);
+    const { data } = await query;
+    return (data || []).map(o => {
+        try { o.products = typeof o.products === 'string' ? JSON.parse(o.products) : o.products; } catch(e) {}
+        return o;
+    });
+}
+
+async function getMarketplaceOrder(orderId) {
+    const { data } = await supabase.from(COL_SUPPLIER_ORDERS).select('*').eq('id', orderId).limit(1);
+    const o = data?.[0] || null;
+    if (o) { try { o.products = typeof o.products === 'string' ? JSON.parse(o.products) : o.products; } catch(e) {} }
+    return o;
+}
+
+async function updateMarketplaceOrderStatus(orderId, status) {
+    const validStatuses = ['pending', 'accepted', 'ready', 'collected', 'cancelled'];
+    if (!validStatuses.includes(status)) return;
+    await supabase.from(COL_SUPPLIER_ORDERS).update({ status, updated_at: ts() }).eq('id', orderId);
+}
+
 module.exports = {
     supabase, COL_USERS, COL_PRODUCTS, COL_ORDERS, COL_SETTINGS, COL_BROADCASTS, COL_REFERRALS,
     incr, ts, makeDocId, decryptUser, decryptOrder, decryptReview,
@@ -1883,5 +1987,10 @@ module.exports = {
     useSupabaseAuthState,
     // Suppliers
     COL_SUPPLIERS, getSuppliers, getSupplier, getSupplierByTelegramId, saveSupplier, deleteSupplier,
-    getSupplierProducts, getSupplierOrders, markOrderSupplierNotified, markOrderSupplierReady
+    getSupplierProducts, getSupplierOrders, markOrderSupplierNotified, markOrderSupplierReady,
+    // Marketplace
+    COL_SUPPLIER_PRODUCTS, COL_SUPPLIER_ORDERS,
+    getMarketplaceProducts, getMarketplaceProduct, getAvailableMarketplaceProducts,
+    saveMarketplaceProduct, deleteMarketplaceProduct, updateMarketplaceStock,
+    createMarketplaceOrder, getMarketplaceOrders, getMarketplaceOrder, updateMarketplaceOrderStatus
 };
