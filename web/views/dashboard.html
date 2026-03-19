@@ -2395,9 +2395,32 @@
 
             <!-- ===== MARKETPLACE TAB ===== -->
             <div id="marketplaceTab" style="display:none;">
-                <div class="card" style="margin-bottom:20px; border-left:4px solid #6a5acd;">
-                    <h3>🏪 Marketplace Fournisseurs</h3>
-                    <p style="font-size:13px;">Produits gérés directement par les fournisseurs depuis Telegram. Parcourez les magasins et passez vos commandes.</p>
+                <div class="card" style="margin-bottom:20px; border-left:4px solid #6a5acd; display:flex; justify-content:space-between; align-items:center;">
+                    <div>
+                        <h3>🏪 Marketplace Fournisseurs</h3>
+                        <p style="font-size:13px;">Produits gérés directement par les fournisseurs depuis Telegram. Parcourez les magasins et passez vos commandes.</p>
+                    </div>
+                    <button class="btn btn-accent" id="mpCartBtn" onclick="toggleMpCart()" style="position:relative;">
+                        🛒 Panier <span id="mpCartBadge" style="position:absolute; top:-10px; right:-10px; background:red; color:white; border-radius:50%; width:20px; height:20px; display:none; align-items:center; justify-content:center; font-size:10px;">0</span>
+                    </button>
+                </div>
+
+                <!-- Panier Marketplace (Drawer style) -->
+                <div id="mpCartDrawer" style="display:none; position:fixed; right:0; top:0; height:100vh; width:350px; background:var(--sidebar-bg); border-left:1px solid var(--border); box-shadow:-10px 0 30px rgba(0,0,0,0.5); z-index:1000; padding:25px; flex-direction:column;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:25px;">
+                        <h3 style="margin:0;">🛒 Votre Panier</h3>
+                        <button class="btn btn-outline" onclick="toggleMpCart()">✕</button>
+                    </div>
+                    <div id="mpCartItems" style="flex:1; overflow-y:auto; margin-bottom:20px;">
+                        <p style="text-align:center; color:var(--text-muted); margin-top:100px;">Panier vide 📭</p>
+                    </div>
+                    <div id="mpCartSummary" style="border-top:1px solid var(--border); padding-top:20px;">
+                        <div style="display:flex; justify-content:space-between; font-weight:bold; font-size:18px; margin-bottom:15px;">
+                            <span>Total :</span>
+                            <span id="mpCartTotal">0.00€</span>
+                        </div>
+                        <button class="btn btn-accent" style="width:100%; padding:14px; font-weight:800;" onclick="checkoutMarketplace()">🚀 Passer la commande</button>
+                    </div>
                 </div>
 
                 <!-- Filtre par fournisseur -->
@@ -3386,9 +3409,9 @@
                                         ${livreurOptions}
                                     </select>
                                 ` : `
-                                    <div style="display:flex; align-items:center; gap:4px;">
-                                        <small style="font-size:10px; color:var(--accent); font-weight:bold;">👤 ${o.livreur_name}</small>
-                                        <button class="btn btn-sm" style="padding:0 4px; font-size:9px; background:transparent; border:1px solid var(--border);" onclick="assignDriver('${o.id}', '', '')" title="Réassigner">✏️</button>
+                                    <div style="display:flex; flex-direction:column; gap:4px;">
+                                        <small style="font-size:10px; color:var(--accent); font-weight:900; background:rgba(0,180,255,0.05); padding:4px; border-radius:4px;">🚴 ${o.livreur_name}</small>
+                                        <button class="btn btn-sm" style="padding:2px 8px; font-size:10px; background:rgba(255,165,0,0.1); border:1px solid orange; color:orange; font-weight:700;" onclick="assignDriver('${o.id}', '', '')" title="Réassigner">🔄 Réassigner</button>
                                     </div>
                                 `}
                             </div>
@@ -5600,6 +5623,7 @@
                             </div>
                             ${p.description ? '<p style="font-size:12px; color:var(--text-muted); margin:4px 0 8px;">' + p.description.substring(0, 80) + '</p>' : ''}
                             <div style="display:flex; gap:6px; margin-top:8px;">
+                                <button class="btn btn-sm btn-accent" onclick="addMarketplaceToCart('${p.id}')" style="flex:1;">🛒 Commander</button>
                                 <button class="btn btn-sm btn-outline" onclick="editMpProduct('${p.id}')" title="Modifier">✏️</button>
                                 <button class="btn btn-sm btn-outline" style="color:red;" onclick="deleteMpProduct('${p.id}')" title="Supprimer">🗑</button>
                             </div>
@@ -5685,6 +5709,111 @@
                 showToast('✅ Commande récupérée', 'success');
                 loadMarketplaceOrders();
             } catch(e) { showToast('Erreur: ' + e.message, 'error'); }
+        }
+        // Panier Marketplace Logic
+        let mpCart = [];
+        function toggleMpCart() {
+            const drawer = document.getElementById('mpCartDrawer');
+            if (drawer) {
+                drawer.style.display = (drawer.style.display === 'none' || drawer.style.display === '') ? 'flex' : 'none';
+            }
+        }
+
+        function addMarketplaceToCart(productId) {
+            const p = mpProductsData.find(x => x.id === productId);
+            if (!p) return;
+            const existing = mpCart.find(x => x.id === productId);
+            if (existing) {
+                existing.qty++;
+            } else {
+                mpCart.push({ ...p, qty: 1 });
+            }
+            renderMpCart();
+            showToast(`✅ ${p.name} ajouté`, 'success');
+        }
+
+        function renderMpCart() {
+            const listEl = document.getElementById('mpCartItems');
+            const badge = document.getElementById('mpCartBadge');
+            if (!listEl) return;
+
+            if (mpCart.length === 0) {
+                listEl.innerHTML = '<p style="text-align:center; color:var(--text-muted); margin-top:100px;">Panier vide 📭</p>';
+                if (badge) badge.style.display = 'none';
+                document.getElementById('mpCartTotal').innerText = '0.00€';
+                return;
+            }
+
+            if (badge) {
+                badge.style.display = 'flex';
+                badge.innerText = mpCart.reduce((a, b) => a + b.qty, 0);
+            }
+
+            let total = 0;
+            listEl.innerHTML = mpCart.map((it, idx) => {
+                total += it.price * it.qty;
+                return `
+                    <div style="display:flex; align-items:center; gap:10px; margin-bottom:15px; padding:10px; background:rgba(255,255,255,0.03); border-radius:12px; border:1px solid var(--border);">
+                        ${it.image_url ? `<img src="${it.image_url}" style="width:40px; height:40px; object-fit:cover; border-radius:8px;">` : `<div style="width:40px; height:40px; background:var(--border); border-radius:8px; display:flex; align-items:center; justify-content:center;">📦</div>`}
+                        <div style="flex:1; min-width:0;">
+                            <div style="font-weight:700; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${it.name}</div>
+                            <div style="font-size:12px; color:var(--accent);">${it.price}€</div>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <button class="btn btn-sm btn-outline" style="padding:0; width:24px; height:24px;" onclick="updateMpCartQty(${idx}, -1)">-</button>
+                            <span style="font-weight:bold; font-size:13px;">${it.qty}</span>
+                            <button class="btn btn-sm btn-outline" style="padding:0; width:24px; height:24px;" onclick="updateMpCartQty(${idx}, 1)">+</button>
+                        </div>
+                    </div>`;
+            }).join('');
+            document.getElementById('mpCartTotal').innerText = `${total.toFixed(2)}€`;
+        }
+
+        function updateMpCartQty(idx, delta) {
+            if (!mpCart[idx]) return;
+            mpCart[idx].qty += delta;
+            if (mpCart[idx].qty <= 0) mpCart.splice(idx, 1);
+            renderMpCart();
+        }
+
+        async function checkoutMarketplace() {
+            if (mpCart.length === 0) return showToast('Panier vide !', 'error');
+            
+            // Group elements by supplier
+            const orders = {};
+            mpCart.forEach(it => {
+                if (!orders[it.supplier_id]) orders[it.supplier_id] = [];
+                orders[it.supplier_id].push(it);
+            });
+
+            if (!confirm(`Passer ${Object.keys(orders).length} commande(s) aux fournisseurs ?`)) return;
+
+            try {
+                for (const supplierId in orders) {
+                    const products = orders[supplierId].map(it => ({
+                        id: it.id,
+                        name: it.name,
+                        price: it.price,
+                        qty: it.qty,
+                        image_url: it.image_url
+                    }));
+                    const totalPrice = products.reduce((a, b) => a + (b.price * b.qty), 0);
+                    
+                    await api('/marketplace/orders', 'POST', {
+                        supplier_id: supplierId,
+                        products: products,
+                        total_price: totalPrice
+                    }, true);
+                }
+                
+                showToast('🚀 Commandes envoyées !', 'success');
+                mpCart = [];
+                renderMpCart();
+                toggleMpCart();
+                switchSupplierTab('mpOrders');
+            } catch(e) {
+                showToast('Erreur: ' + e.message, 'error');
+            }
         }
         // ========== FIN MARKETPLACE FUNCTIONS ==========
 

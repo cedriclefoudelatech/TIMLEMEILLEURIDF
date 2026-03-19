@@ -21,10 +21,15 @@ function getTgBot() {
     return bot;
 }
 
-async function notifyAdmins(bot, message) {
+async function notifyAdmins(bot, message, options = {}) {
     try {
-        // On supporte l'appel avec (message) seul si bot est omis
+        // Support (bot, message, options) OR (message, options)
         if (typeof bot === 'string' && !message) {
+            options = message || {};
+            message = bot;
+            bot = null;
+        } else if (typeof bot === 'string' && typeof message === 'object') {
+            options = message;
             message = bot;
             bot = null;
         }
@@ -32,8 +37,6 @@ async function notifyAdmins(bot, message) {
         const settings = await getAppSettings();
         if (!settings) return;
 
-        // Construire la liste des admins AVANT de vérifier si elle est vide
-        // (pour ne pas ignorer ADMIN_TELEGRAM_ID env si admin_telegram_id DB est vide)
         const rawAdmins = String(settings.admin_telegram_id || '');
         const dbAdmins = rawAdmins.replace(/[\[\]"']/g, '').split(/[\s,]+/).filter(Boolean);
         const envAdmin = process.env.ADMIN_TELEGRAM_ID;
@@ -45,10 +48,10 @@ async function notifyAdmins(bot, message) {
         }
 
         for (const adminId of allAdmins) {
-            // Unify ID format if it's just a number, assume telegram
-            const finalId = (adminId.includes('_') || adminId.includes('@')) ? adminId : `telegram_${adminId}`;
+            const idStr = String(adminId);
+            const finalId = (idStr.includes('_') || idStr.includes('@')) ? idStr : `telegram_${idStr}`;
             console.log(`[Notification] Envoi alerte admin à ${finalId}: ${message.substring(0, 50)}...`);
-            await sendMessageToUser(finalId, message).catch((err) => {
+            await sendMessageToUser(finalId, message, options).catch((err) => {
                 console.error(`[Notification] Échec envoi à ${finalId}:`, err.message);
             });
         }

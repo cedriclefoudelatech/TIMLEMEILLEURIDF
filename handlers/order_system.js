@@ -653,16 +653,21 @@ function setupOrderSystem(bot) {
     });
 
     async function promptAddressDetails(ctx) {
+        const settings = ctx.state?.settings || await getAppSettings();
         const userId = `${ctx.platform}_${ctx.from.id}`;
         const addrState = awaitingAddressDetails.get(userId);
         if (addrState) addrState.step = 2;
 
         const text = `🏢 <b>Détails de livraison (Optionnel)</b>\n\nIndiquez votre <b>digicode, code bâtiment, étage, numéro d'appartement</b> ou toute info utile pour le livreur.\n\nSinon, cliquez sur le bouton ci-dessous :`;
         const buttons = [
-            [Markup.button.callback('⏭ Passer cette étape', 'address_details_skip')],
-            [Markup.button.callback('◀️ Modifier l\'adresse', 'start_checkout')]
+            [Markup.button.callback('⏭ Passer cette étape', 'address_details_skip')]
         ];
-        return await safeEdit(ctx, text, Markup.inlineKeyboard(buttons));
+        const keyboard = Markup.inlineKeyboard([
+            ...buttons,
+            [Markup.button.callback('◀️ Modifier l\'adresse', 'checkout_retry')],
+            [Markup.button.callback(settings.btn_cancel_order || '❌ Annuler la commande', 'main_menu')]
+        ]);
+        return await safeEdit(ctx, text, keyboard);
     }
 
     bot.action('scheduling_plan', async (ctx) => {
@@ -989,7 +994,12 @@ function setupOrderSystem(bot) {
             .replace('{pay_label}', payLabel)
             .replace('{order_id}', order.id);
 
-        await notifyAdmins(bot, adminAlert);
+        const adminButtons = [
+            [Markup.button.callback('🤝 ASSIGNER LIVREUR', `admin_order_assign_list_${order.id}`)],
+            [Markup.button.callback('⚙️ GÉRER COMMANDE', `admin_order_view_${order.id}`)]
+        ];
+
+        await notifyAdmins(bot, adminAlert, Markup.inlineKeyboard(adminButtons));
 
         // Notifier TOUS les livreurs via le service central
         await notifyLivreurs(bot, notificationText, {
