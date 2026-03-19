@@ -330,37 +330,28 @@ function setupStartHandler(bot) {
 
         // Si pas en attente de code parrain, passer au handler suivant
         if (!pendingReferralInput.has(docId)) return next();
-        // Si le texte ne commence pas par ref_, c'est peut-être l'adresse -> passer au suivant
-        if (!inputText.startsWith('ref_')) {
+        
+        let referralCode = inputText;
+        if (inputText.startsWith('/start ')) {
+            referralCode = inputText.split(' ')[1];
+        }
+
+        // Si le texte contient ref_, on tente de valider
+        if (referralCode && referralCode.startsWith('ref_')) {
             pendingReferralInput.delete(docId);
-            return next();
-        }
-
-        pendingReferralInput.delete(docId);
-
-        try {
-            const db = require('../services/database');
-            const { supabase, COL_USERS, COL_REFERRALS } = db;
-            const { data: snap } = await supabase.from(COL_USERS).select('*').eq('referral_code', inputText).limit(1);
-
-            if (snap && snap.length > 0 && snap[0].id !== docId) {
-                const referrerDoc = snap[0];
-                await supabase.from(COL_USERS).update({ referral_count: referrerDoc.referral_count + 1 }).eq('id', referrerDoc.id);
-                await supabase.from(COL_USERS).update({ referred_by: referrerDoc.id }).eq('id', docId);
-                await supabase.from(COL_REFERRALS).insert([{
-                    id: `${Date.now()}-${Math.random()}`,
-                    referrer_id: referrerDoc.id,
-                    referred_id: docId,
-                    created_at: db.ts()
-                }]);
-                return safeEdit(ctx, '🎉 Code parrainage validé ! Votre parrain a été crédité. Vous gagnerez chacun un bonus à votre première commande.', Markup.inlineKeyboard([[Markup.button.callback('◀️ Menu', 'main_menu')]]));
-            } else {
-                return safeEdit(ctx, '❌ Code parrainage invalide ou déjà utilisé.', Markup.inlineKeyboard([[Markup.button.callback('◀️ Menu', 'main_menu')]]));
+            try {
+                const { registerUser } = require('../services/database');
+                await registerUser(ctx.from, ctx.platform, referralCode);
+                return safeEdit(ctx, '🎉 Code parrainage validé ! Vous gagnerez un bonus à votre première commande.', Markup.inlineKeyboard([[Markup.button.callback('◀️ Menu', 'main_menu')]]));
+            } catch (e) {
+                console.error('Referral code error:', e);
+                return safeEdit(ctx, '❌ Erreur lors de la validation du code.', Markup.inlineKeyboard([[Markup.button.callback('◀️ Menu', 'main_menu')]]));
             }
-        } catch (e) {
-            console.error('Referral code error:', e);
-            return safeEdit(ctx, '❌ Erreur lors de la validation du code. Réessayez plus tard.', Markup.inlineKeyboard([[Markup.button.callback('◀️ Menu', 'main_menu')]]));
         }
+        
+        // Si c'était un autre texte, on nettoie l'attente pour ne pas bloquer les autres handlers
+        pendingReferralInput.delete(docId);
+        return next();
     });
 }
 

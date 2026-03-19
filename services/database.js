@@ -144,8 +144,9 @@ async function registerUser(platformUser, platform = 'telegram', referrerId = nu
         const lastUpdated = existing.updated_at ? new Date(existing.updated_at).getTime() : 0;
         const needsDbUpdate = (nowMs - lastUpdated) > 300000; // 5 minutes
         const needsTypeHealing = !existing.type;
+        const needsReferralCode = !existing.referral_code;
 
-        if (needsDbUpdate || needsTypeHealing) {
+        if (needsDbUpdate || needsTypeHealing || needsReferralCode) {
             const updateData = {
                 last_active: ts(),
                 updated_at: ts(),
@@ -153,6 +154,9 @@ async function registerUser(platformUser, platform = 'telegram', referrerId = nu
             };
 
             if (needsTypeHealing) updateData.type = isGroup ? 'group' : 'user';
+            if (needsReferralCode) {
+                updateData.referral_code = generateReferralCode(platform, platformUser.id || Date.now());
+            }
 
             // Si on a des infos fraîches sur le nom/username
             if (platformUser.username) updateData.username = !isGroup ? encryption.encrypt(platformUser.username) : platformUser.username;
@@ -163,7 +167,18 @@ async function registerUser(platformUser, platform = 'telegram', referrerId = nu
 
             const updatedUser = { ...existing, ...updateData };
             _userCache.set(docId, { data: updatedUser, expire: nowMs + 300000 });
+
+            // Si cet utilisateur déjà inscrit clique sur un lien de parrainage et n'a PAS de parrain encore
+            if (referrerId && !existing.referred_by) {
+                processReferral(docId, referrerId).catch(console.error);
+            }
+
             return { isNew: false, user: decryptUser(updatedUser) };
+        }
+
+        // Si l'utilisateur est connu mais clique sur un lien de parrainage et n'a PAS de parrain encore
+        if (referrerId && !existing.referred_by) {
+            processReferral(docId, referrerId).catch(console.error);
         }
 
         return { isNew: false, user: decryptUser(existing) };
@@ -215,37 +230,65 @@ async function registerUser(platformUser, platform = 'telegram', referrerId = nu
     _userCache.set(docId, { data: newUser, expire: nowMs + 300000 });
 
     if (referrerId) {
-        try {
-            const { data: refDocs } = await supabase.from(COL_USERS).select('*').eq('referral_code', referrerId).limit(1);
-            if (refDocs && refDocs.length > 0) {
-                const referrerDoc = refDocs[0];
-                // Update referrer count
-                await supabase.from(COL_USERS).update({
-                    referral_count: (referrerDoc.referral_count || 0) + 1
-                }).eq('id', referrerDoc.id);
-                
-                // CRITICAL FIX: Link the new user to the ACTUAL referrer ID (docId), not the ref_code
-                await supabase.from(COL_USERS).update({
-                    referred_by: referrerDoc.id
-                }).eq('id', docId);
-
-                _userCache.delete(referrerDoc.id);
-                _userCache.delete(docId); // Clear cache for new user to reflect link
-
-                await supabase.from(COL_REFERRALS).insert([{
-                    id: `${Date.now()}-${Math.round(Math.random() * 1000)}`,
-                    referrer_id: referrerDoc.id,
-                    referred_id: docId,
-                    created_at: ts()
-                }]).catch(() => { });
-                await incrementStat('total_referrals').catch(() => { });
-            }
-        } catch (e) {
-            console.error("Error processing referral:", e.message);
-        }
+        processReferral(docId, referrerId).catch(console.error);
     }
 
     return { isNew: true, user: decryptUser(newUser) };
+}
+
+/**
+ * Traite l'attribution d'un parrainage.
+ * @param {string} docId ID de l'utilisateur parrainé
+ * @param {string} referralCode Code de parrainage (ex: ref_telegram_123_xyz)
+ */
+async function processReferral(docId, referralCode) {
+    if (!referralCode) return;
+    try {
+        // Chercher le parrain par son code
+        const { data: refDocs } = await supabase.from(COL_USERS).select('*').eq('referral_code', referralCode).limit(1);
+        if (refDocs && refDocs.length > 0) {
+            const referrerDoc = refDocs[0];
+            
+            // Empêcher l'auto-parrainage (même ID platform)
+            const refPlatformId = String(referralCode).split('_')[2];
+            const myPlatformId = String(docId).split('_')[1];
+            if (refPlatformId === myPlatformId) return;
+
+            // Déjà parrainé ? (Double check DB)
+            const { data: me } = await supabase.from(COL_USERS).select('referred_by').eq('id', docId).single();
+            if (me && me.referred_by) return;
+
+            console.log(`[Referral] Attribution : ${docId} est parrainé par ${referrerDoc.id} (code: ${referralCode})`);
+
+            // Mettre à jour le compteur du parrain
+            await supabase.from(COL_USERS).update({
+                referral_count: (referrerDoc.referral_count || 0) + 1
+            }).eq('id', referrerDoc.id);
+
+            // Lier l'utilisateur au parrain
+            await supabase.from(COL_USERS).update({
+                referred_by: referrerDoc.id
+            }).eq('id', docId);
+
+            // Enregistrer dans la table dédiée
+            await supabase.from(COL_REFERRALS).insert([{
+                id: `${Date.now()}-${Math.round(Math.random() * 1000)}`,
+                referrer_id: referrerDoc.id,
+                referred_id: docId,
+                created_at: ts()
+            }]).catch(() => { });
+
+            await incrementStat('total_referrals').catch(() => { });
+
+            // Invalider les caches
+            _userCache.delete(referrerDoc.id);
+            _userCache.delete(docId);
+        } else {
+            console.log(`[Referral] Code ${referralCode} non trouvé dans la DB.`);
+        }
+    } catch (e) {
+        console.error("❌ processReferral error:", e.message);
+    }
 }
 
 async function getAllActiveUsers(platform = null, type = null) {
