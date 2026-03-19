@@ -1158,8 +1158,8 @@ async function getAllLivreurs() {
 
 // --- Settings ---
 const SETTINGS_DEFAULTS = {
-    bot_name: 'Mon Shop',
-    dashboard_title: 'Mon Shop - Admin',
+    bot_name: 'TIM LE MEILLEUR',
+    dashboard_title: 'TIM LE MEILLEUR - Admin',
     welcome_message: 'Bienvenue ! Vous faites partie de la famille.',
     admin_password: process.env.ADMIN_PASSWORD || 'timlemeilleur2024',
     admin_telegram_id: String(process.env.ADMIN_TELEGRAM_ID || ''),
