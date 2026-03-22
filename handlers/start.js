@@ -43,17 +43,37 @@ function setupStartHandler(bot) {
             // Quitter tout contexte produit
             try { const { clearActiveMediaGroup } = require('../services/utils'); clearActiveMediaGroup(docId); } catch(e) {}
 
-            // ═══ NETTOYAGE COMPLET : supprimer tous les anciens messages du bot ═══
+            // ═══ NETTOYAGE COMPLET : supprimer TOUS les messages du bot dans le chat ═══
             try {
-                const tracked = await getTrackedMessages(docId);
-                if (tracked && tracked.length > 0 && ctx.platform === 'telegram' && ctx.telegram) {
-                    const chatId = ctx.chat?.id;
-                    if (chatId) {
-                        await Promise.allSettled(tracked.map(msgId =>
-                            ctx.telegram.deleteMessage(chatId, msgId).catch(() => {})
-                        ));
+                const chatId = ctx.chat?.id;
+                const currentMsgId = ctx.message?.message_id;
+
+                if (chatId && currentMsgId && ctx.platform === 'telegram' && ctx.telegram) {
+                    // 1. D'abord supprimer tous les messages trackés en DB
+                    const tracked = await getTrackedMessages(docId);
+                    const trackedSet = new Set((tracked || []).map(Number));
+
+                    // 2. Balayer les 50 derniers messages (IDs décroissants avant le /start)
+                    //    Telegram permet de supprimer les messages de moins de 48h
+                    const deletePromises = [];
+                    for (let id = currentMsgId - 1; id >= currentMsgId - 50 && id > 0; id--) {
+                        deletePromises.push(
+                            ctx.telegram.deleteMessage(chatId, id).catch(() => {})
+                        );
                     }
-                    // Vider la liste des messages trackés
+                    // Ajouter les trackés qui seraient plus anciens
+                    for (const tid of trackedSet) {
+                        if (tid < currentMsgId - 50) {
+                            deletePromises.push(
+                                ctx.telegram.deleteMessage(chatId, tid).catch(() => {})
+                            );
+                        }
+                    }
+
+                    // Exécuter en parallèle (les erreurs sont silencieuses)
+                    await Promise.allSettled(deletePromises);
+
+                    // 3. Vider la liste des messages trackés en DB
                     const { supabase, COL_USERS } = require('../services/database');
                     await supabase.from(COL_USERS).update({
                         tracked_messages: [],
