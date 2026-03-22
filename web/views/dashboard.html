@@ -2414,6 +2414,8 @@
                     <button class="btn btn-accent" onclick="sendBC()" style="flex:2">🚀 Envoyer la diffusion</button>
                     <button class="btn btn-outline" onclick="viewDiagnosticLogs()" style="flex:1; font-size:11px;">📋
                         Logs</button>
+                    <button class="btn btn-outline" onclick="checkBotStatus()" style="flex:1; font-size:11px;">🔍
+                        État Bot</button>
                 </div>
             </div>
             <div class="card">
@@ -4549,6 +4551,30 @@
 
         async function viewDiagnosticLogs() {
             window.open(`/api/debug/logs?token=${TOKEN}`, '_blank');
+        }
+
+        async function checkBotStatus() {
+            try {
+                const data = await api('/bot-status');
+                let msg = '📊 <b>ÉTAT DU BOT</b>\n\n';
+                if (data.telegram) {
+                    if (data.telegram.connected) {
+                        msg += `✅ <b>Telegram:</b> Connecté\n` +
+                               `    Bot: @${data.telegram.username}\n` +
+                               `    ID: ${data.telegram.id}\n`;
+                    } else {
+                        msg += `❌ <b>Telegram:</b> DÉCONNECTÉ\n` +
+                               `    Erreur: ${data.telegram.error}\n`;
+                    }
+                }
+                if (data.whatsapp) {
+                    msg += `\n${data.whatsapp.active ? '✅' : '❌'} <b>WhatsApp:</b> ${data.whatsapp.active ? 'Actif' : 'Inactif'}\n`;
+                }
+                msg += `\n⏱️ Uptime: ${Math.round(data.uptime / 60)} minutes`;
+                showModal('État du Bot', msg);
+            } catch (e) {
+                showToast('Erreur: ' + e.message, 'error');
+            }
         }
 
         function initDragAndDrop(zoneId, previewId, urlInputId, typeInputId = null, type) {

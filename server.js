@@ -132,12 +132,54 @@ function createServer() {
 
     // Health check pour Railway/Debug
     app.get('/_health', (req, res) => {
+        const tgChannel = registry.query('telegram');
+        const waChannel = registry.query('whatsapp');
         res.json({
             status: 'ok',
             time: new Date().toISOString(),
             port: process.env.PORT || 'not-set',
-            env: process.env.RAILWAY_ENVIRONMENT || 'local'
+            env: process.env.RAILWAY_ENVIRONMENT || 'local',
+            telegram: {
+                registered: !!tgChannel,
+                active: tgChannel?.isActive || false
+            },
+            whatsapp: {
+                registered: !!waChannel,
+                active: waChannel?.isActive || false
+            }
         });
+    });
+
+    // Endpoint de diagnostic détaillé du bot (protégé par auth)
+    app.get('/api/bot-status', authMiddleware, async (req, res) => {
+        try {
+            const tgChannel = registry.query('telegram');
+            const waChannel = registry.query('whatsapp');
+
+            let tgInfo = null;
+            if (tgChannel && tgChannel.getBotInstance) {
+                const bot = tgChannel.getBotInstance();
+                if (bot) {
+                    try {
+                        const me = await bot.telegram.getMe();
+                        tgInfo = { connected: true, username: me.username, id: me.id, name: me.first_name };
+                    } catch (e) {
+                        tgInfo = { connected: false, error: e.message };
+                    }
+                } else {
+                    tgInfo = { connected: false, error: 'Bot instance null' };
+                }
+            }
+
+            res.json({
+                telegram: tgInfo || { connected: false, error: 'Canal non enregistré' },
+                whatsapp: { registered: !!waChannel, active: waChannel?.isActive || false },
+                uptime: process.uptime(),
+                memory: process.memoryUsage()
+            });
+        } catch (e) {
+            res.status(500).json({ error: e.message });
+        }
     });
 
     // QR Code WhatsApp - accessible via navigateur pour scanner

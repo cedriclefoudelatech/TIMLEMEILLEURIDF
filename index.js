@@ -390,4 +390,29 @@ async function runAutomatedSync(bot) {
     }
 }
 
+// ═══════════════════════════════════════════════════
+// GESTION PROPRE DU SHUTDOWN (évite les conflits 409)
+// ═══════════════════════════════════════════════════
+const gracefulShutdown = async (signal) => {
+    console.log(`\n⚠️ Signal ${signal} reçu — Arrêt propre en cours...`);
+    try {
+        await registry.stopAll();
+        console.log('✅ Tous les canaux arrêtés proprement.');
+    } catch (e) {
+        console.error('❌ Erreur pendant le shutdown:', e.message);
+    }
+    process.exit(0);
+};
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+process.on('uncaughtException', (err) => {
+    console.error('💥 UNCAUGHT EXCEPTION:', err.message, err.stack);
+});
+
+process.on('unhandledRejection', (reason) => {
+    console.error('💥 UNHANDLED REJECTION:', reason);
+});
+
 main().catch(console.error);

@@ -160,10 +160,10 @@ function setupStartHandler(bot) {
                     : '';
                 if (isNew) {
                     welcomeText = `✨ <b>Bienvenue sur ${settings.bot_name}, ${user.first_name} !</b>\n\n` +
-                        `${settings.welcome_message}\n${paymentLine}\n` +
+                        `${settings.welcome_message || ''}\n${paymentLine}\n` +
                         `📍 <i>En utilisant ce service, vous acceptez d'être localisé tacitement.</i>\n\n` +
                         `🔗 <b>Votre lien de parrainage :</b>\n` +
-                        `<code>https://t.me/${ctx.botInfo.username}?start=${registeredUser.referral_code}</code>`;
+                        `<code>https://t.me/${ctx.botInfo?.username || 'bot'}?start=${registeredUser.referral_code}</code>`;
                     if (!referrerId) pendingReferralInput.set(docId, true);
                 } else {
                     const defaultBack = `👋 <b>Ravi de vous revoir, ${user.first_name} !</b>\n\nVous êtes déjà membre du ${settings.bot_name}.${paymentLine}`;

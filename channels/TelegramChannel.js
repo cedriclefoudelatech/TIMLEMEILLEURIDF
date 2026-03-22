@@ -79,25 +79,39 @@ class TelegramChannel extends Channel {
 
     async start() {
         console.log(`[TG] Lancement du bot (${this.token.substring(0, 4)}****...)...`);
-        
+
+        const MAX_RETRIES = 10;
+        const self = this;
+
         const launch = async (retryCount = 0) => {
             try {
-                await this.bot.launch();
+                // Avant de lancer, supprimer le webhook existant pour forcer le mode polling
+                await self.bot.telegram.deleteWebhook({ drop_pending_updates: false }).catch(() => {});
+                await self.bot.launch();
                 console.log('✅ [TG] Bot lancé avec succès !');
-                this.isActive = true;
+                self.isActive = true;
             } catch (err) {
-                if (err.message.includes('409') && retryCount < 5) {
-                    console.warn(`⚠️ [TG] Conflit 409 (déjà une instance). Tentative ${retryCount + 1}/5 dans 15s...`);
-                    setTimeout(() => launch(retryCount + 1), 15000);
+                if (err.message.includes('409') && retryCount < MAX_RETRIES) {
+                    const delay = Math.min(10000 + retryCount * 5000, 30000); // 10s, 15s, 20s, ... 30s max
+                    console.warn(`⚠️ [TG] Conflit 409 (ancienne instance). Tentative ${retryCount + 1}/${MAX_RETRIES} dans ${delay/1000}s...`);
+                    await new Promise(r => setTimeout(r, delay));
+                    return launch(retryCount + 1);
+                } else if (err.message.includes('401')) {
+                    console.error('❌ [TG] TOKEN INVALIDE ! Vérifiez BOT_TOKEN dans les variables d\'environnement.');
                 } else {
                     console.error('❌ [TG] Erreur fatale au lancement:', err.message);
+                    // Retry même pour les erreurs non-409 après un délai
+                    if (retryCount < 3) {
+                        console.log(`[TG] Nouvelle tentative dans 30s...`);
+                        await new Promise(r => setTimeout(r, 30000));
+                        return launch(retryCount + 1);
+                    }
                 }
             }
         };
 
-        launch();
-        // On marque isActive true temporairement pour le registry, 
-        // ou on laisse le launch s'en occuper. Ici on dit qu'il est "initialisé".
+        // Lancer en arrière-plan mais avec await pour les retries
+        launch().catch(e => console.error('[TG] Launch fatal:', e.message));
         console.log('  Telegram channel initialized and launching in background...');
     }
 
