@@ -248,6 +248,7 @@ CREATE TABLE IF NOT EXISTS public.bot_users (
   blocked_at       timestamptz,
   is_available     boolean       DEFAULT false,
   current_city     text          DEFAULT 'non défini'::text,
+  is_approved      boolean       DEFAULT true,
   data             jsonb         DEFAULT '{}'::jsonb,
   CONSTRAINT bot_users_pkey PRIMARY KEY (id)
 );
