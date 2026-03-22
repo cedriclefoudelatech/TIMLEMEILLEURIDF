@@ -143,17 +143,53 @@ function setupAdminHandlers(bot) {
      */
     bot.action(/^approve_(.+)$/, async (ctx) => {
         if (!(await isAdmin(ctx))) return ctx.answerCbQuery('❌ Accès réservé aux administrateurs.');
-        const userId = ctx.match[1];
-        const { approveUser } = require('../services/database');
-        
+        const rawId = ctx.match[1];
+        const { approveUser, getUser, getAppSettings, getSupplierByTelegramId } = require('../services/database');
+        const { getMainMenuKeyboard, getLivreurMenuKeyboard } = require('./start');
+
         try {
+            // rawId peut être "telegram_12345" ou "12345"
+            const userId = rawId.includes('_') ? rawId : `telegram_${rawId}`;
             await approveUser(userId);
             await ctx.answerCbQuery('✅ Utilisateur approuvé avec succès !', true);
             await safeEdit(ctx, ctx.callbackQuery.message.text + `\n\n✅ <b>APPROUVÉ PAR ${ctx.from.first_name}</b>`);
-            
-            // Notifier le client
-            const settings = ctx.state?.settings || await require('../services/database').getAppSettings();
-            await sendTelegramMessage(userId, `🎉 <b>Félicitations !</b>\n\nVotre accès a été validé par l'administrateur. Vous pouvez maintenant découvrir notre catalogue et passer commande.\n\nCliquez sur /start pour commencer !`);
+
+            // Récupérer les infos de l'utilisateur approuvé
+            const approvedUser = await getUser(userId);
+            const settings = ctx.state?.settings || await getAppSettings();
+            const platformId = userId.replace('telegram_', '').replace('whatsapp_', '');
+
+            // Envoyer le message de bienvenue + le menu automatiquement
+            const welcomeMsg = `🎉 <b>Félicitations !</b>\n\nVotre accès a été validé par l'administrateur. Bienvenue sur <b>${settings.bot_name || 'notre service'}</b> !\n\nVoici votre menu :`;
+
+            const supplier = await getSupplierByTelegramId(platformId).catch(() => null);
+            const isFournisseur = !!supplier;
+
+            // Construire le clavier du menu
+            let keyboard;
+            if (approvedUser && approvedUser.is_livreur) {
+                keyboard = await getLivreurMenuKeyboard({ platform: userId.startsWith('whatsapp_') ? 'whatsapp' : 'telegram', from: { id: platformId }, state: { settings } }, settings, approvedUser, false);
+            } else {
+                keyboard = await getMainMenuKeyboard({ platform: userId.startsWith('whatsapp_') ? 'whatsapp' : 'telegram', from: { id: platformId }, state: { settings } }, settings, approvedUser, isFournisseur);
+            }
+
+            // Envoyer au client avec le menu
+            const reply_markup = keyboard?.reply_markup || keyboard;
+            if (approvedUser && approvedUser.is_livreur) {
+                await sendTelegramMessage(userId, welcomeMsg, reply_markup ? { reply_markup } : {});
+            } else {
+                // Envoyer avec photo de bienvenue si configurée
+                if (settings.welcome_photo) {
+                    const { sendMessageToUser } = require('../services/notifications');
+                    await sendMessageToUser(userId, welcomeMsg, {
+                        reply_markup,
+                        media_url: settings.welcome_photo,
+                        media_type: 'photo'
+                    });
+                } else {
+                    await sendTelegramMessage(userId, welcomeMsg, reply_markup ? { reply_markup } : {});
+                }
+            }
         } catch (e) {
             console.error('[Admin-Approve] Error:', e.message);
             await ctx.answerCbQuery('❌ Erreur lors de l\'approbation.', true);
@@ -162,13 +198,31 @@ function setupAdminHandlers(bot) {
 
     bot.command(/^approve_(.+)$/, async (ctx) => {
         if (!(await isAdmin(ctx))) return;
-        const userId = ctx.match[1];
-        const { approveUser } = require('../services/database');
-        
+        const rawId = ctx.match[1];
+        const { approveUser, getUser, getAppSettings, getSupplierByTelegramId } = require('../services/database');
+        const { getMainMenuKeyboard, getLivreurMenuKeyboard } = require('./start');
+
         try {
+            const userId = rawId.includes('_') ? rawId : `telegram_${rawId}`;
             await approveUser(userId);
             ctx.reply(`✅ L'utilisateur <code>${userId}</code> a été approuvé.`, { parse_mode: 'HTML' });
-            await sendTelegramMessage(userId, `🎉 <b>Accès validé !</b>\n\nL'admin a autorisé votre compte. Tapez /start pour commander.`);
+
+            const approvedUser = await getUser(userId);
+            const settings = ctx.state?.settings || await getAppSettings();
+            const platformId = userId.replace('telegram_', '').replace('whatsapp_', '');
+
+            const welcomeMsg = `🎉 <b>Accès validé !</b>\n\nL'admin a autorisé votre compte. Bienvenue sur <b>${settings.bot_name || 'notre service'}</b> !\n\nVoici votre menu :`;
+
+            const supplier = await getSupplierByTelegramId(platformId).catch(() => null);
+            const isFournisseur = !!supplier;
+            let keyboard;
+            if (approvedUser && approvedUser.is_livreur) {
+                keyboard = await getLivreurMenuKeyboard({ platform: 'telegram', from: { id: platformId }, state: { settings } }, settings, approvedUser, false);
+            } else {
+                keyboard = await getMainMenuKeyboard({ platform: 'telegram', from: { id: platformId }, state: { settings } }, settings, approvedUser, isFournisseur);
+            }
+            const reply_markup = keyboard?.reply_markup || keyboard;
+            await sendTelegramMessage(userId, welcomeMsg, reply_markup ? { reply_markup } : {});
         } catch (e) {
             ctx.reply(`❌ Erreur : ${e.message}`);
         }

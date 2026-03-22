@@ -1070,6 +1070,7 @@ function setupOrderSystem(bot) {
                     .replace('{order_id}', order.id);
 
                 const adminBtns = Markup.inlineKeyboard([
+                    [Markup.button.callback('✅ ACCEPTER LA LIVRAISON', `admin_take_order_${order.id}`)],
                     [Markup.button.callback('🤝 ASSIGNER', `admin_order_assign_list_${order.id}`)],
                     [Markup.button.callback('⚙️ GÉRER', `admin_order_view_${order.id}`)]
                 ]).reply_markup;
@@ -1376,6 +1377,55 @@ function setupOrderSystem(bot) {
         buttons.push([Markup.button.callback('◀️ Retour mes commandes', 'my_orders')]);
 
         await safeEdit(ctx, text, Markup.inlineKeyboard(buttons));
+    });
+
+    // ═══ ADMIN : Accepter une livraison directement ═══
+    bot.action(/^admin_take_order_(.+)$/, async (ctx) => {
+        await ctx.answerCbQuery();
+        const orderId = ctx.match[1];
+        const settings = ctx.state?.settings || await getAppSettings();
+        const order = await getOrder(orderId);
+
+        if (!order || order.status !== 'pending') {
+            return safeEdit(ctx, '❌ Cette commande n\'est plus disponible (déjà prise en charge ou annulée).');
+        }
+
+        // L'admin prend la livraison en tant que "livreur admin"
+        await updateOrderStatus(orderId, 'taken', {
+            livreur_id: `${ctx.platform}_${ctx.from.id}`,
+            livreur_name: `${ctx.from.first_name} (Admin)`
+        });
+
+        await safeEdit(ctx,
+            `✅ <b>LIVRAISON ACCEPTÉE PAR L'ADMIN</b>\n\n` +
+            `🆔 Commande : <code>#${orderId.slice(-5)}</code>\n` +
+            `📦 Produit : <b>${order.product_name}</b>\n` +
+            `📍 Adresse : <code>${order.address}</code>\n` +
+            `💰 Total : <b>${order.total_price}€</b>\n\n` +
+            `Le client a été notifié.`,
+            Markup.inlineKeyboard([
+                [Markup.button.callback('⏰ Arrivée -1h', `notify_${orderId}_1h`)],
+                [Markup.button.callback('⏳ 30 min', `notify_${orderId}_30m`), Markup.button.callback('⏳ 10 min', `notify_${orderId}_10m`)],
+                [Markup.button.callback('⚡ 5 min', `notify_${orderId}_5m`), Markup.button.callback('📍 Arrivé', `notify_${orderId}_here`)],
+                [Markup.button.callback(`${settings.ui_icon_success || '✅'} MARQUER COMME LIVRÉE`, `finish_${orderId}`)],
+                [Markup.button.callback('⚙️ Gérer', `admin_order_view_${orderId}`)]
+            ])
+        );
+
+        // Notifier le client
+        if (order.user_id) {
+            await sendTelegramMessage(order.user_id,
+                `🚚 <b>Bonne nouvelle !</b>\n\n` +
+                `Votre commande #${orderId.slice(-5)} a été acceptée par <b>${settings.bot_name || 'notre équipe'}</b>.\n` +
+                `⏳ Vous recevrez une notification quand le livreur sera en route.`,
+                {
+                    ...Markup.inlineKeyboard([
+                        [Markup.button.callback(settings.btn_help_support || '❓ Aide & Support', 'help_menu')],
+                        [Markup.button.callback(settings.btn_cancel_my_order || '❌ Annuler ma commande', `cancel_order_client_${orderId}`)]
+                    ])
+                }
+            );
+        }
     });
 
     bot.action(/^take_order_(.+)$/, async (ctx) => {

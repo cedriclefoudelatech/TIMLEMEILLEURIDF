@@ -1,5 +1,5 @@
 const { Markup } = require('telegraf');
-const { registerUser, getUser, incrementDailyStat, getAppSettings, addMessageToTrack, getLastMenuId, getSupplierByTelegramId } = require('../services/database');
+const { registerUser, getUser, incrementDailyStat, getAppSettings, addMessageToTrack, getLastMenuId, getTrackedMessages, getSupplierByTelegramId } = require('../services/database');
 const { safeEdit } = require('../services/utils');
 const { createPersistentMap } = require('../services/persistent_map');
 const { isAdmin } = require('./admin');
@@ -42,6 +42,27 @@ function setupStartHandler(bot) {
 
             // Quitter tout contexte produit
             try { const { clearActiveMediaGroup } = require('../services/utils'); clearActiveMediaGroup(docId); } catch(e) {}
+
+            // ═══ NETTOYAGE COMPLET : supprimer tous les anciens messages du bot ═══
+            try {
+                const tracked = await getTrackedMessages(docId);
+                if (tracked && tracked.length > 0 && ctx.platform === 'telegram' && ctx.telegram) {
+                    const chatId = ctx.chat?.id;
+                    if (chatId) {
+                        await Promise.allSettled(tracked.map(msgId =>
+                            ctx.telegram.deleteMessage(chatId, msgId).catch(() => {})
+                        ));
+                    }
+                    // Vider la liste des messages trackés
+                    const { supabase, COL_USERS } = require('../services/database');
+                    await supabase.from(COL_USERS).update({
+                        tracked_messages: [],
+                        last_menu_id: null
+                    }).eq('id', docId);
+                }
+            } catch (e) {
+                console.error('[START] Cleanup error:', e.message);
+            }
 
             // Vérifier si un code de parrainage
             let referrerId = null;
@@ -86,14 +107,15 @@ function setupStartHandler(bot) {
 
             if (!isApproved) {
                 // Alerte Admin avec bouton d'approbation
+                const userType = registeredUser.is_livreur ? '🚚 Livreur' : '👤 Client';
                 const adminMsg = `🆕 <b>DEMANDE D'ACCÈS</b>\n\n` +
-                    `👤 Client : ${user.first_name}\n` +
+                    `${userType} : <b>${user.first_name}</b>\n` +
                     `🆔 ID : <code>${user.id}</code> (Platform: ${ctx.platform})\n` +
                     `Username : @${user.username || 'Inconnu'}\n\n` +
-                    `<i>Cliquez sur le bouton ci-dessous pour lui donner accès au catalogue.</i>`;
-                
+                    `<i>Cliquez sur le bouton ci-dessous pour lui donner accès.</i>`;
+
                 const adminKeyboard = Markup.inlineKeyboard([
-                    [Markup.button.callback('✅ DONNER ACCÈS', `approve_${ctx.platform}_${user.id}`)]
+                    [Markup.button.callback(`✅ ACCEPTER ${registeredUser.is_livreur ? 'LE LIVREUR' : 'LE CLIENT'}`, `approve_${ctx.platform}_${user.id}`)]
                 ]);
 
                 await notifyAdmins(bot, adminMsg, adminKeyboard).catch(() => {});
