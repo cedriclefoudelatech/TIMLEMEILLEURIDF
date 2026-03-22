@@ -34,10 +34,14 @@ class Dispatcher {
     }
 
     // Permet aux fonctions externes (notifyUser) d'enregistrer des boutons pour le fallback numérique WA
-    setLastButtons(userId, buttons) {
+    setUserLastButtons(userId, buttons) {
+        const id = this._normalizeId(userId);
         if (buttons && buttons.length > 0) {
-            console.log(`[Dispatcher] setLastButtons for ${userId}: ${JSON.stringify(buttons.map(b => b.id || b.title))}`);
-            this.userLastButtons.set(userId, buttons);
+            console.log(`[Dispatcher] setLastButtons for ${id}: ${JSON.stringify(buttons.map(b => b.id || (b.web_app ? 'WebApp' : 'Text')))}`);
+            this.userLastButtons.set(id, buttons);
+        } else {
+            console.log(`[Dispatcher] Clearing buttons for ${id}`);
+            this.userLastButtons.delete(id);
         }
     }
 
@@ -238,7 +242,8 @@ class Dispatcher {
                     extra = { ...extra, protect_content: true };
                 }
                 const options = this._convertExtra(extra);
-                if (options.buttons) this.userLastButtons.set(userId, options.buttons);
+                if (options.buttons) this.setUserLastButtons(userId, options.buttons);
+                else if (channel.type === 'whatsapp') this.setUserLastButtons(userId, null); // Clear if no buttons
                 
                 // Cleanup auto pour WA
                 if (channel.type === 'whatsapp') {
@@ -281,7 +286,8 @@ class Dispatcher {
                     extra = { ...extra, protect_content: true };
                 }
                 const options = this._convertExtra(extra);
-                if (options.buttons) this.userLastButtons.set(userId, options.buttons);
+                if (options.buttons) this.setUserLastButtons(userId, options.buttons);
+                else if (channel.type === 'whatsapp') this.setUserLastButtons(userId, null);
                 
                 if (channel.type === 'whatsapp') {
                     const oldIds = this.userLastMessageIds.get(userId) || [];
@@ -305,7 +311,8 @@ class Dispatcher {
                     extra = { ...extra, protect_content: true };
                 }
                 const options = this._convertExtra(extra);
-                if (options.buttons) this.userLastButtons.set(userId, options.buttons);
+                if (options.buttons) this.setUserLastButtons(userId, options.buttons);
+                else if (channel.type === 'whatsapp') this.setUserLastButtons(userId, null);
                 
                 if (channel.type === 'whatsapp') {
                     const oldIds = this.userLastMessageIds.get(userId) || [];
