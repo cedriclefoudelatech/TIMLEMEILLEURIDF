@@ -1329,8 +1329,8 @@ const SETTINGS_DEFAULTS = {
     admin_telegram_id: '',
     dashboard_url: process.env.DASHBOARD_URL || '',
     private_contact_url: '',
-    private_contact_wa_url: 'https://wa.me/33752981714',
-    channel_url: '', // Corrected for La Frappe
+    private_contact_wa_url: 'https://wa.me/33618875972',
+    channel_url: '',
     bot_description: '',
     bot_short_description: '',
     payment_modes: '💵 Espèces',
