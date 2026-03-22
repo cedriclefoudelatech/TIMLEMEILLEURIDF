@@ -58,7 +58,7 @@ class Dispatcher {
         }
         if (msgId) {
             this.processedMessages.add(msgId);
-            if (this.processedMessages.size > 100) {
+            if (this.processedMessages.size > 500) {
                 const first = this.processedMessages.values().next().value;
                 this.processedMessages.delete(first);
             }
@@ -66,23 +66,36 @@ class Dispatcher {
 
         const fromRaw = String(msg.from || '');
         const fromStr = this._normalizeId(fromRaw);
-        console.log(`[Dispatcher] HandleUpdate from ${channel.type}: ${fromStr} (Raw: ${fromRaw})`);
-        
-        // Auto-enregistrement/mise à jour de l'utilisateur pour ce canal
-        try {
-            // Pour WhatsApp, on garde le JID complet normalisé
-            const userId = channel.type === 'whatsapp' ? fromStr : fromStr.split('@')[0];
-            const settings = await getAppSettings();
-            
-            const { isNew, user: registeredUser } = await registerUser({
-                id: userId,
-                first_name: msg.name || settings.default_wa_name || 'Utilisateur WhatsApp',
-                username: '',
-                type: 'user'
-            }, channel.type);
+        const isCallback = !!msg.isAction;
 
-            msg.user = registeredUser;
-            msg._isNewUser = isNew;
+        // Auto-enregistrement/mise à jour de l'utilisateur pour ce canal
+        // OPTIMISATION: Sur les callbacks (boutons), on skip registerUser car l'user est déjà enregistré
+        // et on charge les settings en parallèle pour gagner du temps
+        try {
+            const userId = channel.type === 'whatsapp' ? fromStr : fromStr.split('@')[0];
+
+            if (isCallback) {
+                // Callback = user déjà connu → charger settings + user cache en parallèle (pas de registerUser)
+                const settings = await getAppSettings(); // cached 10min
+                const docId = `${channel.type}_${userId}`;
+                const cachedEntry = require('./database')._userCache?.get(docId);
+                msg.user = cachedEntry?.data || null;
+                msg._isNewUser = false;
+                msg._settings = settings; // Passer au contexte pour éviter un 2e appel
+            } else {
+                // Message normal → enregistrer l'utilisateur
+                const settings = await getAppSettings();
+                const { isNew, user: registeredUser } = await registerUser({
+                    id: userId,
+                    first_name: msg.name || settings.default_wa_name || 'Utilisateur WhatsApp',
+                    username: '',
+                    type: 'user'
+                }, channel.type);
+
+                msg.user = registeredUser;
+                msg._isNewUser = isNew;
+                msg._settings = settings; // Passer au contexte pour éviter un 2e appel
+            }
         } catch (e) {
             console.error(`[Dispatcher] Auto-reg failed:`, e.message);
         }
@@ -122,7 +135,8 @@ class Dispatcher {
 
     async _createUnifiedContext(channel, msg, normalizedFrom) {
         const userId = normalizedFrom || this._normalizeId(msg.from);
-        const settings = await getAppSettings();
+        // Réutiliser les settings déjà chargées dans handleUpdate pour éviter un 2e appel
+        const settings = msg._settings || await getAppSettings();
         
         const _isPrivileged = this._isPrivilegedUser(userId, msg.user, settings);
 
@@ -206,7 +220,15 @@ class Dispatcher {
                     }
                     return results;
                 },
-                setChatMenuButton: async () => {}
+                setChatMenuButton: async () => {},
+                getFileLink: async (fileId) => {
+                    if (channel.type === 'telegram') {
+                        const tgCh = registry.query('telegram');
+                        const tgBot = tgCh?.getBotInstance?.();
+                        if (tgBot) return tgBot.telegram.getFileLink(fileId);
+                    }
+                    throw new Error('getFileLink not available for this platform');
+                }
             },
 
             reply: async (text, extra = {}) => {
@@ -347,14 +369,19 @@ class Dispatcher {
 
         if (extra.reply_markup) {
             if (extra.reply_markup.inline_keyboard) {
-                buttons = extra.reply_markup.inline_keyboard.flat();
+                buttons = extra.reply_markup.inline_keyboard;
+            } else if (extra.reply_markup.keyboard) {
+                buttons = extra.reply_markup.keyboard.flat();
             }
         } else if (extra.inline_keyboard) {
-            buttons = extra.inline_keyboard.flat();
+            buttons = extra.inline_keyboard;
         }
 
         if (buttons.length > 0) {
-            options.buttons = buttons.map(b => ({
+            // If buttons is a 2D array (inline_keyboard), flatten it for processing
+            const processedButtons = Array.isArray(buttons[0]) ? buttons.flat() : buttons;
+
+            options.buttons = processedButtons.map(b => ({
                 id: b.callback_data,
                 title: b.text,
                 url: b.url,
@@ -377,7 +404,8 @@ class Dispatcher {
     }
 
     async _route(ctx) {
-        const text = ctx.message.text || '';
+        const msg = ctx.message || {};
+        const text = msg.text || ctx.text || '';
         const lowerText = text.toLowerCase().trim();
         const platform = ctx.platform.toUpperCase();
         console.log(`\n====== [${platform}] NOUVEAU MESSAGE ======`);
@@ -386,7 +414,7 @@ class Dispatcher {
         // 1. Gestion des CALLBACKS (Boutons Telegram & Actions WhatsApp)
         if (ctx.callbackQuery) {
             const data = ctx.callbackQuery.data;
-            console.log(`[${platform}] 🔘 BOUTON pressé: "${data}"`);
+            console.log(`[Dispatcher-CB] Bouton détecté: "${data}" (User: ${ctx.from.id})`);
             const found = await this._routeAction(ctx, data);
             if (found) {
                 console.log(`[${platform}] ✅ Handler trouvé et exécuté pour: "${data}"`);
@@ -421,7 +449,11 @@ class Dispatcher {
         // 4. Handlers globaux (on text, message, etc.)
         console.log(`[${platform}] 📝 Passage dans ${this.onHandlers.filter(h=>h.type==='text').length} handlers texte...`);
         for (const h of this.onHandlers) {
-            if (h.type === 'text' && ctx.message.text) {
+            if (h.type === 'text' && (ctx.message.text || ctx.text)) {
+                await h.fn(ctx, () => {});
+            } else if (h.type === 'photo' && ctx.message.photo) {
+                await h.fn(ctx, () => {});
+            } else if (h.type === 'video' && ctx.message.video) {
                 await h.fn(ctx, () => {});
             } else if (h.type === 'message') {
                 await h.fn(ctx, () => {});
@@ -477,6 +509,16 @@ class Dispatcher {
             }
         }
         return false;
+    }
+
+    /**
+     * Permet aux services externes (notif, etc.) d'hydrater le cache des boutons
+     * pour que les raccourcis numériques WhatsApp fonctionnent sur les messages envoyés hors ctx.reply
+     */
+    setUserLastButtons(userId, buttons) {
+        if (!userId || !buttons) return;
+        this.userLastButtons.set(String(userId), buttons);
+        console.log(`[Dispatcher] Buttons cache hydrated for ${userId} (${buttons.length} buttons)`);
     }
 }
 

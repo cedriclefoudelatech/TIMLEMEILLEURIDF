@@ -145,8 +145,8 @@ async function safeEdit(ctx, text, opts = {}) {
         } catch (e) { }
     };
 
-    // Helper: supprimer tous les messages trackés sauf le message actif — EN ARRIÈRE-PLAN
-    // Protège les messages du media group actif (ils restent tant qu'on est dans le produit)
+    // Helper: supprimer les messages trackés sauf le message actif — EN ARRIÈRE-PLAN
+    // OPTIMISÉ: max 3 suppressions par cycle pour réduire la latence API
     const cleanupOrphans = (keepId) => {
         // Non bloquant : on lance le cleanup sans attendre
         (async () => {
@@ -163,14 +163,13 @@ async function safeEdit(ctx, text, opts = {}) {
 
                 const toDelete = tracked.filter(id => !protectedIds.has(String(id)));
                 if (toDelete.length > 0) {
-                    console.log(`[CLEANUP] User ${userId}: suppression ${toDelete.length} msg (protégés: ${protectedIds.size})`);
-                    const results = await Promise.allSettled(toDelete.map(id => deleteSingleMessage(id)));
-                    results.forEach((r, i) => {
-                        if (r.status === 'rejected') console.warn(`[CLEANUP] Échec suppression msg ${toDelete[i]}: ${r.reason}`);
-                    });
+                    // OPTIMISATION: max 20 suppressions par cycle pour traiter les broadcasts volumineux
+                    const batch = toDelete.slice(0, 20);
+                    await Promise.allSettled(batch.map(id => deleteSingleMessage(id)));
                 }
-                // Mettre à jour le cache : garder les protégés
-                _trackedCache.set(userId, [...protectedIds].map(Number).filter(Boolean));
+                // Mettre à jour le cache : garder les protégés + les non-supprimés
+                const remaining = toDelete.slice(20);
+                _trackedCache.set(userId, [...new Set([...remaining, ...[...protectedIds].map(Number).filter(Boolean)])]);
             } catch (e) {
                 console.error(`[CLEANUP] Erreur: ${e.message}`);
             }
@@ -296,12 +295,12 @@ async function safeEdit(ctx, text, opts = {}) {
 }
 
 // Permet à d'autres modules de tracker un message intermédiaire dans le cache local
-function trackIntermediateMessage(userId, messageId) {
+async function trackIntermediateMessage(userId, messageId) {
     const existing = _trackedCache.get(userId) || [];
     if (!existing.includes(messageId)) {
         existing.push(messageId);
-        // Max 10 messages
-        if (existing.length > 10) existing.shift();
+        // Max 50 messages (suffisant pour plusieurs broadcasts et navigation)
+        if (existing.length > 50) existing.shift();
         _trackedCache.set(userId, existing);
     }
 }
@@ -312,7 +311,7 @@ function debugLog(msg) {
     const timestamp = new Date().toISOString();
     const line = `[${timestamp}] ${msg}\n`;
     try {
-        fs.appendFileSync(path.join(process.cwd(), 'debug_timlemeilleur.log'), line);
+        fs.appendFileSync(path.join(process.cwd(), 'debug_session.log'), line);
     } catch (e) { }
     console.log(msg);
 }

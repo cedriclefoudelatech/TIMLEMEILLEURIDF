@@ -14,6 +14,7 @@ const {
 const { safeEdit, debugLog, trackIntermediateMessage, setActiveMediaGroup, clearActiveMediaGroup, getActiveMediaGroup, esc } = require('../services/utils');
 const { createPersistentMap } = require('../services/persistent_map');
 const { notifyAdmins, notifyLivreurs, notifySuppliers, sendTelegramMessage } = require('../services/notifications');
+const { clearAllAwaitingMaps } = require('./supplier_marketplace');
 
 // ======= ÉTAT PERSISTANT (survit aux redémarrages via Supabase) =======
 const userCarts = createPersistentMap('userCarts');
@@ -23,6 +24,7 @@ const pendingOrderConfirmation = createPersistentMap('pendingConfirm');
 const awaitingDelayReason = createPersistentMap('awaitingDelay');
 const awaitingChatReply = createPersistentMap('awaitingChat');
 const awaitingReviewText = createPersistentMap('awaitingReview');
+const awaitingUserSupportReply = new Map();
 // État éphémère (pas besoin de persister)
 const userLastActivity = new Map();
 
@@ -115,8 +117,10 @@ function setupOrderSystem(bot) {
     // ========== CATALOGUE & COMMANDE ==========
 
     async function displayCatalog(ctx) {
-        const products = await getProducts();
-        const settings = ctx.state?.settings || await getAppSettings();
+        const [products, settings] = await Promise.all([
+            getProducts(),
+            ctx.state?.settings ? Promise.resolve(ctx.state.settings) : getAppSettings()
+        ]);
         if (!products || products.length === 0) {
             return safeEdit(ctx, settings.msg_catalog_empty || '📭 Le catalogue est actuellement vide.', Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_generic || '◀️ Retour', 'main_menu')]]));
         }
@@ -125,12 +129,20 @@ function setupOrderSystem(bot) {
         const catalogTitle = settings.label_catalog_title || `${catalogIcon} <b>Catalogue ${botName}</b>`;
         let text = `${catalogTitle}\n\nChoisissez un produit :`;
 
-        const buttons = products.map(p => {
-            let label = `${p.name} - ${p.price}€`;
-            if (p.is_bundle) label = `🎁 ${p.name} (BOGO) - ${p.price}€`;
-            else if (p.promo) label = `🔥 ${p.name} - ${p.price}€`;
-            return [Markup.button.callback(label, `product_${p.id}`)];
-        });
+        // Grouper les produits 2 par 2
+        const buttons = [];
+        for (let i = 0; i < products.length; i += 2) {
+            const row = [];
+            const p1 = products[i];
+            let badge1 = p1.is_bundle ? '🎁 ' : (p1.promo ? '🔥 ' : '');
+            row.push(Markup.button.callback(`${badge1}${p1.name} - ${p1.price}€`, `product_${p1.id}`));
+            if (i + 1 < products.length) {
+                const p2 = products[i + 1];
+                let badge2 = p2.is_bundle ? '🎁 ' : (p2.promo ? '🔥 ' : '');
+                row.push(Markup.button.callback(`${badge2}${p2.name} - ${p2.price}€`, `product_${p2.id}`));
+            }
+            buttons.push(row);
+        }
         buttons.push([Markup.button.callback(settings.btn_back_menu || '◀️ Retour Menu', 'main_menu')]);
 
         await safeEdit(ctx, text, Markup.inlineKeyboard(buttons));
@@ -138,6 +150,8 @@ function setupOrderSystem(bot) {
 
     bot.action('view_catalog', async (ctx) => {
         await ctx.answerCbQuery();
+        // Nettoyer les états marketplace pour éviter l'interception des messages
+        clearAllAwaitingMaps(ctx.from.id);
         // Quitter le contexte produit → libérer le media group pour le cleanup
         clearActiveMediaGroup(`${ctx.platform}_${ctx.from.id}`);
         await displayCatalog(ctx);
@@ -145,6 +159,8 @@ function setupOrderSystem(bot) {
 
     bot.action(/^product_(.+)$/, async (ctx) => {
         await ctx.answerCbQuery();
+        // Nettoyer les états marketplace pour éviter l'interception des messages
+        clearAllAwaitingMaps(ctx.from.id);
         const productId = ctx.match[1];
         const products = await getProducts();
         const product = products.find(p => p.id === productId);
@@ -168,23 +184,23 @@ function setupOrderSystem(bot) {
             });
         }
 
-        let text = `${settings.ui_icon_catalog || '🛒'} <b>${product.name}</b>\n` +
-            `💰 Prix unité : <b>${product.price}€</b>\n` +
+        let text = `🌟 <b>${esc(product.name)}</b> 🌟\n\n` +
+            `💰 Prix Unitaire : <b>${product.price}€</b>\n` +
             (promoText ? `${promoText}\n` : "") +
             (product.description ? `\n<i>${product.description}</i>\n` : "") +
-            `\nChoisissez la quantité :`;
+            `\n💎 <b>Choisissez votre quantité :</b>`;
 
         const qtyOptions = [1, 2, 3, 4, 5, 10];
-        const buttons = qtyOptions.map(qty =>
-            Markup.button.callback(`${qty}`, `qty_${productId}_${qty}`)
-        );
-        
-        const rows = [];
-        for (let i = 0; i < buttons.length; i += 3) {
-            rows.push(buttons.slice(i, i + 3));
+        const qtyRows = [];
+        for (let i = 0; i < qtyOptions.length; i += 2) {
+            const row = [Markup.button.callback(`${qtyOptions[i]}`, `qty_${productId}_${qtyOptions[i]}`)];
+            if (i + 1 < qtyOptions.length) {
+                row.push(Markup.button.callback(`${qtyOptions[i+1]}`, `qty_${productId}_${qtyOptions[i+1]}`));
+            }
+            qtyRows.push(row);
         }
-        rows.push([Markup.button.callback('❌ Annuler', 'view_catalog')]);
-        const keyboard = Markup.inlineKeyboard(rows);
+        qtyRows.push([Markup.button.callback('❌ Annuler', 'view_catalog')]);
+        const keyboard = Markup.inlineKeyboard(qtyRows);
 
         const userId = `${ctx.platform}_${ctx.from.id}`;
         // On désactive le media group complexe pour privilégier l'affichage photo+caption professionnel
@@ -248,7 +264,8 @@ function setupOrderSystem(bot) {
             qty,
             totalPrice,
             productName: product.name + bundleText,
-            is_bundle: product.is_bundle
+            is_bundle: product.is_bundle,
+            supplier_id: product.supplier_id // IMPORTANT pour la notification fournisseur
         });
 
         if (product.unit && product.unit.length > 0 && !(['unité', 'unite', 'piece', 'pce'].includes(product.unit.toLowerCase()))) {
@@ -270,10 +287,14 @@ function setupOrderSystem(bot) {
             `Que voulez-vous faire ?`;
 
         const buttons = [
-            [Markup.button.callback('🛒 Ajouter au panier', 'add_to_cart')],
-            [Markup.button.callback('💳 Régler maintenant', 'checkout_now')],
-            [Markup.button.callback('⭐️ Laisser un avis / Commentaire', 'leave_review')],
-            [Markup.button.callback(settings.btn_back_generic || '◀️ Retour', `product_${product.id}`)]
+            [
+                Markup.button.callback('🛒 Ajouter au panier', 'add_to_cart'),
+                Markup.button.callback('💳 Régler maintenant', 'checkout_now')
+            ],
+            [
+                Markup.button.callback('⭐️ Avis / Comment', 'leave_review'),
+                Markup.button.callback(settings.btn_back_generic || '◀️ Retour', `product_${product.id}`)
+            ]
         ];
 
         // Si un media group est actif (multi-images), pas de photo dans safeEdit
@@ -302,8 +323,7 @@ function setupOrderSystem(bot) {
         const products = await getProducts();
         const text = `✅ Produit ajouté !\n\nVotre panier contient <b>${cart.length}</b> article(s).`;
         const buttons = [
-            [Markup.button.callback('🛍️ Continuer mes achats', 'view_catalog')],
-            [Markup.button.callback('💳 Voir mon panier / Commander', 'view_cart')],
+            [Markup.button.callback('🛍️ Continuer', 'view_catalog'), Markup.button.callback('💳 Panier', 'view_cart')],
             [Markup.button.callback(settings.btn_clear_cart || '❌ Vider le panier', 'clear_cart')]
         ];
         await safeEdit(ctx, text, Markup.inlineKeyboard(buttons));
@@ -341,15 +361,13 @@ function setupOrderSystem(bot) {
             const price = parseFloat(item.totalPrice);
             total += price;
             summary += `${idx + 1}. ${item.productName} (x${item.qty})${item.chosen_unit_amount ? ` [${item.chosen_unit_amount}]` : ''} - <b>${price.toFixed(2)}€</b>\n`;
-            // Bouton de suppression individuelle plus clair
+            // Bouton de suppression individuelle
             buttons.push([Markup.button.callback(`❌ Retirer ${item.productName}`, `remove_item_${idx}`)]);
         });
         summary += `\n💰 <b>TOTAL : ${total.toFixed(2)}€</b>`;
 
-        buttons.push([Markup.button.callback('💳 Commander', 'start_checkout')]);
-        buttons.push([Markup.button.callback('🛍️ Continuer mes achats', 'view_catalog')]);
-        buttons.push([Markup.button.callback(settings.btn_clear_cart || '❌ Vider le panier', 'clear_cart')]);
-        buttons.push([Markup.button.callback(settings.btn_back_quick_menu || '◀️ Retour Menu', 'main_menu')]);
+        buttons.push([Markup.button.callback('💳 Commander', 'start_checkout'), Markup.button.callback('🛍️ Continuer', 'view_catalog')]);
+        buttons.push([Markup.button.callback(settings.btn_clear_cart || '❌ Vider', 'clear_cart'), Markup.button.callback(settings.btn_back_quick_menu || '◀️ Menu', 'main_menu')]);
 
         await safeEdit(ctx, summary, Markup.inlineKeyboard(buttons));
     }
@@ -582,17 +600,28 @@ function setupOrderSystem(bot) {
     async function finalizeCheckoutFlow(ctx, fullAddress) {
         const userId = `${ctx.platform}_${ctx.from.id}`;
         const cart = userCarts.get(userId) || [];
-        const total = cart.reduce((acc, item) => acc + parseFloat(item.totalPrice), 0);
+        const bagTotal = cart.reduce((acc, item) => acc + parseFloat(item.totalPrice), 0);
+        let total = bagTotal;
 
-        // Récupérer les donées de scheduling
         const pending = pendingOrders.get(userId);
         const scheduled_at = pending ? pending.scheduled_at : null;
+        let priority_fee = 0;
+        let is_priority = false;
+        
+        if (pending && pending.is_priority) {
+            is_priority = true;
+            priority_fee = parseFloat(pending.priority_fee) || 0;
+            total += priority_fee;
+        }
 
         const checkoutData = {
             isCart: true,
             address: fullAddress,
             totalPrice: total,
+            bagTotal: bagTotal,
             scheduled_at: scheduled_at,
+            is_priority: is_priority,
+            priority_fee: priority_fee,
             userId: userId
         };
         pendingOrders.set(userId, checkoutData);
@@ -619,8 +648,7 @@ function setupOrderSystem(bot) {
                     `Réduction possible : <b>${possibleDiscount.toFixed(2)}€</b>.\n\n` +
                     `Voulez-vous l'appliquer ?`,
                     Markup.inlineKeyboard([
-                        [Markup.button.callback(`✅ Oui, déduire ${possibleDiscount.toFixed(2)}€`, 'confirm_order_use_credit_yes')],
-                        [Markup.button.callback(settings.btn_dont_use_credit || '❌ Non, payer plein tarif', 'confirm_order_use_credit_no')],
+                        [Markup.button.callback(`✅ Déduire ${possibleDiscount.toFixed(2)}€`, 'confirm_order_use_credit_yes'), Markup.button.callback('❌ Plein tarif', 'confirm_order_use_credit_no')],
                         [Markup.button.callback(settings.btn_back_to_address || '◀️ Retour Adresse', 'start_checkout')]
                     ])
                 );
@@ -633,12 +661,16 @@ function setupOrderSystem(bot) {
     async function askScheduling(ctx) {
         const settings = ctx.state?.settings || await getAppSettings();
         const text = `🕒 <b>Quand souhaitez-vous être livré ?</b>\n\nChoisissez si vous voulez être livré dès que possible ou planifier un horaire précis.`;
-        const buttons = [
-            [Markup.button.callback('🚀 Immédiatement', 'scheduling_now')],
-            [Markup.button.callback('🕒 Planifier une heure', 'scheduling_plan')],
-            [Markup.button.callback(settings.btn_back_to_address || '◀️ Retour Adresse', 'back_to_address')],
-            [Markup.button.callback(settings.btn_cancel_alt || '❌ Annuler', 'view_catalog')]
-        ];
+        const buttons = [];
+        
+        if (settings.priority_delivery_enabled) {
+            const price = parseFloat(settings.priority_delivery_price) || 15;
+            buttons.push([Markup.button.callback(`🚀 Livraison Prioritaire (+${price}€)`, 'scheduling_priority')]);
+        }
+        
+        buttons.push([Markup.button.callback('🏃 Dès que possible', 'scheduling_now'), Markup.button.callback('🕒 Planifier', 'scheduling_plan')]);
+        buttons.push([Markup.button.callback(settings.btn_back_to_address || '◀️ Retour', 'back_to_address'), Markup.button.callback(settings.btn_cancel_alt || '❌ Annuler', 'view_catalog')]);
+        
         await safeEdit(ctx, text, Markup.inlineKeyboard(buttons));
     }
 
@@ -648,9 +680,27 @@ function setupOrderSystem(bot) {
         const pending = pendingOrders.get(userId);
         if (!pending) return ctx.reply("Session expirée.");
         pending.scheduled_at = null;
+        pending.is_priority = false;
+        pending.priority_fee = 0;
 
-        // Après le scheduling, on demande les détails facultatifs
-        await promptAddressDetails(ctx);
+        const addrState = awaitingAddressDetails.get(userId);
+        if (addrState) addrState.finalized = true;
+        await finalizeCheckoutFlow(ctx, addrState?.address || pending.address);
+    });
+
+    bot.action('scheduling_priority', async (ctx) => {
+        await ctx.answerCbQuery();
+        const settings = ctx.state?.settings || await getAppSettings();
+        const userId = `${ctx.platform}_${ctx.from.id}`;
+        const pending = pendingOrders.get(userId);
+        if (!pending) return ctx.reply("Session expirée.");
+        pending.scheduled_at = null;
+        pending.is_priority = true;
+        pending.priority_fee = parseFloat(settings.priority_delivery_price) || 15;
+
+        const addrState = awaitingAddressDetails.get(userId);
+        if (addrState) addrState.finalized = true;
+        await finalizeCheckoutFlow(ctx, addrState?.address || pending.address);
     });
 
     async function promptAddressDetails(ctx) {
@@ -734,8 +784,9 @@ function setupOrderSystem(bot) {
 
         pending.scheduled_at = `${date} ${hour}`;
 
-        // On demande les détails facultatifs avant de finir
-        await promptAddressDetails(ctx);
+        const addrState = awaitingAddressDetails.get(userId);
+        if (addrState) addrState.finalized = true;
+        await finalizeCheckoutFlow(ctx, addrState?.address || pending.address);
     });
 
     bot.action('back_to_address', async (ctx) => {
@@ -789,20 +840,33 @@ function setupOrderSystem(bot) {
                 text += `🏆 Points : <b>${user.loyalty_points || 0} pts</b>\n\n`;
             }
 
-            if (orders.length === 0) {
-                text += '📭 Vous n\'avez pas encore de commandes.';
-                return safeEdit(ctx, text, Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_quick_menu || '◀️ Menu', 'main_menu')]]));
+            const activeOrders = orders.filter(o => o.status === 'pending' || o.status === 'taken');
+            const pastOrders = orders.filter(o => o.status === 'delivered' || o.status === 'cancelled').slice(0, 5);
+            
+            const buttons = [];
+
+            if (activeOrders.length > 0) {
+                text += `<b>🏃 Commandes en cours :</b>\n`;
+                activeOrders.forEach((o) => {
+                    const statusIcon = o.status === 'taken' ? '🚚' : '⏳';
+                    const statusLabel = o.status === 'taken' ? 'En livraison' : 'En attente';
+                    text += `${statusIcon} #${o.id.slice(-5)} - ${o.product_name} (${statusLabel})\n`;
+                    buttons.push([Markup.button.callback(`🔍 Gérer #${o.id.slice(-5)}`, `view_order_${o.id}`)]);
+                });
+                text += `\n`;
             }
 
-            text += `📝 <b>Historique (10 dernières) :</b>\n`;
-            orders.slice(0, 10).forEach((o, i) => {
-                const date = o.created_at ? new Date(o.created_at).toLocaleDateString('fr-FR') : 'Inconnue';
-                const statusLabel = o.status === 'delivered' ? '✅ Livrée' : (o.status === 'cancelled' ? '❌ Annulée' : '⏳ En cours');
-                text += `${i + 1}. #${o.id.slice(-5)} - ${o.product_name}\n` +
-                    `💰 ${o.total_price}€ - ${statusLabel} (${date})\n\n`;
-            });
+            if (pastOrders.length > 0) {
+                text += `📋 <b>Anciennes Commandes :</b>\n`;
+                pastOrders.forEach((o) => {
+                    const date = o.created_at ? new Date(o.created_at).toLocaleDateString('fr-FR') : 'Inconnue';
+                    const statusLabel = o.status === 'delivered' ? '✅ Livrée' : '❌ Annulée';
+                    text += `• #${o.id.slice(-5)} - ${statusLabel} le ${date}\n`;
+                });
+            }
 
-            await safeEdit(ctx, text, Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_quick_menu || '◀️ Menu', 'main_menu')]]));
+            buttons.push([Markup.button.callback(settings.btn_back_quick_menu || '◀️ Menu', 'main_menu')]);
+            await safeEdit(ctx, text, Markup.inlineKeyboard(buttons));
         } catch (e) {
             console.error('Error fetching user orders:', e);
             await safeEdit(ctx, '❌ Erreur lors de la récupération de vos commandes.', Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_quick_menu || '◀️ Menu', 'main_menu')]]));
@@ -817,17 +881,22 @@ function setupOrderSystem(bot) {
     async function showCartSummary(ctx, address, finalPrice, discount, scheduledAt = null) {
         const userId = `${ctx.platform}_${ctx.from.id}`;
         const cart = userCarts.get(userId) || [];
+        const pending = pendingOrderConfirmation.get(userId) || pendingOrders.get(userId);
 
         let cartText = ``;
         cart.forEach((item, idx) => {
             cartText += `📦 <b>${item.productName}</b> (x${item.qty})${item.chosen_unit_amount ? ` [${item.chosen_unit_amount}]` : ''}\n`;
         });
 
+        const priorityFee = pending?.is_priority ? parseFloat(pending.priority_fee) : 0;
+        const totalProducts = (finalPrice + discount) - priorityFee;
+
         const text = `🛒 <b>Récapitulatif de Commande</b>\n\n` +
             cartText +
             `📍 Adresse : ${address}\n` +
             (scheduledAt ? `🕒 Planifié pour : <b>${scheduledAt}</b>\n` : `🚀 Livraison : Dès que possible\n`) +
-            `💰 Total : <b>${(finalPrice + discount).toFixed(2)}€</b>\n` +
+            (priorityFee > 0 ? `🚀 <b>Option Prioritaire : +${priorityFee.toFixed(2)}€</b>\n` : '') +
+            `💰 Sous-total : <b>${totalProducts.toFixed(2)}€</b>\n` +
             (discount > 0 ? `🎁 Réduction solde : -${discount.toFixed(2)}€\n` : '') +
             `💵 <b>NET À RÉGLER : ${finalPrice.toFixed(2)}€</b>\n\n` +
             `Confirmez-vous la commande ?`;
@@ -848,12 +917,16 @@ function setupOrderSystem(bot) {
             ];
         }
 
-        pModes.forEach(mode => {
-            keyboard.push([Markup.button.callback(`${mode.icon} ${mode.label} (${netToPay}€)`, `create_order_${mode.id}_${discount > 0 ? 'discount' : 'normal'}`)]);
-        });
+        // Grouper les modes de paiement 2 par 2
+        for (let i = 0; i < pModes.length; i += 2) {
+            const row = [Markup.button.callback(`${pModes[i].icon} ${pModes[i].label}`, `create_order_${pModes[i].id}_${discount > 0 ? 'discount' : 'normal'}`)];
+            if (i + 1 < pModes.length) {
+                row.push(Markup.button.callback(`${pModes[i+1].icon} ${pModes[i+1].label}`, `create_order_${pModes[i+1].id}_${discount > 0 ? 'discount' : 'normal'}`));
+            }
+            keyboard.push(row);
+        }
 
-        keyboard.push([Markup.button.callback('◀️ Modifier livraison', 'back_to_scheduling')]);
-        keyboard.push([Markup.button.callback(settings.btn_cancel_alt || '❌ Annuler', 'view_catalog')]);
+        keyboard.push([Markup.button.callback('◀️ Modifier', 'back_to_scheduling'), Markup.button.callback(settings.btn_cancel_alt || '❌ Annuler', 'view_catalog')]);
 
         await safeEdit(ctx, text, {
             ...Markup.inlineKeyboard(keyboard)
@@ -861,174 +934,158 @@ function setupOrderSystem(bot) {
     }
 
     bot.action(/^create_order_(.+)$/, async (ctx) => {
-        const settings = ctx.state?.settings || await getAppSettings();
-        const fullTag = ctx.match[1]; // e.g. "CASH_normal" or "CARD_discount"
+        const userId = `${ctx.platform}_${ctx.from.id}`;
+        console.log(`[Checkout] Commande lancée par ${userId}`);
+        
+        // --- 1. RÉACTION UI IMMÉDIATE ---
+        // Enlève le spinner sur le bouton Telegram
+        ctx.answerCbQuery().catch(() => {});
+
+        const fullTag = ctx.match[1];
         const parts = fullTag.split('_');
         const useDiscount = parts[parts.length - 1] === 'discount';
-        const paymentMethod = parts.slice(0, -1).join('_'); // All but last part
-        const userId = `${ctx.platform}_${ctx.from.id}`;
+        const paymentMethod = parts.slice(0, -1).join('_');
+        
         const pending = useDiscount ? pendingOrderConfirmation.get(userId) : pendingOrders.get(userId);
-        if (!pending) return safeEdit(ctx, settings.msg_session_expired || '❌ Session expirée.', Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_quick_menu || '◀️ Menu', 'main_menu')]]));
+        if (!pending) {
+            console.error(`[Checkout] Session expirée pour ${userId}`);
+            const settings = ctx.state?.settings || await getAppSettings();
+            return safeEdit(ctx, settings.msg_session_expired || '❌ Session expirée.', Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_quick_menu || '◀️ Menu', 'main_menu')]]));
+        }
 
         const cart = userCarts.get(userId) || [];
         const productList = cart.map(item => `${item.productName} (x${item.qty})${item.chosen_unit_amount ? ` [${item.chosen_unit_amount}]` : ''}`).join(', ');
         const totalQty = cart.reduce((acc, item) => acc + item.qty, 0);
-
-        const discount = useDiscount ? pending.possibleDiscount : 0;
+        const discount = useDiscount ? (pending.possibleDiscount || 0) : 0;
         const finalPrice = parseFloat(pending.totalPrice) - discount;
 
-        // Identification du fournisseur (depuis le premier produit du panier)
-        let orderSupplierId = null;
-        if (cart.length > 0) {
-            const products = await getProducts();
-            for (const item of cart) {
-                const p = products.find(prod => String(prod.id) === String(item.productId));
-                if (p && p.supplier_id) {
-                    orderSupplierId = p.supplier_id;
-                    break;
-                }
-            }
-        }
+        const isPriority = pending.is_priority;
+        const priorityFee = isPriority ? (parseFloat(pending.priority_fee) || 0) : 0;
+        let finalProductList = productList;
+        if (isPriority) finalProductList += `\n🚀 Option Livraison Prioritaire (+${priorityFee.toFixed(2)}€)`;
 
-        // Tentative d'extraction de la ville depuis l'adresse
+        // Ville auto-détectée
         let city = null;
         const addr = (pending.address || '').toLowerCase();
         if (addr.includes('paris') || addr.includes('idf') || addr.includes('75') || addr.includes('92') || addr.includes('93') || addr.includes('94')) city = 'paris';
         else if (addr.includes('marseille') || addr.includes('1300')) city = 'marseille';
-        else if (addr.includes('lyon')) city = 'lyon';
-        else if (addr.includes('lille')) city = 'lille';
-        else if (addr.includes('bordeaux')) city = 'bordeaux';
-        else if (addr.includes('toulouse')) city = 'toulouse';
 
         const orderData = {
             user_id: userId,
             username: ctx.from.username || 'Inconnu',
             first_name: ctx.from.first_name || 'Inconnu',
-            product_name: productList,
+            product_name: finalProductList,
             quantity: totalQty,
             total_price: finalPrice,
             payment_method: paymentMethod.toLowerCase(),
             address: pending.address,
-            city: city, // Ajout de la ville pour le filtrage livreur
+            city: city,
             platform: ctx.platform,
             status: 'pending',
             discount_applied: discount,
             scheduled_at: pending.scheduled_at || null,
-            supplier_id: orderSupplierId // Ajout du fournisseur ici !
         };
 
-        const { order, error: createError } = await createOrder(orderData);
-        if (createError) {
-            console.error("❌ Error creating order:", createError);
-            const errMsg = createError.message || JSON.stringify(createError);
-            return safeEdit(ctx, `❌ Erreur lors de la création de la commande.\n\nType: <i>${errMsg}</i>`, Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_quick_menu || '◀️ Menu', 'main_menu')]]));
-        }
+        // --- 2. TRAVAIL PARALLÈLE (Vitesse Maximale) ---
+        console.log(`[Checkout] Exécution des tâches DB en parallèle...`);
+        const startTime = Date.now();
 
-        // Logic for New Clients — check actual orders in DB
         try {
-            const previousOrders = await getOrdersByUser(userId);
-            if (!previousOrders || previousOrders.length <= 1) {
-                const adminContact = (ctx.state?.settings || await getAppSettings()).private_contact_url || 'https://t.me/Lejardinidf';
-                const welcomeMsg = `👋 <b>Bienvenue pour votre première commande !</b>\n\nPour valider votre compte et accélérer votre livraison, merci de contacter l'administrateur :\n\n📱 Contact : ${adminContact}`;
-                ctx.reply(welcomeMsg, { parse_mode: 'HTML' }).catch(() => { });
-            }
-        } catch (e) {
-            console.error('[Checkout] First order check failed:', e.message);
+            const [createResult, previousOrders, allProducts, dbSettings] = await Promise.all([
+                createOrder(orderData),
+                getOrdersByUser(userId),
+                getProducts(),
+                getAppSettings()
+            ]);
+
+            if (createResult.error) throw createResult.error;
+            const order = createResult.order;
+            const isFirstOrder = (!previousOrders || previousOrders.length === 0);
+
+            console.log(`[Checkout] Tâches DB terminées en ${Date.now() - startTime}ms. Confirmation client...`);
+
+            // --- 3. RÉPONSE CLIENT (Priorité #1) ---
+            const confirmedMsgBody = dbSettings.msg_order_confirmed_client || `✅ <b>Commande enregistrée !</b>\n\n📦 Produit : {product_list}\n📍 Adresse : {address}\n{delivery_time}\n💰 Total : <b>{total}€</b>\n\n{success_icon} Recherche d'un livreur en cours...`;
+            const finalConfirmedMsg = confirmedMsgBody
+                .replace('{product_list}', finalProductList)
+                .replace('{address}', pending.address)
+                .replace('{delivery_time}', (pending.scheduled_at ? `🕒 Prévu pour : <b>${pending.scheduled_at}</b>` : `🚀 Livraison : Dès que possible`))
+                .replace('{total}', finalPrice.toFixed(2))
+                .replace('{success_icon}', dbSettings.ui_icon_success || '✅');
+
+            await safeEdit(ctx, finalConfirmedMsg, Markup.inlineKeyboard([
+                [Markup.button.callback('📦 Mes commandes en cours', 'my_orders')],
+                [Markup.button.callback(dbSettings.btn_back_menu || '◀️ Retour Menu', 'main_menu')]
+            ]));
+
+            // Nettoyage rapide
+            userCarts.delete(userId);
+            pendingOrders.delete(userId);
+            pendingOrderConfirmation.delete(userId);
+            awaitingAddressDetails.delete(userId);
+
+            // --- 4. TRAITEMENT ARRIÈRE-PLAN (Notifications) ---
+            (async () => {
+                // Notif Nouveau Client
+                if (isFirstOrder) {
+                    const adminContact = dbSettings.private_contact_url || 'Support';
+                    ctx.reply(`👋 <b>Première commande !</b>\nContactez l'admin pour valider : ${adminContact}`, { parse_mode: 'HTML' }).catch(() => {});
+                }
+
+                // Fournisseur ?
+                let orderSupplierId = null;
+                if (cart.length > 0 && allProducts) {
+                    for (const item of cart) {
+                        const p = allProducts.find(prod => String(prod.id) === String(item.productId));
+                        if (p && p.supplier_id) { orderSupplierId = p.supplier_id; break; }
+                    }
+                }
+
+                // Alerte Admin & Livreurs
+                let pModes = [];
+                try { pModes = typeof dbSettings.payment_modes_config === 'string' ? JSON.parse(dbSettings.payment_modes_config) : (dbSettings.payment_modes_config || []); } catch(e) {}
+                if (!pModes.length) pModes = [{ id: 'CASH', label: 'Espèces', icon: '💵' }];
+
+                const payIcon = pModes.find(m => m.id === paymentMethod.toLowerCase())?.icon || '💰';
+                const payLabel = pModes.find(m => m.id === paymentMethod.toLowerCase())?.label || paymentMethod;
+
+                const baseNotifLivreur = (dbSettings.msg_order_notif_livreur || `🆕 <b>NOUVELLE COMMANDE !</b>\n\n📦 {product_list}\n📍 {address}\n{scheduled}\n💰 <b>{total}€ ({pay_icon} {pay_label})</b>`)
+                    .replace('{product_list}', esc(finalProductList))
+                    .replace('{address}', esc(pending.address))
+                    .replace('{scheduled}', (pending.scheduled_at ? `🕒 <b>Prévu pour : ${esc(pending.scheduled_at)}</b>` : `🕒 Dès que possible`))
+                    .replace('{total}', finalPrice.toFixed(2))
+                    .replace('{pay_icon}', payIcon)
+                    .replace('{pay_label}', payLabel);
+
+                const badge = isFirstOrder ? `\n🔥 <b>[ NOUVEAU CLIENT ]</b> 🔥\n` : '';
+                const baseNotifAdmin = (dbSettings.msg_order_received_admin || `🚨 <b>NOUVELLE COMMANDE !</b>\n{badge}\n👤 {client_name} (@{username})\n📦 {product_list}\n📍 {address}\n💰 {total}€ ({pay_icon} {pay_label})\n🔑 ID : <code>{order_id}</code>`)
+                    .replace('{badge}', badge)
+                    .replace('{client_name}', esc(ctx.from.first_name))
+                    .replace('{username}', (ctx.from.username ? esc(ctx.from.username) : 'Inconnu'))
+                    .replace('{product_list}', esc(finalProductList))
+                    .replace('{address}', esc(pending.address))
+                    .replace('{total}', finalPrice.toFixed(2))
+                    .replace('{pay_icon}', payIcon)
+                    .replace('{pay_label}', payLabel)
+                    .replace('{order_id}', order.id);
+
+                const adminBtns = Markup.inlineKeyboard([
+                    [Markup.button.callback('🤝 ASSIGNER', `admin_order_assign_list_${order.id}`)],
+                    [Markup.button.callback('⚙️ GÉRER', `admin_order_view_${order.id}`)]
+                ]).reply_markup;
+
+                // Envois réels
+                notifyAdmins(bot, baseNotifAdmin, { reply_markup: adminBtns }).catch(e => console.error("Admin Notif Error:", e.message));
+                notifyLivreurs(bot, baseNotifLivreur, { reply_markup: Markup.inlineKeyboard([[Markup.button.callback('📦 Voir Commandes', 'show_available_orders')]]).reply_markup }).catch(e => console.error("Livreur Notif Error:", e.message));
+                if (orderSupplierId) notifySuppliers(bot, cart, order.id, pending.address, dbSettings, isFirstOrder).catch(e => console.error("Supplier Notif Error:", e.message));
+
+            })().catch(e => console.error("Background processing crash:", e.message));
+
+        } catch (err) {
+            console.error(`[Checkout] Erreur fatale pour ${userId}:`, err.message);
+            const settings = ctx.state?.settings || await getAppSettings();
+            return safeEdit(ctx, `❌ Erreur.\n<i>${err.message}</i>`, Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_quick_menu || '◀️ Menu', 'main_menu')]]));
         }
-
-        const successText = (ctx.state?.settings || await getAppSettings()).msg_order_success || `✅ <b>Commande #${order.id.slice(-5)} envoyée !</b>\n\nUn livreur va vous contacter dès qu'elle sera prise en charge.`;
-
-        // Removed duplicate createOrder call
-        userCarts.delete(userId); // Vider le panier après commande
-        pendingOrders.delete(userId);
-        pendingOrderConfirmation.delete(userId);
-        awaitingAddressDetails.delete(userId);
-
-        // settings already defined above
-        const confirmedMsgBody = settings.msg_order_confirmed_client || `✅ <b>Commande enregistrée !</b>\n\n📦 Produit : {product_list}\n📍 Adresse : {address}\n{delivery_time}\n💰 Total : <b>{total}€</b>\n\n{success_icon} Recherche d'un livreur en cours...`;
-        
-        const finalConfirmedMsg = confirmedMsgBody
-            .replace('{product_list}', productList)
-            .replace('{address}', pending.address)
-            .replace('{delivery_time}', (pending.scheduled_at ? `🕒 Prévu pour : <b>${pending.scheduled_at}</b>` : `🚀 Livraison : Dès que possible`))
-            .replace('{total}', finalPrice.toFixed(2))
-            .replace('{success_icon}', settings.ui_icon_success || '✅');
-
-        await safeEdit(ctx,
-            finalConfirmedMsg,
-            Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_menu || '◀️ Retour Menu', 'main_menu')]])
-        );
-
-        // Notify Admin / Livreurs - Résolution des modes de paiement
-        let pModes = [];
-        try {
-            pModes = typeof settings.payment_modes_config === 'string' ? JSON.parse(settings.payment_modes_config) : (settings.payment_modes_config || []);
-        } catch(e) { }
-        if (!pModes || pModes.length === 0) pModes = [{ id: 'CASH', label: 'Espèces', icon: '💵' }];
-
-        const payIcon = pModes.find(m => m.id === paymentMethod)?.icon || '💰';
-        const payLabel = pModes.find(m => m.id === paymentMethod)?.label || paymentMethod;
-
-        const defaultLivreurNotif = `🆕 <b>NOUVELLE COMMANDE !</b>\n\n` +
-            `📦 {product_list}\n` +
-            `📍 {address}\n` +
-            `{scheduled}\n` +
-            `💰 <b>{total}€ ({pay_icon} {pay_label})</b>\n\n` +
-            `<i>Ouvrez votre espace livreur pour la prendre.</i>`;
-
-        const notificationText = (settings.msg_order_notif_livreur || defaultLivreurNotif)
-            .replace('{product_list}', esc(productList))
-            .replace('{address}', esc(pending.address))
-            .replace('{scheduled}', (pending.scheduled_at ? `🕒 <b>Prévu pour : ${esc(pending.scheduled_at)}</b>` : `🕒 Dès que possible`))
-            .replace('{total}', finalPrice.toFixed(2))
-            .replace('{pay_icon}', payIcon)
-            .replace('{pay_label}', payLabel);
-
-        const defaultAdminAlert = `🚨 <b>NOUVELLE COMMANDE !</b>\n\n` +
-            `📱 <b>Source :</b> {platform}\n` +
-            `👤 Client : {client_name} (@{username})\n` +
-            `📦 Produit : {product_list}\n` +
-            `📍 Adresse : {address}\n` +
-            `{scheduled}\n` +
-            `💰 Total : {total}€ ({pay_icon} {pay_label})\n` +
-            `🔑 ID : <code>{order_id}</code>\n\n` +
-            `Choisissez un livreur ou gérez la commande :`;
-
-        const adminAlert = (settings.msg_order_received_admin || defaultAdminAlert)
-            .replace('{platform}', (ctx.platform === 'whatsapp' ? 'WhatsApp' : 'Telegram'))
-            .replace('{client_name}', esc(ctx.from.first_name))
-            .replace('{username}', (ctx.from.username ? esc(ctx.from.username) : 'Inconnu'))
-            .replace('{product_list}', esc(productList))
-            .replace('{address}', esc(pending.address))
-            .replace('{scheduled}', (pending.scheduled_at ? `🕒 <b>PLANIFIÉ : ${esc(pending.scheduled_at)}</b>` : `🚀 <b>ASAP</b>`))
-            .replace('{total}', finalPrice.toFixed(2))
-            .replace('{pay_icon}', payIcon)
-            .replace('{pay_label}', payLabel)
-            .replace('{order_id}', order?.id || 'NO_ID');
-
-        const adminButtons = [
-            [Markup.button.callback('🤝 ASSIGNER LIVREUR', `admin_order_assign_list_${order.id}`)],
-            [Markup.button.callback('⚙️ GÉRER COMMANDE', `admin_order_view_${order.id}`)]
-        ];
-
-        // Notifier et traiter en arrière-plan (NE PAS BLOQUER LE CLIENT)
-        console.log('[Checkout] Déclenchement notifications asynchrones...');
-
-        // Notification Admin
-        notifyAdmins(bot, adminAlert, { reply_markup: Markup.inlineKeyboard(adminButtons).reply_markup }).catch(err => {
-            console.error("[Checkout] Admin notification failed:", err.message);
-        });
-
-        // Notification Livreurs
-        notifyLivreurs(bot, notificationText, { reply_markup: Markup.inlineKeyboard([[Markup.button.callback('📦 Voir les commandes', 'show_available_orders')]]).reply_markup }).catch(err => {
-            console.error("[Checkout] Livreur notification failed:", err.message);
-        });
-
-        // Notifier le fournisseur si le produit a un supplier_id
-        const cartItems = cart.length > 0 ? cart : [pending];
-        notifySuppliers(bot, cartItems, order.id, pending.address, settings).catch(err => {
-            console.error("Supplier notification failed:", err.message);
-        });
     });
 
     // ========== SYSTEME LIVREUR ==========
@@ -1069,8 +1126,7 @@ function setupOrderSystem(bot) {
             `📢 <b>Statut actuel :</b> ${user.is_available ? '✅ DISPONIBLE' : '😴 INDISPONIBLE'}\n\n` +
             `Voulez-vous changer votre statut ?`,
             Markup.inlineKeyboard([
-                [Markup.button.callback(settings.btn_set_available || '✅ Passer en Disponible', 'set_dispo_true')],
-                [Markup.button.callback('😴 Passer en Indisponible', 'set_dispo_false')],
+                [Markup.button.callback('✅ Disponible', 'set_dispo_true'), Markup.button.callback('😴 Indisponible', 'set_dispo_false')],
                 [Markup.button.callback(settings.btn_back_quick_menu || '◀️ Menu', 'main_menu')]
             ])
         );
@@ -1116,6 +1172,30 @@ function setupOrderSystem(bot) {
 
         // 6. Relayer à l'admin
         await notifyAdmins(bot, `🔔 <b>STATUT LIVREUR</b>\n\n👤 ${ctx.from.first_name}\n📍 Secteur : ${city.toUpperCase()}\n🔘 ${isAvailable ? '✅ DISPONIBLE' : '❌ INDISPONIBLE'}`);
+    });
+
+    // --- QUITTER L'ÉQUIPE ---
+    bot.action('quit_livreur_confirm', async (ctx) => {
+        await ctx.answerCbQuery();
+        await safeEdit(ctx, '⚠️ <b>Êtes-vous sûr ?</b>\n\nVous ne recevrez plus les alertes de commande et votre profil de livreur sera désactivé.', Markup.inlineKeyboard([
+            [Markup.button.callback('✅ Oui, quitter l\'équipe', 'quit_livreur_final')],
+            [Markup.button.callback('◀️ Retour', 'livreur_menu')]
+        ]));
+    });
+
+    bot.action('quit_livreur_final', async (ctx) => {
+        await ctx.answerCbQuery('Profil désactivé');
+        const userId = `${ctx.platform}_${ctx.from.id}`;
+        await supabase.from(COL_USERS).update({ is_livreur: false, is_available: false, updated_at: ts() }).eq('id', userId);
+        
+        // Invalider cache
+        if (_userCache) _userCache.delete(userId);
+
+        await safeEdit(ctx, '✅ <b>Profil désactivé avec succès.</b>\nVous ne faites plus partie de l\'équipe de livraison.', Markup.inlineKeyboard([
+            [Markup.button.callback('◀️ Retour Menu Principal', 'main_menu')]
+        ]));
+        
+        await notifyAdmins(bot, `🚪 <b>DÉPART LIVREUR</b>\n\n👤 ${ctx.from.first_name} a quitté l'équipe.`);
     });
 
     bot.command('ma_position', async (ctx) => {
@@ -1243,26 +1323,57 @@ function setupOrderSystem(bot) {
     });
 
     bot.action(/^view_order_(.+)$/, async (ctx) => {
-        await ctx.answerCbQuery();
         const orderId = ctx.match[1];
         const order = await getOrder(orderId);
         const settings = ctx.state?.settings || await getAppSettings();
+        
+        if (!order) return ctx.answerCbQuery('❌ Commande introuvable.');
 
-        if (!order || order.status !== 'pending') {
-            return safeEdit(ctx, settings.msg_order_not_available || '❌ Cette commande n\'est plus disponible.', Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_generic || '◀️ Retour', 'show_available_orders')]]));
+        // On vérifie si l'appelant est le livreur (pour le menu de prise en charge) 
+        // ou le client (pour le suivi).
+        const isLivreurRole = (await getUser(`${ctx.platform}_${ctx.from.id}`))?.is_livreur;
+        
+        // Si c'est un livreur qui regarde une commande "pending", on lui montre le menu d'acceptation
+        if (isLivreurRole && order.status === 'pending') {
+            await ctx.answerCbQuery();
+            const text = `📦 <b>Détails de la mission #${orderId.slice(-5)}</b>\n\n` +
+                `🛒 Produit : <b>${order.product_name}</b>\n` +
+                `📍 Adresse : <code>${order.address || 'Non spécifiée'}</code>\n` +
+                `💰 Total : <b>${order.total_price}€</b>\n` +
+                `🕒 Créneau : <b>${order.scheduled_at ? order.scheduled_at : 'Dès que possible (ASAP)'}</b>\n\n` +
+                `<i>Voulez-vous prendre en charge cette livraison ?</i>`;
+
+            const buttons = [
+                [Markup.button.callback('🔥 ACCEPTER LA MISSION 🔥', `take_order_${orderId}`)],
+                [Markup.button.callback(settings.btn_cancel || '◀️ Annuler', 'show_available_orders')]
+            ];
+            return safeEdit(ctx, text, Markup.inlineKeyboard(buttons));
         }
 
-        const text = `📦 <b>Détails de la mission #${orderId.slice(-5)}</b>\n\n` +
-            `🛒 Produit : <b>${order.product_name}</b>\n` +
-            `📍 Adresse : <code>${order.address || 'Non spécifiée'}</code>\n` +
-            `💰 Total : <b>${order.total_price}€</b>\n` +
-            `🕒 Créneau : <b>${order.scheduled_at ? order.scheduled_at : 'Dès que possible (ASAP)'}</b>\n\n` +
-            `<i>Voulez-vous prendre en charge cette livraison ?</i>`;
+        // Sinon, c'est la vue CLIENT (suivi de commande)
+        await ctx.answerCbQuery();
+        let statusEmoji = o => o.status === 'pending' ? '⏳' : (o.status === 'taken' ? '🚚' : (o.status === 'delivered' ? '✅' : '❌'));
+        let statusLabel = o => o.status === 'pending' ? 'En attente de livreur' : (o.status === 'taken' ? 'En cours de livraison' : (o.status === 'delivered' ? 'Livrée' : 'Annulée'));
 
-        const buttons = [
-            [Markup.button.callback('🔥 ACCEPTER LA MISSION 🔥', `take_order_${orderId}`)],
-            [Markup.button.callback(settings.btn_cancel || '◀️ Annuler', 'show_available_orders')]
-        ];
+        let text = `📦 <b>Suivi Commande #${orderId.slice(-5)}</b>\n\n` +
+            `🔹 Statut : ${statusEmoji(order)} <b>${statusLabel(order)}</b>\n` +
+            `🛒 Produit : <b>${order.product_name}</b>\n` +
+            `💰 Prix : <b>${order.total_price}€</b>\n` +
+            `📍 Adresse : <code>${order.address}</code>\n`;
+        
+        if (order.livreur_name) {
+            text += `👤 Livreur : <b>${order.livreur_name}</b>\n`;
+        }
+        
+        const feedbackBtn = order.status === 'delivered' ? [Markup.button.callback('⭐ Laisser un avis', `rate_order_${orderId}`)] : [];
+        const cancelBtn = (order.status === 'pending' || order.status === 'taken') ? [Markup.button.callback('❌ Annuler la commande', `cancel_order_client_${orderId}`)] : [];
+        const chatBtn = order.status === 'taken' ? [Markup.button.callback('💬 Parler au livreur', `chat_livreur_${orderId}`)] : [];
+
+        const buttons = [];
+        if (chatBtn.length) buttons.push(chatBtn);
+        if (cancelBtn.length) buttons.push(cancelBtn);
+        if (feedbackBtn.length) buttons.push(feedbackBtn);
+        buttons.push([Markup.button.callback('◀️ Retour mes commandes', 'my_orders')]);
 
         await safeEdit(ctx, text, Markup.inlineKeyboard(buttons));
     });
@@ -1452,7 +1563,6 @@ function setupOrderSystem(bot) {
                 finalDeliveredMsg,
                 {
                     ...Markup.inlineKeyboard([
-                        [Markup.button.callback(settings.btn_leave_review || '⭐️ Laisser un avis / Commentaire', `feedback_start_${orderId}`)],
                         [Markup.button.callback(settings.btn_back_menu || '◀️ Retour Menu', 'main_menu')]
                     ])
                 }
@@ -1485,6 +1595,31 @@ function setupOrderSystem(bot) {
         // Notifier Livreur
         if (order.livreur_id) {
             await sendTelegramMessage(order.livreur_id, `⚠️ <b>COMMANDE ANNULÉE</b>\n\nLe client a annulé la commande <b>#${shortId}</b>. Ne vous déplacez pas.`);
+        }
+    });
+
+    // --- Gestion de l'annulation par le livreur ---
+    bot.action(/^cancel_order_livreur_(.+)$/, async (ctx) => {
+        const orderId = ctx.match[1];
+        const settings = ctx.state?.settings || await getAppSettings();
+        const order = await getOrder(orderId);
+        if (!order || order.status === 'delivered' || order.status === 'cancelled') {
+            return ctx.answerCbQuery('Action impossible ou déjà effectuée.', true);
+        }
+
+        await updateOrderStatus(orderId, 'cancelled');
+        await ctx.answerCbQuery('La commande a été annulée. ❌', true);
+
+        const shortId = orderId.slice(-5);
+        await safeEdit(ctx, `🚩 <b>COMMANDE #${shortId} ANNULÉE</b>\n\nL'annulation a bien été effectuée.`, Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_to_livreur_menu || '◀️ Menu Livreur', 'livreur_menu')]]));
+
+        // Notifier Admin
+        const alertMsg = `🚩 <b>ANNULATION LIVREUR</b>\n\nLa commande <b>#${shortId}</b> a été annulée par le livreur.\n👤 Livreur: ${ctx.from.first_name}`;
+        await notifyAdmins(bot, alertMsg);
+
+        // Notifier Client
+        if (order.client_id) {
+            await sendTelegramMessage(order.client_id, `🚩 <b>COMMANDE ANNULÉE</b>\n\nVotre commande <b>#${shortId}</b> a été annulée par le livreur.\nMotif: Incident ou stock indisponible.`);
         }
     });
 
@@ -2077,6 +2212,39 @@ function setupOrderSystem(bot) {
             return;
         }
 
+        // --- DISCUSSION CLIENT -> ADMIN ---
+        if (awaitingUserSupportReply.has(userId)) {
+            // Si c'est une commande spécifiquement pour arrêter
+            if (ctx.message.text === '/end' || ctx.message.text === '/stop') {
+                awaitingUserSupportReply.delete(userId);
+                return ctx.reply('🏁 <b>Discussion terminée.</b>\n\nLe bot reprend son fonctionnement normal.', { parse_mode: 'HTML' });
+            }
+
+            const text = ctx.message.text || ctx.message.caption || '';
+            const adminMsg = `💬 <b>MESSAGE SUPPORT CLIENT</b>\n\n👤 De : ${esc(ctx.from.first_name)} (@${esc(ctx.from.username || 'Inconnu')})\n🆔 ID : <code>${userId}</code>\n\n${text ? `<i>"${text}"</i>` : '(Sans texte)'}`;
+            
+            const options = { parse_mode: 'HTML' };
+            options.reply_markup = {
+                inline_keyboard: [[{ text: '💬 Répondre au Client', callback_data: `admin_chat_user_${userId}` }]]
+            };
+
+            if (ctx.message.photo) {
+                options.photo = ctx.message.photo[ctx.message.photo.length - 1].file_id;
+            } else if (ctx.message.video) {
+                options.video = ctx.message.video.file_id;
+                options.caption = adminMsg;
+            }
+
+            try {
+                const { notifyAdmins } = require('../services/notifications');
+                await notifyAdmins(bot, adminMsg, options);
+                await ctx.reply(`✅ <b>Message envoyé à l'administration.</b>\n\n<i>Tapez /end pour quitter la discussion.</i>`, { parse_mode: 'HTML' });
+            } catch (e) {
+                await ctx.reply(`❌ <b>Échec de l'envoi :</b> ${e.message}`, { parse_mode: 'HTML' });
+            }
+            return;
+        }
+
         await next();
     });
 
@@ -2163,6 +2331,7 @@ function setupOrderSystem(bot) {
                     [Markup.button.callback('💬 Parler au client', `chat_livreur_${orderId}`)],
                     [Markup.button.callback(`${settings.ui_icon_success} MARQUER COMME LIVRÉE`, `finish_${orderId}`)],
                     [Markup.button.callback(settings.btn_abandon_delivery || '❌ Abandonner la livraison', `abandon_${orderId}`)],
+                    [Markup.button.callback('🚩 ANNULER LA COMMANDE', `cancel_order_livreur_${orderId}`)],
                     [Markup.button.callback(settings.btn_back_generic || '◀️ Retour', 'active_deliveries')]
                 ])
             }
@@ -2203,16 +2372,13 @@ function setupOrderSystem(bot) {
             await safeEdit(ctx, text, Markup.inlineKeyboard(buttons));
         } catch (e) {
             console.error('❌ Error in showHelpMenu:', e);
-            throw e; // Laisse bot.catch gérer la réponse utilisateur
+            throw e;
         }
     }
 
-
-    // --- Système d'Aide ---
     bot.action('help_menu', async (ctx) => {
         await showHelpMenu(ctx);
     });
-
 
     bot.action('help_where_is_my_order', async (ctx) => {
         await ctx.answerCbQuery();
@@ -2225,28 +2391,17 @@ function setupOrderSystem(bot) {
 
         const latest = orders[0];
         const shortId = latest.id.slice(-5);
-
-        // Logger la demande
+        const { logHelpRequest } = require('../services/database');
         await logHelpRequest(latest.id, 'WHERE_IS_MY_ORDER', 'Le client demande où est sa commande.');
 
-        // Notifier le livreur
         if (latest.livreur_id) {
             await sendTelegramMessage(latest.livreur_id,
                 `❓ <b>DEMANDE CLIENT (ID #${shortId})</b>\n\nLe client demande où vous en êtes pour sa livraison.\nMerci de lui envoyer une estimation ASAP via le menu livreur !`
             );
         }
 
-        // Notifier Admin
         const settings = await getAppSettings();
-        if (settings.admin_telegram_id) {
-            const rawAdmins = String(settings.admin_telegram_id);
-            const adminIds = rawAdmins.replace(/[\[\]"']/g, '').split(/[\s,]+/).filter(Boolean);
-            const alertMsg = `❓ <b>DEMANDE "OÙ EST MA COMMANDE"</b>\n\n🆔 ID : <code>#${shortId}</code>\n👤 Client : ${ctx.from.first_name}`;
-            for (const adminId of adminIds) {
-                if (!adminId) continue;
-                bot.telegram.sendMessage(adminId, alertMsg, { parse_mode: 'HTML' }).catch(() => { });
-            }
-        }
+        await notifyAdmins(bot, `❓ <b>DEMANDE "OÙ EST MA COMMANDE"</b>\n\n🆔 ID : <code>#${shortId}</code>\n👤 Client : ${ctx.from.first_name}`);
 
         await safeEdit(ctx, `✅ <b>Votre demande a été transmise !</b>\n\nLe livreur (ID #${shortId}) a été notifié de votre attente. Il reviendra vers vous très vite par message.`,
             Markup.inlineKeyboard([[Markup.button.callback('◀️ Retour', 'help_menu')]])
@@ -2257,21 +2412,39 @@ function setupOrderSystem(bot) {
         await ctx.answerCbQuery();
         const settings = await getAppSettings();
         
-        // Notification Admin
-        await notifyAdmins(bot, `💬 <b>CONTACT ADMIN SOLICITÉ</b>\n\n👤 Client : ${esc(ctx.from.first_name)} (@${esc(ctx.from.username || 'Inconnu')})\nID : <code>${ctx.from.id}</code>`);
+        const userId = `${ctx.platform}_${ctx.from.id}`;
+        await notifyAdmins(bot, `💬 <b>CONTACT ADMIN SOLICITÉ</b>\n\n👤 Client : ${esc(ctx.from.first_name)} (@${esc(ctx.from.username || 'Inconnu')})\n🆔 ID : <code>${userId}</code>\n\n<i>Vous pouvez cliquer sur le bouton ci-dessous pour lui répondre directement.</i>`, {
+            parse_mode: 'HTML',
+            ...Markup.inlineKeyboard([[Markup.button.callback('💬 Lui répondre', `admin_chat_user_${userId}`)]])
+        });
 
+        const buttons = [];
         if (settings.private_contact_url) {
-            return safeEdit(ctx, `💬 <b>Besoin d'un admin ?</b>\n\nContact direct : <a href="${settings.private_contact_url}">${settings.private_contact_url}</a>\n\nCliquez aussi sur le bouton ci-dessous :`,
-                Markup.inlineKeyboard([
-                    [Markup.button.url('📲 Parler à l\'Admin', settings.private_contact_url)],
-                    [Markup.button.callback('◀️ Retour', 'help_menu')]
-                ])
-            );
-        } else {
-            return safeEdit(ctx, `💬 <b>Discussion Admin</b>\n\nL'admin n'a pas configuré de lien de contact direct.\n\nVous pouvez cliquer sur le bouton Aide pour revenir ou contacter le support via le canal officiel.`,
-                Markup.inlineKeyboard([[Markup.button.callback('◀️ Retour', 'help_menu')]])
-            );
+            buttons.push([Markup.button.url('📲 Telegram : Admin', settings.private_contact_url)]);
         }
+        if (settings.private_contact_wa_url) {
+            buttons.push([Markup.button.url('📲 WhatsApp : Admin', settings.private_contact_wa_url)]);
+        }
+        buttons.push([Markup.button.callback('◀️ Retour', 'help_menu')]);
+
+        return safeEdit(ctx, `💬 <b>Besoin d'un admin ?</b>\n\nVous pouvez nous contacter directement via les liens ci-dessous, ou attendre que nous vous collections via le bot.\n\nCliquez sur un bouton :`,
+            Markup.inlineKeyboard(buttons)
+        );
+    });
+
+    bot.action('user_chat_reply_admin', async (ctx) => {
+        await ctx.answerCbQuery();
+        awaitingUserSupportReply.set(`${ctx.platform}_${ctx.from.id}`, true);
+        return ctx.reply(`💬 <b>Réponse à l'administration</b>\n\nEnvoyez votre message maintenant (texte, photo ou vidéo) :`, {
+            parse_mode: 'HTML',
+            ...Markup.inlineKeyboard([[Markup.button.callback('❌ Annuler', 'cancel_user_support')]])
+        });
+    });
+
+    bot.action('cancel_user_support', async (ctx) => {
+        awaitingUserSupportReply.delete(`${ctx.platform}_${ctx.from.id}`);
+        await ctx.answerCbQuery('Annulé');
+        return showHelpMenu(ctx);
     });
 
 

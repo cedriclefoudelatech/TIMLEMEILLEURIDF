@@ -125,15 +125,32 @@ async function registerUser(platformUser, platform = 'telegram', referrerId = nu
         if (phoneNum) {
             const altSuffix = rawId.includes('@lid') ? '@s.whatsapp.net' : '@lid';
             const altId = `whatsapp_${phoneNum}${altSuffix}`;
-            if (!_userCache.has(altId)) {
-                const { data: altArray } = await supabase.from(COL_USERS).select('*').eq('id', altId).limit(1);
-                if (altArray && altArray.length > 0) {
-                    existing = altArray[0];
-                    console.log(`[WA-Dedup] Utilisateur trouvé sous ${altId} pour ${docId} — fusion`);
-                }
-            } else {
-                existing = _userCache.get(altId).data;
-                console.log(`[WA-Dedup] Utilisateur trouvé en cache sous ${altId} pour ${docId}`);
+            const { data: altArray } = await supabase.from(COL_USERS).select('*').eq('id', altId).limit(1);
+            if (altArray && altArray.length > 0) {
+                existing = altArray[0];
+                _userCache.set(docId, { data: existing, expire: nowMs + 300000 });
+                console.log(`[WA-Dedup] Utilisateur trouvé sous ${altId} pour ${docId} — fusion par numéro`);
+            }
+        }
+
+        // Fallback par NOM (Nouveau : Regroupement automatique par identité textuelle)
+        if (!existing && platformUser.first_name && platformUser.first_name !== 'Utilisateur WhatsApp') {
+            const encryptedName = encryption.encrypt(platformUser.first_name);
+            // On cherche tous les utilisateurs WhatsApp avec ce nom (chiffré)
+            const { data: nameMatches } = await supabase.from(COL_USERS)
+                .select('*')
+                .eq('platform', 'whatsapp')
+                .eq('first_name', encryptedName)
+                .neq('id', docId); // Ne pas se matcher soi-même si l'ID a changé mais le nom est resté
+            
+            if (nameMatches && nameMatches.length > 0) {
+                // On prend le "meilleur" (plus de commandes ou plus vieux)
+                existing = nameMatches.sort((a, b) => (b.order_count || 0) - (a.order_count || 0) || new Date(a.date_inscription || 0) - new Date(b.date_inscription || 0))[0];
+                console.log(`[WA-Identity-Merged] Regroupement de ${docId} sur l'identité existante ${existing.id} (Nom: "${platformUser.first_name}")`);
+                
+                // On enregistre ce lien dans le cache pour éviter de refaire la recherche DB à chaque message
+                _userCache.set(docId, { data: existing, expire: nowMs + 300000 });
+                // L'utilisateur retrouvera son portefeuille, ses points et son historique
             }
         }
     }
@@ -168,6 +185,7 @@ async function registerUser(platformUser, platform = 'telegram', referrerId = nu
             supabase.from(COL_USERS).update(updateData).eq('id', docId).then(() => { }, () => { });
 
             const updatedUser = { ...existing, ...updateData };
+            _userCache.set(docId, { data: updatedUser, expire: nowMs + 300000 });
             _userCache.set(docId, { data: updatedUser, expire: nowMs + 300000 });
 
             // Si cet utilisateur déjà inscrit clique sur un lien de parrainage et n'a PAS de parrain encore
@@ -211,6 +229,7 @@ async function registerUser(platformUser, platform = 'telegram', referrerId = nu
         current_city: null,
         data: {},
         referral_code: generateReferralCode(platform, platformUser.id || Date.now()),
+        is_approved: false, // Nouveau : nécessite validation admin
     };
 
     const { error: insertError } = await supabase.from(COL_USERS).insert([newUser]);
@@ -235,7 +254,15 @@ async function registerUser(platformUser, platform = 'telegram', referrerId = nu
     }
 
     _userCache.set(docId, { data: newUser, expire: nowMs + 300000 });
+
     return { isNew: true, user: decryptUser(newUser) };
+}
+
+async function approveUser(userId) {
+    const { error } = await supabase.from(COL_USERS).update({ is_approved: true, updated_at: ts() }).eq('id', userId);
+    if (error) throw error;
+    _userCache.delete(userId);
+    return true;
 }
 
 /**
@@ -615,7 +642,7 @@ async function updateOrderStatus(orderId, status, extraData = {}) {
                 const pointsToAdd = Math.floor(price * pointsRatio);
                 const isFirstOrder = user.order_count === 0;
 
-                if (isFirstOrder && user.referred_by) {
+                if (settings.enable_referral !== false && isFirstOrder && user.referred_by) {
                     await updateUserWallet(user.id, (user.wallet_balance || 0) + refBonus);
                     const referrer = await getUser(user.referred_by);
                     if (referrer) {
@@ -631,26 +658,30 @@ async function updateOrderStatus(orderId, status, extraData = {}) {
                     }
                 }
 
-                await updateUserPoints(user.id, (user.points || 0) + pointsToAdd);
                 const newOrderCount = (user.order_count || 0) + 1;
-                await supabase.from(COL_USERS).update({ order_count: newOrderCount }).eq('id', user.id);
 
-                // --- Système de Bonus Fidélité ---
-                const thresholds = (settings.fidelity_bonus_thresholds || "5,9,10").split(',').map(t => parseInt(t.trim())).filter(t => !isNaN(t));
-                const bonusAmount = parseFloat(settings.fidelity_bonus_amount) || 10;
+                if (settings.enable_fidelity !== false) {
+                    await updateUserPoints(user.id, (user.points || 0) + pointsToAdd);
+                    
+                    // --- Système de Bonus Fidélité ---
+                    const thresholds = (settings.fidelity_bonus_thresholds || "5,9,10").split(',').map(t => parseInt(t.trim())).filter(t => !isNaN(t));
+                    const bonusAmount = parseFloat(settings.fidelity_bonus_amount) || 10;
 
-                if (thresholds.includes(newOrderCount)) {
-                    await updateUserWallet(user.id, (user.wallet_balance || 0) + bonusAmount);
+                    if (thresholds.includes(newOrderCount)) {
+                        await updateUserWallet(user.id, (user.wallet_balance || 0) + bonusAmount);
 
-                    // Notifier le client du bonus
-                    const { getBotInstance } = require('../server');
-                    const bot = getBotInstance();
-                    if (bot) {
-                        const tgId = String(user.id).replace('telegram_', '');
-                        bot.telegram.sendMessage(tgId, `🏮 <b>C'EST VOTRE JOUR DE CHANCE ! Bonus Fidélité !</b>\n\nFélicitations pour votre <b>${newOrderCount}ème</b> commande !\n\nEn récompense, votre portefeuille a été crédité de <b>+${bonusAmount.toFixed(2)}€</b>. Merci de votre fidélité ! ⭐️`, { parse_mode: 'HTML' }).catch(() => { });
+                        // Notifier le client du bonus
+                        const { getBotInstance } = require('../server');
+                        const bot = getBotInstance();
+                        if (bot) {
+                            const tgId = String(user.id).replace('telegram_', '');
+                            bot.telegram.sendMessage(tgId, `🏮 <b>C'EST VOTRE JOUR DE CHANCE ! Bonus Fidélité !</b>\n\nFélicitations pour votre <b>${newOrderCount}ème</b> commande !\n\nEn récompense, votre portefeuille a été crédité de <b>+${bonusAmount.toFixed(2)}€</b>. Merci de votre fidélité ! ⭐️`, { parse_mode: 'HTML' }).catch(() => { });
+                        }
+                        console.log(`🎁 Bonus fidélité de ${bonusAmount}€ accordé à ${user.id} pour sa ${newOrderCount}ème commande.`);
                     }
-                    console.log(`🎁 Bonus fidélité de ${bonusAmount}€ accordé à ${user.id} pour sa ${newOrderCount}ème commande.`);
                 }
+                
+                await supabase.from(COL_USERS).update({ order_count: newOrderCount }).eq('id', user.id);
 
                 _userCache.delete(user.id);
                 extraData.points_awarded = true;
@@ -699,22 +730,13 @@ async function assignOrderLivreur(orderId, livreurId, livreurName) {
 
     // Notifier Admin
     try {
-        const settings = await getAppSettings();
-        if ((settings.admin_telegram_id || process.env.ADMIN_TELEGRAM_ID) && livreurId) {
-            const { getBotInstance } = require('../server');
-            const bot = getBotInstance();
-            if (bot) {
-                const dbAdmins = String(settings.admin_telegram_id || '').split(/[\s,]+/).map(id => id.trim().replace('telegram_', '')).filter(Boolean);
-                const envAdmin = String(process.env.ADMIN_TELEGRAM_ID || '').match(/\d+/g)?.[0];
-                const adminIds = [...new Set([...dbAdmins, envAdmin].filter(Boolean))];
-
-                const alertMsg = `🚚 <b>AFFECTATION</b>\n\n🆔 #<code>${orderId.slice(-5)}</code>\n👤 Livreur : <b>${livreurName}</b>`;
-                for (const adminId of adminIds) {
-                    bot.telegram.sendMessage(adminId, alertMsg, { parse_mode: 'HTML' }).catch(() => { });
-                }
-            }
-        }
-    } catch (e) { }
+        const { notifyAdmins } = require('./notifications');
+        const alertMsg = `🚚 <b>AFFECTATION</b>\n\n🆔 #<code>${orderId.slice(-5)}</code>\n👤 Livreur : <b>${livreurName}</b>`;
+        // On n'attend pas forcément pour ne pas bloquer le livreur
+        notifyAdmins(null, alertMsg).catch(e => console.error("❌ notifyAdmins (assign) failed:", e.message));
+    } catch (e) {
+        console.error("❌ Notification Admin (assign) error:", e.message);
+    }
 }
 
 async function getClientActiveOrders(userId) {
@@ -737,6 +759,13 @@ async function logHelpRequest(orderId, type, message) {
     } catch (e) {
         console.error("❌ logHelpRequest error:", e.message);
     }
+
+    // NOUVEAU: Notifier l'admin pour l'aider
+    try {
+        const { notifyAdmins } = require('./notifications');
+        const alertMsg = `❓ <b>DEMANDE D'AIDE</b>\n\n🆔 Commande : <code>#${orderId.slice(-5)}</code>\n📌 Type : <b>${type}</b>\n💬 Message : ${message}`;
+        notifyAdmins(null, alertMsg).catch(() => {});
+    } catch (e) {}
 }
 
 async function saveClientReply(orderId, reply) {
@@ -810,9 +839,45 @@ async function getAvailableOrders(city = null) {
     return (data || []).map(decryptOrder);
 }
 
-async function getAllOrders(limit = 50) {
-    const { data } = await supabase.from(COL_ORDERS).select('*').order('created_at', { ascending: false }).limit(limit);
-    return (data || []).map(decryptOrder);
+async function getAllOrders(limit = 1000) {
+    const { data } = await supabase.from(COL_ORDERS)
+        .select(`
+            *,
+            users:user_id (
+                is_approved
+            )
+        `)
+        .order('created_at', { ascending: false })
+        .limit(limit);
+    
+    return (data || []).map(o => {
+        const decrypted = decryptOrder(o);
+        decrypted.is_approved = o.users ? o.users.is_approved : true;
+        return decrypted;
+    });
+}
+
+/**
+ * Recherche multicritère pour le dashboard (ID court ou nom produit)
+ */
+async function searchOrders(query) {
+    if (!query) return [];
+    const { data } = await supabase.from(COL_ORDERS)
+        .select(`
+            *,
+            users:user_id (
+                is_approved
+            )
+        `)
+        .or(`id.ilike.%${query}%,product_name.ilike.%${query}%`)
+        .order('created_at', { ascending: false })
+        .limit(50);
+        
+    return (data || []).map(o => {
+        const decrypted = decryptOrder(o);
+        decrypted.is_approved = o.users ? o.users.is_approved : true;
+        return decrypted;
+    });
 }
 
 async function getLivreurHistory(livreurId) {
@@ -862,29 +927,40 @@ async function getActiveUserCount(platform = null) {
     const { count } = await q;
     return count || 0;
 }
-async function getRecentUsers(limit = 20) {
-    const { data } = await supabase.from(COL_USERS).select('*').order('last_active', { ascending: false }).limit(limit * 2);
+async function getRecentUsers(limit = 100) {
+    const { data } = await supabase.from(COL_USERS).select('*').eq('is_blocked', false).order('last_active', { ascending: false }).limit(limit);
     const users = (data || []).map(decryptUser);
-    // Déduplication WhatsApp : même numéro de téléphone sous @lid et @s.whatsapp.net
-    const seen = new Map();
+    
+    const seenId = new Set();
+    const seenName = new Set();
     const deduped = [];
+
     for (const u of users) {
-        if (u.platform === 'whatsapp' && u.platform_id) {
-            const phoneNum = String(u.platform_id).split('@')[0].split(':')[0];
-            if (seen.has(phoneNum)) {
-                // Garder celui avec le plus de commandes ou le plus récent
-                const prev = seen.get(phoneNum);
-                if ((u.order_count || 0) > (prev.order_count || 0)) {
-                    deduped[deduped.indexOf(prev)] = u;
-                    seen.set(phoneNum, u);
-                }
-                continue;
-            }
-            seen.set(phoneNum, u);
+        if (u.platform === 'whatsapp') {
+            const rawId = String(u.platform_id || '');
+            const phoneNum = rawId.split('@')[0].split(':')[0];
+            const name = u.first_name || '';
+
+            // 1. Dédup par numéro
+            if (phoneNum && seenId.has(phoneNum)) continue;
+            
+            // 2. Dédup par nom (si pas le nom par défaut)
+            if (name && name !== 'Utilisateur WhatsApp' && seenName.has(name)) continue;
+
+            if (phoneNum) seenId.add(phoneNum);
+            if (name && name !== 'Utilisateur WhatsApp') seenName.add(name);
         }
         deduped.push(u);
     }
     return deduped.slice(0, limit);
+}
+
+async function getBlockedUsers(limit = 1000) {
+    const { data } = await supabase.from(COL_USERS).select('*')
+        .eq('is_blocked', true)
+        .order('updated_at', { ascending: false })
+        .limit(limit);
+    return (data || []).map(decryptUser);
 }
 async function searchUsers(query) {
     // Exact match by ID first (snappy)
@@ -905,20 +981,38 @@ async function searchUsers(query) {
     }
 
     // Otherwise fetch a larger batch and filter in memory (for encrypted names)
-    // Augmentation de la limite à 2000 pour retrouver les anciens utilisateurs
-    const { data } = await supabase.from(COL_USERS).select('*').order('last_active', { ascending: false }).limit(2000);
+    // Reduce batch to 500 for better CPU performance on Railway
+    const { data } = await supabase.from(COL_USERS).select('*').order('last_active', { ascending: false }).limit(500);
     const decrypted = (data || []).map(decryptUser);
 
-    if (!query) return decrypted.slice(0, 50);
+    if (!query) {
+        // Dédup même pour le retour sans query
+        const seen = new Set();
+        return decrypted.filter(u => {
+            if (u.platform === 'whatsapp' && u.first_name && u.first_name !== 'Utilisateur WhatsApp') {
+                if (seen.has(u.first_name)) return false;
+                seen.add(u.first_name);
+            }
+            return true;
+        }).slice(0, 50);
+    }
 
     const q = query.toLowerCase().replace('@', '');
+    const seen = new Set();
     return decrypted.filter(u => {
         const uid = String(u.id || '').toLowerCase();
         const uname = String(u.username || '').toLowerCase();
         const fname = String(u.first_name || '').toLowerCase();
         const pid = String(u.platform_id || '').toLowerCase();
 
-        return uid.includes(q) || uname.includes(q) || fname.includes(q) || pid.includes(q);
+        const match = uid.includes(q) || uname.includes(q) || fname.includes(q) || pid.includes(q);
+        if (!match) return false;
+
+        if (u.platform === 'whatsapp' && u.first_name && u.first_name !== 'Utilisateur WhatsApp') {
+            if (seen.has(u.first_name)) return false;
+            seen.add(u.first_name);
+        }
+        return true;
     }).slice(0, 50);
 }
 
@@ -1013,6 +1107,9 @@ async function getStatsOverview() {
     }
 
     const total = await getUserCount();
+    const totalBlocked = await supabase.from(COL_USERS).select('*', { count: 'exact', head: true }).eq('is_blocked', true).then(r => r.count || 0);
+    const totalTelegram = await getUserCount('telegram');
+    const totalWhatsapp = await getUserCount('whatsapp');
     const active = await getActiveUserCount();
     const stats = await getGlobalStats();
     const { data: bcSnap } = await supabase.from(COL_BROADCASTS).select('id, created_at, success, failed, message').order('created_at', { ascending: false }).limit(5);
@@ -1049,7 +1146,10 @@ async function getStatsOverview() {
     const { count: totalOrdersCount } = await supabase.from(COL_ORDERS).select('*', { count: 'exact', head: true });
 
     const result = {
-        totalUsers: total,
+        totalUsers: total - totalBlocked,
+        totalBlocked: totalBlocked,
+        totalUsersTelegram: totalTelegram,
+        totalUsersWhatsapp: totalWhatsapp,
         activeUsers: active,
         totalStats: stats,
         totalOrders: totalOrdersCount || 0,
@@ -1079,10 +1179,11 @@ async function getOrderAnalytics() {
     const analytics = {
         totalCA: 0,
         totalOrders: 0,
+        avgBasket: 0,
         avgDeliveryTime: 0,
         byPlatform: {
-            telegram: { ca: 0, count: 0, products: {} },
-            whatsapp: { ca: 0, count: 0, products: {} }
+            telegram: { ca: 0, count: 0, avgBasket: 0, products: {} },
+            whatsapp: { ca: 0, count: 0, avgBasket: 0, products: {} }
         },
         byHour: {}, byDay: {}, byWeek: {}, byMonth: {}, byYear: {}, byCity: {}, byDriver: {}, byUser: {}, byProduct: {},
         rawDelivered: []
@@ -1101,7 +1202,7 @@ async function getOrderAnalytics() {
         // Platform metrics
         const platform = order.platform || (String(order.user_id).startsWith('whatsapp') ? 'whatsapp' : 'telegram');
         if (!analytics.byPlatform[platform]) {
-            analytics.byPlatform[platform] = { ca: 0, count: 0, products: {} };
+            analytics.byPlatform[platform] = { ca: 0, count: 0, avgBasket: 0, products: {} };
         }
         analytics.byPlatform[platform].ca += price;
         analytics.byPlatform[platform].count++;
@@ -1132,6 +1233,14 @@ async function getOrderAnalytics() {
         analytics.byDriver[driverName].count++;
         analytics.byDriver[driverName].ca += price;
 
+        // Finalize averages
+        analytics.avgBasket = analytics.totalOrders > 0 ? (analytics.totalCA / analytics.totalOrders) : 0;
+        Object.keys(analytics.byPlatform).forEach(p => {
+            const plat = analytics.byPlatform[p];
+            plat.avgBasket = plat.count > 0 ? (plat.ca / plat.count) : 0;
+        });
+        analytics.avgDeliveryTime = deliveryCount > 0 ? (totalDeliveryMinutes / deliveryCount) : 0;
+
         const productName = order.product_name || 'Inconnu';
         if (!analytics.byProduct[productName]) {
             analytics.byProduct[productName] = { qty: 0, ca: 0 };
@@ -1150,21 +1259,31 @@ async function getOrderAnalytics() {
             const date = new Date(order.created_at);
             const hour = date.getHours() + 'h';
             analytics.byHour[hour] = (analytics.byHour[hour] || 0) + price;
+            if (!analytics.byPlatform[platform].byHour) analytics.byPlatform[platform].byHour = {};
+            analytics.byPlatform[platform].byHour[hour] = (analytics.byPlatform[platform].byHour[hour] || 0) + price;
 
             const day = date.toISOString().split('T')[0];
             analytics.byDay[day] = (analytics.byDay[day] || 0) + price;
+            if (!analytics.byPlatform[platform].byDay) analytics.byPlatform[platform].byDay = {};
+            analytics.byPlatform[platform].byDay[day] = (analytics.byPlatform[platform].byDay[day] || 0) + price;
 
             const year = date.getFullYear();
             const oneJan = new Date(year, 0, 1);
             const weekNum = Math.ceil((((date - oneJan) / 86400000) + oneJan.getDay() + 1) / 7);
             const weekKey = `${year}-W${weekNum}`;
             analytics.byWeek[weekKey] = (analytics.byWeek[weekKey] || 0) + price;
+            if (!analytics.byPlatform[platform].byWeek) analytics.byPlatform[platform].byWeek = {};
+            analytics.byPlatform[platform].byWeek[weekKey] = (analytics.byPlatform[platform].byWeek[weekKey] || 0) + price;
 
             const month = date.toISOString().substring(0, 7);
             analytics.byMonth[month] = (analytics.byMonth[month] || 0) + price;
+            if (!analytics.byPlatform[platform].byMonth) analytics.byPlatform[platform].byMonth = {};
+            analytics.byPlatform[platform].byMonth[month] = (analytics.byPlatform[platform].byMonth[month] || 0) + price;
 
             const yr = date.getFullYear().toString();
             analytics.byYear[yr] = (analytics.byYear[yr] || 0) + price;
+            if (!analytics.byPlatform[platform].byYear) analytics.byPlatform[platform].byYear = {};
+            analytics.byPlatform[platform].byYear[yr] = (analytics.byPlatform[platform].byYear[yr] || 0) + price;
         }
 
         const city = (order.city || 'Inconnue').split(',')[0].trim().toUpperCase();
@@ -1180,7 +1299,8 @@ async function getOrderAnalytics() {
             qty: order.quantity,
             price: price,
             city: city,
-            livreur: order.livreur_name || 'N/A'
+            livreur: order.livreur_name || 'N/A',
+            platform: platform
         });
     });
 
@@ -1203,22 +1323,25 @@ async function getAllLivreurs() {
 
 // --- Settings ---
 const SETTINGS_DEFAULTS = {
-    bot_name: 'TIM LE MEILLEUR IDF',
-    welcome_message: 'Bienvenue chez TIM LE MEILLEUR IDF ! 👟 Livraison express en Île-de-France.',
+    bot_name: 'Votre Bot',
+    welcome_message: 'Bienvenue sur notre service de livraison express.',
     admin_password: 'admin',
     admin_telegram_id: '',
     dashboard_url: process.env.DASHBOARD_URL || '',
-    private_contact_url: 'https://t.me/Lejardinidf',
-    channel_url: 'https://t.me/timlemeilleuridf_canal',
+    private_contact_url: '',
+    private_contact_wa_url: 'https://wa.me/33752981714',
+    channel_url: '', // Corrected for La Frappe
     bot_description: '',
     bot_short_description: '',
     payment_modes: '💵 Espèces',
     maintenance_mode: false,
-    maintenance_message: '🔧 <b>Le bot est actuellement en maintenance.</b>\n\nNous revenons bientôt !\n\nContactez l\'admin : @Lejardinidf',
-    maintenance_contact: 'https://t.me/Lejardinidf',
-    accent_color: '#ff0050',
+    maintenance_message: '🔧 <b>Le bot est actuellement en maintenance.</b>\n\nNous revenons bientôt !',
+    maintenance_contact: '',
+    accent_color: '#4CAF50',
     languages: 'fr',
     payment_modes_config: '[]',
+    force_subscribe: false,
+    force_subscribe_channel_id: '',
     default_wa_name: 'Utilisateur',
     enable_abandoned_cart_notifications: false,
     msg_abandoned_cart: '',
@@ -1226,36 +1349,40 @@ const SETTINGS_DEFAULTS = {
     msg_order_notif_livreur: '',
     msg_order_received_admin: '',
     msg_order_confirmed_client: '',
+    enable_telegram: true,
+    enable_whatsapp: true,
+    enable_marketplace: true,
+    enable_fidelity: true,
+    enable_referral: true,
+    enable_help_menu: true,
     
     // UI Labels & Icons
-    label_catalog: 'Catalogue Products',
-    ui_icon_catalog: '👟',
+    label_catalog: 'Catalogue',
+    ui_icon_catalog: '🛒',
     label_my_orders: 'Mes Commandes',
     ui_icon_orders: '📦',
-    label_contact: 'Contact Admin',
+    label_contact: 'Contact',
     ui_icon_contact: '📱',
-    label_profile: 'Profil / Parrainage',
-    ui_icon_profile: '🎁',
+    label_profile: 'Profil',
+    ui_icon_profile: '👤',
     label_livreur_space: 'Espace Livreur',
     ui_icon_livreur: '🚴',
-    label_admin_bot: 'Gestion Bot',
-    ui_icon_admin: '🛠',
+    label_admin_bot: 'Admin Bot',
+    ui_icon_admin: '⚙️',
     label_admin_web: 'Dashboard Web',
-    ui_icon_web: '🔐',
-    label_channel: 'Canal Telegram',
+    ui_icon_web: '🌐',
+    label_channel: 'Canal',
     ui_icon_channel: '📢',
     label_welcome: 'Bienvenue',
-    ui_icon_welcome: '🏠',
+    ui_icon_welcome: '👋',
     label_support: 'Aide & Support',
     ui_icon_support: '❓',
-    label_reviews: 'Avis Clients',
+    label_reviews: 'Avis',
     ui_icon_leave_review: '⭐️',
     ui_icon_view_reviews: '👥',
     label_users: 'Utilisateurs',
     label_info: 'Informations',
     ui_icon_info: 'ℹ️',
-    label_catalog_title: '', // Added for consistency
-    welcome_photo: '', // Added for consistency
     
     // Statuses
     status_pending_label: 'Attente Validation',
@@ -1281,27 +1408,6 @@ const SETTINGS_DEFAULTS = {
     msg_review_thanks: '🙏 Merci pour votre avis !',
     msg_thanks_participation: 'Merci pour votre participation !',
     msg_your_answer: 'Votre réponse',
-    msg_session_expired: '❌ Session expirée.',
-    msg_product_not_found: '❌ Produit non trouvé.',
-    msg_order_not_available: '❌ Cette commande n\'est plus disponible.',
-    msg_order_not_found: '❌ Commande introuvable.',
-    msg_order_creation_error: '❌ Erreur lors de la création de la commande...',
-    msg_not_livreur: '❌ Vous n\'êtes pas livreur.',
-    msg_access_denied: '❌ Accès refusé.',
-    msg_error_fetching_orders: '❌ Erreur lors de la récupération de vos commandes.',
-    msg_error_fetching_history: '❌ Erreur lors de la récupération de l\'historique.',
-    msg_position_usage: '❌ Usage: /ma_position [ville]',
-    msg_catalog_empty: '📭 Le catalogue est actuellement vide.',
-    msg_cart_empty: '📭 Votre panier est vide.',
-    msg_no_reviews_yet: '📭 Aucun avis pour le moment. Soyez le premier !',
-    msg_no_information: '📭 Aucune information à afficher pour le moment.',
-    msg_no_active_deliveries: '📭 Aucune livraison en cours.',
-    msg_empty_delivery_history: '📭 Votre historique de livraison est vide.',
-    msg_no_active_orders: '📭 Vous n\'avez aucune commande active.',
-    msg_cart_cleared: '✅ Panier vidé !',
-    msg_thanks_for_feedback: '🙏 Merci pour votre note !',
-    msg_location_updated: '📍 Secteur mis à jour',
-    msg_livreur_welcome: '🚴 <b>Bienvenue dans l\'équipe de livraison !</b>',
     
     // Settings Logic
     points_exchange: 100,
@@ -1312,28 +1418,19 @@ const SETTINGS_DEFAULTS = {
     fidelity_min_spend: 50,
     fidelity_bonus_thresholds: '5,10,15,20',
     fidelity_bonus_amount: 10,
-    dashboard_title: 'TIM LE MEILLEUR IDF Dashboard',
+    dashboard_title: 'Dashboard',
     show_broadcasts_btn: true,
     show_reviews_btn: true,
+    priority_delivery_enabled: false,
+    priority_delivery_price: 15,
     
     // Buttons
     btn_back_menu: '◀️ Retour Menu',
     btn_back_menu_nav: '◀️ Retour Menu',
     btn_cart_resume: '➡️ 🛒 REPRENDRE MON PANIER',
     btn_client_mode: '🛒 Mode Client (commander)',
-    accent_color: '#4CAF50',
-    languages: 'fr',
-    payment_modes_config: '[]',
-    default_wa_name: 'Utilisateur',
-    enable_abandoned_cart_notifications: false,
-    msg_abandoned_cart: '',
-    msg_welcome_back: '',
-    msg_order_notif_livreur: '',
-    ui_icon_leave_review: '⭐️',
-    ui_icon_view_reviews: '👥',
-
-    // === BOUTONS DE NAVIGATION ===
     btn_back_generic: '◀️ Retour',
+    btn_verify_sub: '✅ Vérifier mon abonnement',
     btn_back_to_cart: '◀️ Retour Panier',
     btn_back_to_qty: '◀️ Retour Quantité',
     btn_back_to_address: '◀️ Retour Adresse',
@@ -1342,14 +1439,6 @@ const SETTINGS_DEFAULTS = {
     btn_back_to_livreur_menu: '◀️ Menu Livreur',
     btn_back_main_menu_alt: '◀️ Menu principal',
     btn_cancel: '◀️ Annuler',
-    btn_modify_address: '◀️ Modifier l\'adresse',
-    btn_modify_delivery: '◀️ Modifier livraison',
-    btn_later: '◀️ Plus tard',
-    btn_next: 'Suivant ➡️',
-    btn_previous: '⬅️ Précédent',
-
-    // === BOUTONS D'ACTION ===
-    btn_clear_cart: '❌ Vider le panier',
     btn_cancel_alt: '❌ Annuler',
     btn_cancel_order: '❌ Annuler la commande',
     btn_cancel_my_order: '❌ Annuler ma commande',
@@ -1357,53 +1446,17 @@ const SETTINGS_DEFAULTS = {
     btn_dont_use_credit: '❌ Non, payer plein tarif',
     btn_send_now: '✅ Envoyer maintenant',
     btn_set_available: '✅ Passer en Disponible',
-    btn_leave_review_alt: '⭐️ Laisser un avis / Commentaire',
-    btn_leave_review_simple: '⭐️ Laisser un avis',
-    btn_help_support: '❓ Aide & Support',
-    btn_where_is_delivery: '⏳ Où en est ma livraison ?',
-    btn_notify_30min: '⏳ 30 min',
-    btn_notify_10min: '⏳ 10 min',
-
-    // === NOTES / ÉTOILES ===
-    btn_rate_5: '⭐️⭐️⭐️⭐️⭐️ Excellent',
-    btn_rate_4: '⭐️⭐️⭐️⭐️ Très bien',
-    btn_rate_3: '⭐️⭐️⭐️ Bien',
-    btn_rate_1: '⭐️ Moyen / Insatisfait',
-
-    // === MESSAGES D'ERREUR ===
-    msg_session_expired: '❌ Session expirée.',
-    msg_product_not_found: '❌ Produit non trouvé.',
-    msg_order_not_available: '❌ Cette commande n\'est plus disponible.',
-    msg_order_not_found: '❌ Commande introuvable.',
-    msg_order_creation_error: '❌ Erreur lors de la création de la commande...',
-    msg_not_livreur: '❌ Vous n\'êtes pas livreur.',
-    msg_access_denied: '❌ Accès refusé.',
-    msg_error_fetching_orders: '❌ Erreur lors de la récupération de vos commandes.',
-    msg_error_fetching_history: '❌ Erreur lors de la récupération de l\'historique.',
-    msg_position_usage: '❌ Usage: /ma_position [ville]',
-
-    // === MESSAGES VIDES ===
-    msg_catalog_empty: '📭 Le catalogue est actuellement vide.',
-    msg_cart_empty: '📭 Votre panier est vide.',
-    msg_no_reviews_yet: '📭 Aucun avis pour le moment. Soyez le premier !',
-    msg_no_information: '📭 Aucune information à afficher pour le moment.',
-    msg_no_active_deliveries: '📭 Aucune livraison en cours.',
-    msg_empty_delivery_history: '📭 Votre historique de livraison est vide.',
-    msg_no_active_orders: '📭 Vous n\'avez aucune commande active.',
-
-    // === MESSAGES DE CONFIRMATION ===
-    msg_cart_cleared: '✅ Panier vidé !',
-    msg_thanks_for_feedback: '🙏 Merci pour votre note !',
-    msg_location_updated: '📍 Secteur mis à jour',
-    msg_livreur_welcome: '🚴 <b>Bienvenue dans l\'équipe de livraison !</b>',
-
-    // === FOURNISSEURS ===
-    msg_supplier_new_order: '📦 <b>Nouvelle commande !</b>',
-    msg_supplier_ready: '✅ Produit prêt pour livraison !',
+    btn_leave_review: '⭐️ Laisser un avis',
+    btn_view_reviews: '👥 Voir les avis',
+    btn_confirm_review: '✅ Confirmer',
     btn_supplier_ready: '✅ Prêt à livrer',
-    btn_supplier_prep_time: '⏱ Temps de préparation',
     btn_supplier_my_sales: '📊 Mes ventes',
-    btn_supplier_menu: '🏪 Espace Fournisseur'
+    btn_supplier_menu: '🏪 Espace Fournisseur',
+    btn_supplier_prep_time: '⏱ Temps de préparation',
+    
+    // Suppliers
+    msg_supplier_new_order: '📦 <b>Nouvelle commande !</b>',
+    msg_supplier_ready: '✅ Produit prêt pour livraison !'
 };
 
 let _settingsCache = null;
@@ -1464,7 +1517,7 @@ async function getAppSettings() {
 
 
     _settingsCache = settings;
-    _settingsExpire = Date.now() + 10000; // Cache valid for 10 seconds
+    _settingsExpire = Date.now() + 30000; // Cache valid for 30 seconds
     return settings;
 }
 
@@ -1484,11 +1537,12 @@ async function updateAppSettings(settings) {
         const coreFields = [
             'bot_name', 'welcome_message', 'admin_password', 'admin_telegram_id',
             'dashboard_url', 'payment_modes', 'maintenance_mode', 'maintenance_message',
-            'private_contact_url', 'channel_url', 'accent_color', 'bot_description',
+            'private_contact_url', 'private_contact_wa_url', 'channel_url', 'accent_color', 'bot_description',
             'label_contact', 'label_channel', 'ui_icon_contact', 'ui_icon_channel',
             'dashboard_title', 'label_support', 'ui_icon_support', 'msg_help_intro',
             'label_catalog', 'ui_icon_catalog', 'label_my_orders', 'ui_icon_orders',
-            'payment_modes_config', 'msg_order_received_admin', 'msg_order_confirmed_client'
+            'payment_modes_config', 'msg_order_received_admin', 'msg_order_confirmed_client',
+            'force_subscribe', 'force_subscribe_channel_id', 'priority_delivery_enabled', 'priority_delivery_price'
         ];
         const coreFiltered = {};
         for (const key of coreFields) {
@@ -1513,7 +1567,7 @@ async function getProducts() {
     }
     const { data } = await supabase.from(COL_PRODUCTS).select('*').order('created_at', { ascending: true });
     _productsCache = data || [];
-    _productsExpire = Date.now() + 15000; // Cache valid for 15 seconds
+    _productsExpire = Date.now() + 60000; // Cache valid for 60 seconds
     return _productsCache;
 }
 
@@ -1895,7 +1949,9 @@ async function markOrderSupplierReady(orderId, prepTime = null) {
     await supabase.from(COL_ORDERS).update(update).eq('id', orderId);
 }
 
-// ====== MARKETPLACE / FOURNISSEURS ======
+// ========== MARKETPLACE FOURNISSEURS ==========
+
+// --- Produits marketplace (gérés par les fournisseurs eux-mêmes) ---
 
 async function getMarketplaceProducts(supplierId = null) {
     let query = supabase.from(COL_SUPPLIER_PRODUCTS).select('*').order('created_at', { ascending: false });
@@ -1952,6 +2008,8 @@ async function createMarketplaceOrder(orderData) {
         admin_id: orderData.admin_id || 'admin',
         products: JSON.stringify(orderData.products), // [{product_id, name, price, qty}]
         total_price: orderData.total_price || 0,
+        address: orderData.address || '',
+        delivery_type: orderData.delivery_type || 'delivery',
         status: 'pending', // pending -> accepted -> ready -> collected -> cancelled
         notes: orderData.notes || '',
         created_at: ts(),
@@ -1997,11 +2055,13 @@ async function updateMarketplaceOrderStatus(orderId, status) {
     await supabase.from(COL_SUPPLIER_ORDERS).update({ status, updated_at: ts() }).eq('id', orderId);
 }
 
+// ========== FIN MARKETPLACE ==========
+
 module.exports = {
     supabase, COL_USERS, COL_PRODUCTS, COL_ORDERS, COL_SETTINGS, COL_BROADCASTS, COL_REFERRALS,
     incr, ts, makeDocId, decryptUser, decryptOrder, decryptReview,
     registerUser, getAllActiveUsers, getAllUsersForBroadcast, markUserBlocked, markUserUnblocked, deleteUser, getUser, updateUserWallet, updateUserPoints,
-    getUserCount, getActiveUserCount, getRecentUsers, searchUsers, searchLivreurs,
+    getUserCount, getActiveUserCount, getRecentUsers, getBlockedUsers, searchUsers, searchLivreurs,
     generateReferralCode, getReferralLeaderboard, incrementOrderCount,
     setLivreurStatus, updateLivreurPosition, getActiveLivreursCount,
     createOrder, updateOrderStatus, assignOrderLivreur, getOrder, deleteOrder, getAvailableOrders, getAllOrders,
@@ -2021,5 +2081,6 @@ module.exports = {
     COL_SUPPLIER_PRODUCTS, COL_SUPPLIER_ORDERS,
     getMarketplaceProducts, getMarketplaceProduct, getAvailableMarketplaceProducts,
     saveMarketplaceProduct, deleteMarketplaceProduct, updateMarketplaceStock,
-    createMarketplaceOrder, getMarketplaceOrders, getMarketplaceOrder, updateMarketplaceOrderStatus
+    createMarketplaceOrder, getMarketplaceOrders, getMarketplaceOrder, updateMarketplaceOrderStatus,
+    approveUser
 };

@@ -29,6 +29,30 @@ const awaitingProductCategory = new Map();
 const awaitingProductEdit = new Map();
 // Panier admin marketplace
 const adminMarketCart = new Map();
+// Chat Support Marketplace (Fournisseur -> Admin)
+const awaitingSupplierAdminChat = new Map(); 
+
+/**
+ * Nettoie TOUS les états "awaiting" d'un utilisateur.
+ * Appelé quand l'utilisateur quitte le flow marketplace (main_menu, view_catalog, etc.)
+ * pour éviter que ses messages texte soient interceptés par le marketplace.
+ */
+function clearAllAwaitingMaps(userId) {
+    const id = String(userId);
+    const hadState = awaitingProductName.has(id) || awaitingProductPrice.has(id) ||
+        awaitingProductDesc.has(id) || awaitingProductPhoto.has(id) ||
+        awaitingProductStock.has(id) || awaitingProductCategory.has(id) ||
+        awaitingProductEdit.has(id) || awaitingSupplierAdminChat.has(id);
+    awaitingProductName.delete(id);
+    awaitingProductPrice.delete(id);
+    awaitingProductDesc.delete(id);
+    awaitingProductPhoto.delete(id);
+    awaitingProductStock.delete(id);
+    awaitingProductCategory.delete(id);
+    awaitingProductEdit.delete(id);
+    awaitingSupplierAdminChat.delete(id);
+    if (hadState) console.log(`[Marketplace] Cleared all awaiting maps for user ${id}`);
+}
 
 async function initMarketplaceState() {
     // Les maps sont en mémoire (éphémères) — pas besoin de persistance pour ces flows
@@ -47,24 +71,52 @@ function setupMarketplaceHandlers(bot) {
         const supplier = await getSupplierByTelegramId(String(ctx.from.id));
         if (!supplier) return safeEdit(ctx, '❌ Vous n\'êtes pas enregistré comme fournisseur.', Markup.inlineKeyboard([[Markup.button.callback('◀️ Menu', 'main_menu')]]));
 
-        const products = await getMarketplaceProducts(supplier.id);
+        const [products, retailProducts, orders] = await Promise.all([
+            getMarketplaceProducts(supplier.id),
+            require('../services/database').getSupplierProducts(supplier.id),
+            getMarketplaceOrders(supplier.id, 10)
+        ]);
         const available = products.filter(p => p.is_available && p.stock > 0);
-        const orders = await getMarketplaceOrders(supplier.id, 10);
         const pendingOrders = orders.filter(o => ['pending', 'accepted'].includes(o.status));
 
         let text = `🏪 <b>Mon Magasin</b>\n\n`;
         text += `👤 <b>${esc(supplier.name)}</b>\n`;
-        text += `📦 ${products.length} produit(s) | ${available.length} disponible(s)\n`;
-        if (pendingOrders.length > 0) text += `🔔 <b>${pendingOrders.length} commande(s) à traiter !</b>\n`;
+        text += `📦 Marketplace : ${products.length} produit(s) | ${available.length} dispo\n`;
+        text += `🛒 Bot Client : ${retailProducts.length} produit(s)\n`;
+        if (pendingOrders.length > 0) text += `🔔 <b>${pendingOrders.length} commande(s) marketplace !</b>\n`;
+        
+        const pickupIcon = supplier.allow_pickup !== false ? '✅' : '❌';
+        const deliveryIcon = supplier.allow_delivery !== false ? '✅' : '❌';
+        text += `\n📍 Retrait : ${pickupIcon} | 🚚 Livraison : ${deliveryIcon}\n`;
         text += `\n<i>Gérez votre boutique directement depuis Telegram</i>`;
 
         await safeEdit(ctx, text, Markup.inlineKeyboard([
-            [Markup.button.callback('📦 Mes Produits', 'mp_my_products')],
-            [Markup.button.callback('➕ Ajouter un Produit', 'mp_add_product')],
-            [Markup.button.callback(`📋 Commandes reçues${pendingOrders.length ? ' ('+pendingOrders.length+')' : ''}`, 'mp_my_orders')],
-            [Markup.button.callback('📊 Statistiques', 'mp_my_stats')],
-            [Markup.button.callback('◀️ Retour', 'supplier_menu')]
+            [Markup.button.callback('📦 Produits Marché', 'mp_my_products'), Markup.button.callback('➕ Ajouter Marché', 'mp_add_product')],
+            [Markup.button.callback('🛒 Mes Produits Bot', 'mp_retail_products')],
+            [Markup.button.callback(`📋 Commandes${pendingOrders.length ? ' ('+pendingOrders.length+')' : ''}`, 'mp_my_orders'), Markup.button.callback('⚙️ Réglages', 'mp_shop_settings')],
+            [Markup.button.callback('📊 Stats', 'mp_my_stats'), Markup.button.callback('◀️ Retour', 'supplier_menu')]
         ]));
+    });
+
+    bot.action('mp_quit_confirm', async (ctx) => {
+        await ctx.answerCbQuery();
+        await safeEdit(ctx, '⚠️ <b>Êtes-vous sûr ?</b>\n\nVotre boutique ne sera plus visible et vous ne recevrez plus de commandes.', Markup.inlineKeyboard([
+            [Markup.button.callback('✅ Oui, quitter', 'mp_quit_final')],
+            [Markup.button.callback('◀️ Retour', 'mp_my_shop')]
+        ]));
+    });
+
+    bot.action('mp_quit_final', async (ctx) => {
+        await ctx.answerCbQuery('Profil supprimé');
+        const supplier = await getSupplierByTelegramId(String(ctx.from.id));
+        if (supplier) {
+            const { deleteSupplier } = require('../services/database');
+            await deleteSupplier(supplier.id);
+        }
+        await safeEdit(ctx, '✅ <b>Profil de fournisseur supprimé avec succès.</b>', Markup.inlineKeyboard([
+            [Markup.button.callback('◀️ Menu Principal', 'main_menu')]
+        ]));
+        await notifyAdmins(bot, `🚪 <b>DÉPART FOURNISSEUR</b>\n\n👤 ${ctx.from.first_name} a quitté le marketplace.`);
     });
 
     // Liste des produits du fournisseur
@@ -81,22 +133,113 @@ function setupMarketplaceHandlers(bot) {
             ]));
         }
 
-        let text = `📦 <b>Mes Produits (${products.length})</b>\n\n`;
-        products.forEach((p, i) => {
-            const status = p.is_available && p.stock > 0 ? '✅' : '❌';
-            text += `${i + 1}. ${status} <b>${esc(p.name)}</b>\n`;
-            text += `   💰 ${p.price}€ | 📦 Stock: ${p.stock || 0}`;
-            if (p.category) text += ` | 🏷 ${esc(p.category)}`;
-            text += `\n`;
-        });
+        let text = `📦 <b>Mes Produits Marché (${products.length})</b>\n\n`;
+        text += `Ces produits sont destinés à l'administration.\n\n`;
+        
+        const buttons = [];
+        for (let i = 0; i < products.length; i += 2) {
+            const row = [Markup.button.callback(`✏️ ${products[i].name.substring(0, 18)}`, `mp_edit_${products[i].id}`)];
+            if (i + 1 < products.length) {
+                row.push(Markup.button.callback(`✏️ ${products[i+1].name.substring(0, 18)}`, `mp_edit_${products[i+1].id}`));
+            }
+            buttons.push(row);
+        }
+        buttons.push([Markup.button.callback('➕ Ajouter', 'mp_add_product'), Markup.button.callback('◀️ Retour', 'mp_my_shop')]);
 
-        const buttons = products.map(p => [
-            Markup.button.callback(`✏️ ${p.name.substring(0, 20)}`, `mp_edit_${p.id}`)
-        ]);
-        buttons.push([Markup.button.callback('➕ Ajouter', 'mp_add_product')]);
+        await safeEdit(ctx, text, Markup.inlineKeyboard(buttons));
+    });
+
+    // Liste des produits RETAIL (bot client) assignés au fournisseur
+    bot.action('mp_retail_products', async (ctx) => {
+        await ctx.answerCbQuery();
+        const supplier = await getSupplierByTelegramId(String(ctx.from.id));
+        if (!supplier) return safeEdit(ctx, '❌ Accès refusé.');
+
+        const products = await require('../services/database').getSupplierProducts(supplier.id);
+        if (products.length === 0) {
+            return safeEdit(ctx, '📭 Aucun produit du catalogue client ne vous est assigné.', Markup.inlineKeyboard([
+                [Markup.button.callback('◀️ Retour', 'mp_my_shop')]
+            ]));
+        }
+
+        let text = `🛒 <b>Mes Produits Client (${products.length})</b>\n\n`;
+        text += `Ces produits apparaissent dans le catalogue général du bot.\n\n`;
+        
+        const buttons = [];
+        for (let i = 0; i < products.length; i += 2) {
+            const row = [Markup.button.callback(`${products[i].name.substring(0, 18)}`, `mp_retail_view_${products[i].id}`)];
+            if (i + 1 < products.length) {
+                row.push(Markup.button.callback(`${products[i+1].name.substring(0, 18)}`, `mp_retail_view_${products[i+1].id}`));
+            }
+            buttons.push(row);
+        }
         buttons.push([Markup.button.callback('◀️ Retour', 'mp_my_shop')]);
 
         await safeEdit(ctx, text, Markup.inlineKeyboard(buttons));
+    });
+
+    // Vue simplifiée d'un produit retail
+    bot.action(/^mp_retail_view_(.+)$/, async (ctx) => {
+        await ctx.answerCbQuery();
+        const pId = ctx.match[1];
+        const { getProduct } = require('../services/database');
+        const p = await getProduct(pId);
+        if (!p) return safeEdit(ctx, '❌ Produit introuvable.', Markup.inlineKeyboard([[Markup.button.callback('◀️ Retour', 'mp_retail_products')]]));
+
+        let text = `🛒 <b>${esc(p.name)}</b> (Catalogue Bot)\n\n`;
+        text += `💰 Prix: ${p.price}€\n`;
+        text += `📦 Disponibilité: ${p.is_available ? '✅ En vente' : '❌ Masqué'}\n`;
+        text += `🏷 Catégorie: ${esc(p.category || 'Aucune')}\n\n`;
+        text += `<i>Note: Ces produits sont gérés par l\'administrateur depuis le dashboard.</i>`;
+
+        await safeEdit(ctx, text, Markup.inlineKeyboard([
+             [Markup.button.callback('◀️ Retour Liste', 'mp_retail_products'), Markup.button.callback('🏠 Menu Magasin', 'mp_my_shop')]
+        ]));
+    });
+
+    // Réglages boutique fournisseur
+    bot.action('mp_shop_settings', async (ctx) => {
+        await ctx.answerCbQuery();
+        const supplier = await getSupplierByTelegramId(String(ctx.from.id));
+        if (!supplier) return;
+
+        const pickupIcon = supplier.allow_pickup !== false ? '✅' : '❌';
+        const deliveryIcon = supplier.allow_delivery !== false ? '✅' : '❌';
+
+        let text = `⚙️ <b>Paramètres de votre Boutique</b>\n\n`;
+        text += `Gérez ici les options de retrait et de livraison que vous proposez.\n\n`;
+        text += `📍 Retrait sur place: ${pickupIcon}\n`;
+        text += `🚚 Livraison à l'admin: ${deliveryIcon}\n`;
+
+        await safeEdit(ctx, text, Markup.inlineKeyboard([
+            [Markup.button.callback(`${pickupIcon} Retrait sur place`, 'mp_toggle_pickup')],
+            [Markup.button.callback(`${deliveryIcon} Livraison possible`, 'mp_toggle_delivery')],
+            [Markup.button.callback('◀️ Retour', 'mp_my_shop')]
+        ]));
+    });
+
+    bot.action('mp_toggle_pickup', async (ctx) => {
+        const supplier = await getSupplierByTelegramId(String(ctx.from.id));
+        if (!supplier) return;
+        supplier.allow_pickup = (supplier.allow_pickup === false);
+        await require('../services/database').saveSupplier(supplier);
+        await ctx.answerCbQuery(`Retrait sur place: ${supplier.allow_pickup ? 'ACTI' : 'DÉSACTI'}VÉ`);
+        // Refresh settings view
+        ctx.match = ['mp_shop_settings'];
+        const triggerHandler = bot.actions.get('mp_shop_settings');
+        if (triggerHandler) await triggerHandler(ctx);
+    });
+
+    bot.action('mp_toggle_delivery', async (ctx) => {
+        const supplier = await getSupplierByTelegramId(String(ctx.from.id));
+        if (!supplier) return;
+        supplier.allow_delivery = (supplier.allow_delivery === false);
+        await require('../services/database').saveSupplier(supplier);
+        await ctx.answerCbQuery(`Livraison: ${supplier.allow_delivery ? 'ACTI' : 'DÉSACTI'}VÉE`);
+        // Refresh settings view
+        ctx.match = ['mp_shop_settings'];
+        const triggerHandler = bot.actions.get('mp_shop_settings');
+        if (triggerHandler) await triggerHandler(ctx);
     });
 
     // Détail + édition d'un produit fournisseur
@@ -116,15 +259,15 @@ function setupMarketplaceHandlers(bot) {
         text += `📊 Statut : ${status}\n`;
         if (product.image_url) text += `📸 Photo : ✅\n`;
 
-        await safeEdit(ctx, text, Markup.inlineKeyboard([
-            [Markup.button.callback('💰 Modifier Prix', `mp_chprice_${productId}`), Markup.button.callback('📦 Modifier Stock', `mp_chstock_${productId}`)],
-            [Markup.button.callback('📝 Modifier Description', `mp_chdesc_${productId}`)],
-            [Markup.button.callback('📸 Changer Photo', `mp_chphoto_${productId}`)],
-            [Markup.button.callback('🏷 Catégorie', `mp_chcat_${productId}`)],
-            [Markup.button.callback(product.is_available ? '⏸ Mettre en pause' : '▶️ Remettre en vente', `mp_toggle_${productId}`)],
-            [Markup.button.callback('🗑 Supprimer', `mp_delete_${productId}`)],
-            [Markup.button.callback('◀️ Retour', 'mp_my_products')]
-        ]));
+        await safeEdit(ctx, text, {
+            ...Markup.inlineKeyboard([
+                [Markup.button.callback('💰 Modifier Prix', `mp_chprice_${productId}`), Markup.button.callback('📦 Modifier Stock', `mp_chstock_${productId}`)],
+                [Markup.button.callback('📝 Modifier Description', `mp_chdesc_${productId}`), Markup.button.callback('📸 Changer Photo', `mp_chphoto_${productId}`)],
+                [Markup.button.callback('🏷 Catégorie', `mp_chcat_${productId}`), Markup.button.callback(product.is_available ? '⏸ Pause' : '▶️ En vente', `mp_toggle_${productId}`)],
+                [Markup.button.callback('🗑 Supprimer', `mp_delete_${productId}`), Markup.button.callback('◀️ Retour', 'mp_my_products')]
+            ]),
+            photo: product.image_url || null
+        });
     });
 
     // Toggle disponibilité
@@ -227,40 +370,89 @@ function setupMarketplaceHandlers(bot) {
         const supplier = await getSupplierByTelegramId(String(ctx.from.id));
         if (!supplier) return safeEdit(ctx, '❌ Accès refusé.');
 
-        const orders = await getMarketplaceOrders(supplier.id, 20);
-        const active = orders.filter(o => ['pending', 'accepted'].includes(o.status));
+        const [mpOrders, clientOrders] = await Promise.all([
+            getMarketplaceOrders(supplier.id, 20),
+            require('../services/database').getSupplierOrders(supplier.id, 20)
+        ]);
 
-        if (active.length === 0) {
-            return safeEdit(ctx, '📭 Aucune commande en attente.', Markup.inlineKeyboard([
-                [Markup.button.callback('📜 Historique', 'mp_orders_history')],
+        const activeMp = mpOrders.filter(o => ['pending', 'accepted', 'ready'].includes(o.status));
+        const activeClient = clientOrders.filter(o => ['pending', 'livreur_assigned'].includes(o.status));
+
+        if (activeMp.length === 0 && activeClient.length === 0) {
+            return safeEdit(ctx, '📭 Aucune commande active.', Markup.inlineKeyboard([
+                [Markup.button.callback('📜 Historique Marché', 'mp_orders_history')],
                 [Markup.button.callback('◀️ Retour', 'mp_my_shop')]
             ]));
         }
 
-        let text = `📋 <b>Commandes à traiter (${active.length})</b>\n\n`;
-        active.forEach((o, i) => {
-            const items = Array.isArray(o.products) ? o.products.map(p => `${p.name} x${p.qty}`).join(', ') : 'Produits';
-            text += `${i + 1}. 🛒 <b>#${o.id.slice(-6)}</b>\n`;
-            text += `   📦 ${items}\n`;
-            text += `   💰 ${o.total_price}€ | ${o.status === 'pending' ? '⏳ En attente' : '✅ Acceptée'}\n\n`;
-        });
+        let text = `📋 <b>Mes Commandes Actives</b>\n\n`;
+        
+        if (activeMp.length > 0) {
+            text += `🏢 <b>COMMANDES MARCHÉ (Admin)</b>\n`;
+            activeMp.forEach((o) => {
+                const items = Array.isArray(o.products) ? o.products.map(p => `${p.name} x${p.qty}`).join(', ') : 'Produits';
+                const statusEmoji = o.status === 'pending' ? '⏳' : (o.status === 'accepted' ? '✅' : '📦');
+                text += `${statusEmoji} <b>#${o.id.slice(-6)}</b> | ${o.total_price}€\n`;
+                text += `   📦 ${items}\n`;
+                text += `   🚚 ${o.delivery_type === 'pickup' ? '🏁 Retrait' : '🚀 Liv: ' + (o.address || 'Standard')}\n\n`;
+            });
+        }
+
+        if (activeClient.length > 0) {
+            text += `👤 <b>COMMANDES CLIENTS (Bot)</b>\n`;
+            activeClient.forEach((o) => {
+                const products = o.cart || [];
+                const items = products.map(p => `${p.productName} x${p.qty}`).join(', ');
+                const statusEmoji = o.status === 'pending' ? '⏳' : '🛵';
+                text += `${statusEmoji} <b>#${o.id.slice(-5)}</b> | ${o.total}€\n`;
+                text += `   📦 ${items}\n`;
+                text += `   📍 Adresse: ${esc(o.address || 'Non spécifiée')}\n\n`;
+            });
+        }
 
         const buttons = [];
-        active.forEach(o => {
-            const row = [];
+        // Boutons pour Marketplace
+        activeMp.forEach(o => {
+            const shortId = o.id.slice(-6);
             if (o.status === 'pending') {
-                row.push(Markup.button.callback(`✅ Accepter #${o.id.slice(-6)}`, `mp_accept_${o.id}`));
+                buttons.push([Markup.button.callback(`✅ Accepter #${shortId}`, `mp_accept_${o.id}`), Markup.button.callback(`❌ Refuser #${shortId}`, `mp_reject_${o.id}`)]);
+            } else if (o.status === 'accepted') {
+                buttons.push([Markup.button.callback(`📦 Prêt #${shortId}`, `mp_ready_${o.id}`), Markup.button.callback(`❌ Refuser #${shortId}`, `mp_reject_${o.id}`)]);
             }
-            if (o.status === 'accepted') {
-                row.push(Markup.button.callback(`📦 Prêt #${o.id.slice(-6)}`, `mp_ready_${o.id}`));
-            }
-            row.push(Markup.button.callback(`❌ #${o.id.slice(-6)}`, `mp_reject_${o.id}`));
-            buttons.push(row);
+            // Toujours permettre de parler à l'admin qui a commandé
+            buttons.push([Markup.button.callback(`💬 Parler à l'Admin (#${shortId})`, `mp_chat_admin_${o.id}`)]);
         });
-        buttons.push([Markup.button.callback('📜 Historique', 'mp_orders_history')]);
+
+        // Boutons pour Client Orders (Vue seule pour l'instant)
+        activeClient.forEach(o => {
+            buttons.push([Markup.button.callback(`📋 Détail Client #${o.id.slice(-5)}`, `mp_client_order_view_${o.id}`)]);
+        });
+
+        buttons.push([Markup.button.callback('📜 Historique Marché', 'mp_orders_history')]);
         buttons.push([Markup.button.callback('◀️ Retour', 'mp_my_shop')]);
 
         await safeEdit(ctx, text, Markup.inlineKeyboard(buttons));
+    });
+
+    // Vue d'une commande client pour le fournisseur
+    bot.action(/^mp_client_order_view_(.+)$/, async (ctx) => {
+        await ctx.answerCbQuery();
+        const oId = ctx.match[1];
+        const { getOrder } = require('../services/database');
+        const order = await getOrder(oId);
+        if (!order) return safeEdit(ctx, '❌ Commande introuvable.', Markup.inlineKeyboard([[Markup.button.callback('◀️ Retour', 'mp_my_orders')]]));
+
+        let text = `👤 <b>Commande Client #${order.id.slice(-5)}</b>\n\n`;
+        text += `📉 Statut : <b>${order.status}</b>\n`;
+        text += `📍 Adresse : ${esc(order.address)}\n`;
+        text += `💰 Total : <b>${order.total}€</b>\n\n`;
+        text += `📦 <b>Produits :</b>\n`;
+        (order.cart || []).forEach(p => {
+            text += `• ${p.productName} x${p.qty} (${p.price}€)\n`;
+        });
+        text += `\n<i>Note: Les commandes clients sont gérées globalement par l'admin et les livreurs.</i>`;
+
+        await safeEdit(ctx, text, Markup.inlineKeyboard([[Markup.button.callback('◀️ Retour', 'mp_my_orders')]]));
     });
 
     // Accepter une commande
@@ -268,12 +460,24 @@ function setupMarketplaceHandlers(bot) {
         await ctx.answerCbQuery('✅ Commande acceptée !');
         const orderId = ctx.match[1];
         await updateMarketplaceOrderStatus(orderId, 'accepted');
+        
+        const [order, supplier] = await Promise.all([
+            getMarketplaceOrder(orderId),
+            getSupplierByTelegramId(String(ctx.from.id))
+        ]);
+
         // Notifier l'admin
-        const order = await getMarketplaceOrder(orderId);
-        const supplier = await getSupplierByTelegramId(String(ctx.from.id));
         await notifyAdmins(null, `🏪 <b>Marketplace</b>\n\n✅ Commande <b>#${orderId.slice(-6)}</b> acceptée par <b>${supplier?.name || 'Fournisseur'}</b>.`);
-        // Rafraîchir la liste
-        return ctx.scene ? null : bot.emit('callback_query', { ...ctx.callbackQuery, data: 'mp_my_orders' });
+        
+        // Mettre à jour le message actuel (Alerte ou Liste)
+        const shortId = orderId.slice(-6);
+        const text = (ctx.message.text || ctx.message.caption || '').replace('⏳ EN ATTENTE', '').replace('📢 NOUVELLE COMMANDE', '✅ COMMANDE ACCEPTÉE');
+        
+        await safeEdit(ctx, `${text}\n\n✅ <b>Statut : Acceptée</b>`, Markup.inlineKeyboard([
+            [Markup.button.callback(`📦 Marquer comme Prête`, `mp_ready_${orderId}`)],
+            [Markup.button.callback(`💬 Parler à l'Admin`, `mp_chat_admin_${orderId}`)],
+            [Markup.button.callback('📋 Voir mes commandes', 'mp_my_orders')]
+        ]));
     });
 
     // Commande prête
@@ -281,12 +485,20 @@ function setupMarketplaceHandlers(bot) {
         await ctx.answerCbQuery('📦 Marquée comme prête !');
         const orderId = ctx.match[1];
         await updateMarketplaceOrderStatus(orderId, 'ready');
-        const order = await getMarketplaceOrder(orderId);
-        const supplier = await getSupplierByTelegramId(String(ctx.from.id));
+        
+        const [order, supplier] = await Promise.all([
+            getMarketplaceOrder(orderId),
+            getSupplierByTelegramId(String(ctx.from.id))
+        ]);
+
         const items = Array.isArray(order?.products) ? order.products.map(p => `${p.name} x${p.qty}`).join(', ') : '';
         await notifyAdmins(null, `🏪 <b>Marketplace</b>\n\n📦 Commande <b>#${orderId.slice(-6)}</b> PRÊTE !\n🏪 ${supplier?.name || 'Fournisseur'}\n📋 ${items}\n\n<i>Vous pouvez aller la récupérer.</i>`);
-        return safeEdit(ctx, `✅ Commande #${orderId.slice(-6)} marquée comme prête !\nL'admin a été notifié.`, Markup.inlineKeyboard([
-            [Markup.button.callback('◀️ Retour', 'mp_my_orders')]
+
+        const text = (ctx.message.text || ctx.message.caption || '').replace('✅ COMMANDE ACCEPTÉE', '📦 COMMANDE PRÊTE').replace('Acceptée', 'Prête');
+        
+        await safeEdit(ctx, `${text}\n\nL'admin a été notifié.`, Markup.inlineKeyboard([
+            [Markup.button.callback(`💬 Parler à l'Admin`, `mp_chat_admin_${orderId}`)],
+            [Markup.button.callback('◀️ Mes Commandes', 'mp_my_orders')]
         ]));
     });
 
@@ -306,8 +518,8 @@ function setupMarketplaceHandlers(bot) {
         await updateMarketplaceOrderStatus(orderId, 'cancelled');
         const supplier = await getSupplierByTelegramId(String(ctx.from.id));
         await notifyAdmins(null, `🏪 <b>Marketplace</b>\n\n❌ Commande <b>#${orderId.slice(-6)}</b> refusée par <b>${supplier?.name || 'Fournisseur'}</b>.`);
-        return safeEdit(ctx, '❌ Commande refusée.', Markup.inlineKeyboard([
-            [Markup.button.callback('◀️ Retour', 'mp_my_orders')]
+        return safeEdit(ctx, `❌ <b>Commande #${orderId.slice(-6)} refusée.</b>\nL'administration a été prévenue.`, Markup.inlineKeyboard([
+            [Markup.button.callback('◀️ Mes Commandes', 'mp_my_orders')]
         ]));
     });
 
@@ -391,11 +603,16 @@ function setupMarketplaceHandlers(bot) {
             text += `🏪 <b>${esc(s.name)}</b> — ${products.length} produit(s) dispo\n`;
         }
 
-        const buttons = activeSuppliers.map(s => [
-            Markup.button.callback(`🏪 ${s.name}`, `mp_shop_${s.id}`)
-        ]);
-        buttons.push([Markup.button.callback('🛒 Mon Panier', 'mp_admin_cart')]);
-        buttons.push([Markup.button.callback('📋 Mes Commandes', 'mp_admin_orders')]);
+        // Boutons fournisseurs 2x2
+        const buttons = [];
+        for (let i = 0; i < activeSuppliers.length; i += 2) {
+            const row = [Markup.button.callback(`🏪 ${activeSuppliers[i].name}`, `mp_shop_${activeSuppliers[i].id}`)];
+            if (i + 1 < activeSuppliers.length) {
+                row.push(Markup.button.callback(`🏪 ${activeSuppliers[i+1].name}`, `mp_shop_${activeSuppliers[i+1].id}`));
+            }
+            buttons.push(row);
+        }
+        buttons.push([Markup.button.callback('🛒 Mon Panier', 'mp_admin_cart'), Markup.button.callback('📋 Mes Commandes', 'mp_admin_orders')]);
         buttons.push([Markup.button.callback('◀️ Retour Admin', 'admin_menu')]);
 
         await safeEdit(ctx, text, Markup.inlineKeyboard(buttons));
@@ -424,11 +641,16 @@ function setupMarketplaceHandlers(bot) {
             });
         }
 
-        const buttons = products.map(p => [
-            Markup.button.callback(`🛒 ${p.name.substring(0, 25)} — ${p.price}€`, `mp_addcart_${p.id}`)
-        ]);
-        buttons.push([Markup.button.callback('🛒 Mon Panier', 'mp_admin_cart')]);
-        buttons.push([Markup.button.callback('◀️ Retour Marketplace', 'mp_browse')]);
+        // Boutons 2x2
+        const buttons = [];
+        for (let i = 0; i < products.length; i += 2) {
+            const row = [Markup.button.callback(`🛒 ${products[i].name.substring(0, 20)} — ${products[i].price}€`, `mp_addcart_${products[i].id}`)];
+            if (i + 1 < products.length) {
+                row.push(Markup.button.callback(`🛒 ${products[i+1].name.substring(0, 20)} — ${products[i+1].price}€`, `mp_addcart_${products[i+1].id}`));
+            }
+            buttons.push(row);
+        }
+        buttons.push([Markup.button.callback('🛒 Mon Panier', 'mp_admin_cart'), Markup.button.callback('◀️ Retour', 'mp_browse')]);
 
         await safeEdit(ctx, text, Markup.inlineKeyboard(buttons));
     });
@@ -606,12 +828,17 @@ function setupMarketplaceHandlers(bot) {
             const supplier = await getSupplier(sId);
             if (supplier && supplier.telegram_id) {
                 const itemsList = products.map(p => `• ${p.name} x${p.qty} (${(p.price * p.qty).toFixed(2)}€)`).join('\n');
+                
+                let orderDetails = `📢 <b>NOUVELLE COMMANDE ADMIN</b>\n\n`;
+                orderDetails += `🛒 Commande <b>#${order.id.slice(-6)}</b>\n`;
+                orderDetails += `🚚 Mode : ${order.delivery_type === 'pickup' ? '🏁 Click & Collect' : '🚀 Livraison'}\n`;
+                if (order.address) orderDetails += `📍 Adresse : ${esc(order.address)}\n`;
+                orderDetails += `\n${itemsList}\n`;
+                orderDetails += `\n💰 <b>Total : ${total.toFixed(2)}€</b>\n\n`;
+                orderDetails += `⏳ <b>Statut : EN ATTENTE</b>`;
+
                 await sendMessageToUser(`telegram_${supplier.telegram_id}`,
-                    `🔔 <b>Nouvelle commande marketplace !</b>\n\n` +
-                    `🛒 Commande <b>#${order.id.slice(-6)}</b>\n\n` +
-                    `${itemsList}\n\n` +
-                    `💰 <b>Total : ${total.toFixed(2)}€</b>\n\n` +
-                    `Ouvrez votre espace fournisseur pour accepter cette commande.`,
+                    orderDetails,
                     {
                         reply_markup: {
                             inline_keyboard: [
@@ -677,15 +904,34 @@ function setupMarketplaceHandlers(bot) {
         ]));
     });
 
-    // ======================================================================
-    //                    GESTION DES MESSAGES TEXTE (flows)
-    // ======================================================================
+    // --- CHAT FOURNISSEUR -> ADMIN (Marketplace) ---
+    bot.action(/^mp_chat_admin_(.+)$/, async (ctx) => {
+        await ctx.answerCbQuery();
+        const orderId = ctx.match[1];
+        awaitingSupplierAdminChat.set(String(ctx.from.id), orderId);
+        return safeEdit(ctx, `💬 <b>Discussion avec l'Admin</b>\n\nEnvoyez votre message pour la commande <b>#${orderId.slice(-6)}</b>.\n\nL'admin recevra votre message et pourra vous répondre.`, Markup.inlineKeyboard([
+            [Markup.button.callback('❌ Annuler', 'mp_my_orders')]
+        ]));
+    });
+
+    // ======= GESTION DES MESSAGES TEXTE (flows) =======
 
     // Cette fonction est appelée par le middleware principal pour gérer les messages texte
     // liés aux flows marketplace
     function handleMarketplaceText(ctx) {
         const userId = String(ctx.from.id);
         const text = ctx.message?.text?.trim();
+
+        // Chat Fournisseur -> Admin
+        if (awaitingSupplierAdminChat.has(userId)) {
+            const orderId = awaitingSupplierAdminChat.get(userId);
+            if (text && text.startsWith('/')) {
+                awaitingSupplierAdminChat.delete(userId);
+                return false;
+            }
+            awaitingSupplierAdminChat.delete(userId);
+            return relaySupplierMessageToAdmin(ctx, orderId, text);
+        }
 
         // Flow édition produit
         if (awaitingProductEdit.has(userId)) {
@@ -788,6 +1034,13 @@ function setupMarketplaceHandlers(bot) {
     function handleMarketplacePhoto(ctx) {
         const userId = String(ctx.from.id);
 
+        // Chat Fournisseur -> Admin
+        if (awaitingSupplierAdminChat.has(userId)) {
+            const orderId = awaitingSupplierAdminChat.get(userId);
+            awaitingSupplierAdminChat.delete(userId);
+            return relaySupplierMessageToAdmin(ctx, orderId, ctx.message.caption || '');
+        }
+
         // Photo pour édition
         if (awaitingProductEdit.has(userId) && awaitingProductEdit.get(userId).field === 'photo') {
             const edit = awaitingProductEdit.get(userId);
@@ -805,37 +1058,103 @@ function setupMarketplaceHandlers(bot) {
         return false;
     }
 
+    // Gestion des vidéos envoyées
+    function handleMarketplaceVideo(ctx) {
+        const userId = String(ctx.from.id);
+
+        // Chat Fournisseur -> Admin
+        if (awaitingSupplierAdminChat.has(userId)) {
+            const orderId = awaitingSupplierAdminChat.get(userId);
+            awaitingSupplierAdminChat.delete(userId);
+            return relaySupplierMessageToAdmin(ctx, orderId, ctx.message.caption || '');
+        }
+
+        return false;
+    }
+
+    /**
+     * Relaye un message du fournisseur vers l'admin (Marketplace)
+     */
+    async function relaySupplierMessageToAdmin(ctx, orderId, text) {
+        try {
+            const order = await getMarketplaceOrder(orderId);
+            const supplier = await getSupplierByTelegramId(String(ctx.from.id));
+            if (!order || !supplier) return;
+
+            const adminMsg = `🏪 <b>MESSAGE FOURNISSEUR (Marketplace)</b>\n\n` +
+                `📦 Commande : <b>#${orderId.slice(-6)}</b>\n` +
+                `🏪 De : <b>${esc(supplier.name)}</b>\n\n` +
+                (text ? `<i>"${esc(text)}"</i>` : (ctx.message.photo ? '📸 Photo reçue' : (ctx.message.video ? '🎥 Vidéo reçue' : '')));
+
+            const options = { parse_mode: 'HTML' };
+            // L'admin peut répondre directement au fournisseur en utilisant le système de chat client (car le fournisseur est aussi un user)
+            const supplierUid = `telegram_${ctx.from.id}`;
+            options.reply_markup = {
+                inline_keyboard: [[{ text: '💬 Répondre au Fournisseur', callback_data: `admin_chat_user_${supplierUid}` }]]
+            };
+
+            if (ctx.message.photo) {
+                options.photo = ctx.message.photo[ctx.message.photo.length - 1].file_id;
+            } else if (ctx.message.video) {
+                options.video = ctx.message.video.file_id;
+                options.caption = adminMsg;
+            }
+
+            await notifyAdmins(bot, adminMsg, options);
+            await ctx.reply(`✅ <b>Votre message a été transmis à l'administration.</b>`, { parse_mode: 'HTML' });
+            return true;
+        } catch (e) {
+            console.error('Error relaying supplier message:', e);
+            await ctx.reply(`❌ <b>Échec de l'envoi :</b> ${e.message}`);
+            return true;
+        }
+    }
+
     async function handlePhotoUpload(ctx, productId) {
         try {
             const photo = ctx.message.photo;
+            if (!photo || photo.length === 0) return;
             const fileId = photo[photo.length - 1].file_id;
             const fileUrl = await ctx.telegram.getFileLink(fileId);
+            
+            // UPLOAD PERSISTANT SUR SUPABASE
             const imageUrl = await uploadMediaFromUrl(fileUrl.toString(), `mp_${productId}_${Date.now()}.jpg`);
+            
             await saveMarketplaceProduct({ id: productId, image_url: imageUrl || fileUrl.toString() });
-            return safeEdit(ctx, '✅ Photo mise à jour !', Markup.inlineKeyboard([
-                [Markup.button.callback('◀️ Retour au produit', `mp_edit_${productId}`)]
-            ]));
+            
+            return ctx.reply('✅ <b>Photo mise à jour !</b>', {
+                parse_mode: 'HTML',
+                ...Markup.inlineKeyboard([[Markup.button.callback('◀️ Retour au produit', `mp_edit_${productId}`)]])
+            });
         } catch (e) {
             console.error('handlePhotoUpload error:', e);
-            return safeEdit(ctx, '❌ Erreur lors de l\'upload. Réessayez.', Markup.inlineKeyboard([
-                [Markup.button.callback('◀️ Retour', `mp_edit_${productId}`)]
-            ]));
+            return ctx.reply('❌ Erreur lors de l\'upload. Réessayez.');
         }
     }
 
     async function handleNewProductPhoto(ctx, data) {
         try {
             const photo = ctx.message.photo;
+            if (!photo || photo.length === 0) return finalizeProduct(ctx, data);
+            
             const fileId = photo[photo.length - 1].file_id;
             const fileUrl = await ctx.telegram.getFileLink(fileId);
-            data.image_url = fileUrl.toString();
+            
+            // UPLOAD PERSISTANT SUR SUPABASE
+            const imageUrl = await uploadMediaFromUrl(fileUrl.toString(), `mp_new_${Date.now()}.jpg`);
+            data.image_url = imageUrl || fileUrl.toString();
+
             // Demander la catégorie
             awaitingProductCategory.set(String(ctx.from.id), data);
-            return safeEdit(ctx, `📸 Photo ajoutée !\n\n🏷 Envoyez une <b>catégorie</b> (ex: Sneakers, Textile...) ou "skip" :`, Markup.inlineKeyboard([
-                [Markup.button.callback('⏭ Passer', `mp_skipcat_${ctx.from.id}`)],
-                [Markup.button.callback('❌ Annuler', 'mp_my_shop')]
-            ]));
+            return ctx.reply(`📸 <b>Photo ajoutée !</b>\n\n🏷 Envoyez une <b>catégorie</b> (ex: Sneakers, Textile...) ou "skip" :`, {
+                parse_mode: 'HTML',
+                ...Markup.inlineKeyboard([
+                    [Markup.button.callback('⏭ Passer', `mp_skipcat_${ctx.from.id}`)],
+                    [Markup.button.callback('❌ Annuler', 'mp_my_shop')]
+                ])
+            });
         } catch (e) {
+            console.error('handleNewProductPhoto error:', e.message);
             return finalizeProduct(ctx, data);
         }
     }
@@ -931,8 +1250,7 @@ function setupMarketplaceHandlers(bot) {
                 (data.image_url ? `📸 Photo : ✅\n` : '') +
                 `\n<i>Votre produit est maintenant visible dans la marketplace !</i>`,
                 Markup.inlineKeyboard([
-                    [Markup.button.callback('➕ Ajouter un autre', 'mp_add_product')],
-                    [Markup.button.callback('◀️ Mes Produits', 'mp_my_products')],
+                    [Markup.button.callback('➕ Ajouter un autre', 'mp_add_product'), Markup.button.callback('📦 Mes Produits', 'mp_my_products')],
                     [Markup.button.callback('◀️ Mon Magasin', 'mp_my_shop')]
                 ])
             );
@@ -944,7 +1262,7 @@ function setupMarketplaceHandlers(bot) {
         }
     }
 
-    return { handleMarketplaceText, handleMarketplacePhoto };
+    return { handleMarketplaceText, handleMarketplacePhoto, handleMarketplaceVideo };
 }
 
-module.exports = { setupMarketplaceHandlers, initMarketplaceState };
+module.exports = { setupMarketplaceHandlers, initMarketplaceState, clearAllAwaitingMaps };

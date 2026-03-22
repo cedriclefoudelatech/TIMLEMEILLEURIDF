@@ -79,19 +79,26 @@ class TelegramChannel extends Channel {
 
     async start() {
         console.log(`[TG] Lancement du bot (${this.token.substring(0, 4)}****...)...`);
-        try {
-            this.bot.launch().then(() => {
+        
+        const launch = async (retryCount = 0) => {
+            try {
+                await this.bot.launch();
                 console.log('✅ [TG] Bot lancé avec succès !');
                 this.isActive = true;
-            }).catch(err => {
-                console.error('❌ [TG] Erreur fatale au lancement:', err.message);
-            });
-            // On ne bloque pas tout le démarrage si Telegram met du temps
-            this.isActive = true;
-            console.log('  Telegram channel initialized and marked active');
-        } catch (err) {
-            console.error('❌ [TG] Exception lors du launch:', err.message);
-        }
+            } catch (err) {
+                if (err.message.includes('409') && retryCount < 5) {
+                    console.warn(`⚠️ [TG] Conflit 409 (déjà une instance). Tentative ${retryCount + 1}/5 dans 15s...`);
+                    setTimeout(() => launch(retryCount + 1), 15000);
+                } else {
+                    console.error('❌ [TG] Erreur fatale au lancement:', err.message);
+                }
+            }
+        };
+
+        launch();
+        // On marque isActive true temporairement pour le registry, 
+        // ou on laisse le launch s'en occuper. Ici on dit qu'il est "initialisé".
+        console.log('  Telegram channel initialized and launching in background...');
     }
 
     async stop() {

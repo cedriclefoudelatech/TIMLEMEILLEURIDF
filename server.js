@@ -251,8 +251,15 @@ function createServer() {
     });
 
     app.get('/api/users', authMiddleware, async (req, res) => {
-        try { res.json(await getRecentUsers(parseInt(req.query.limit) || 50)); }
+        try { res.json(await getRecentUsers(parseInt(req.query.limit) || 1000)); }
         catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
+    });
+
+    app.get('/api/users/blocked', authMiddleware, async (req, res) => {
+        try {
+            const { getBlockedUsers } = require('./services/database');
+            res.json(await getBlockedUsers(parseInt(req.query.limit) || 100));
+        } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
     });
 
     app.get('/api/users/search', authMiddleware, async (req, res) => {
@@ -327,6 +334,21 @@ function createServer() {
         } catch (e) { res.status(500).json({ error: e.message }); }
     });
 
+    app.post('/api/users/approve', authMiddleware, async (req, res) => {
+        try {
+            const { userId } = req.body;
+            if (!userId) return res.status(400).json({ error: 'User ID manquant' });
+            
+            const { approveUser } = require('./services/database');
+            await approveUser(userId);
+            
+            res.json({ success: true, message: 'Accès accordé avec succès' });
+        } catch (e) {
+            console.error('API Approve Error:', e);
+            res.status(500).json({ error: e.message });
+        }
+    });
+
     app.post('/api/users/unblock', authMiddleware, async (req, res) => {
         try {
             const { markUserUnblocked } = require('./services/database');
@@ -349,9 +371,33 @@ function createServer() {
         catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
     });
 
+    let lastCatalogNotificationTime = 0;
+    const CATALOG_NOTIFICATION_COOLDOWN = 10 * 60 * 1000; // 10 minutes
+
     app.post('/api/products', authMiddleware, async (req, res) => {
         try {
+            const isNew = !req.body.id;
             const id = await saveProduct(req.body);
+
+            // Notification automatique si nouveau produit
+            if (isNew) {
+                const now = Date.now();
+                if (now - lastCatalogNotificationTime > CATALOG_NOTIFICATION_COOLDOWN) {
+                    const settings = await getAppSettings();
+                    const msg = settings?.msg_auto_timer || '🔥 <b>Le catalogue est à jour !</b>';
+                    
+                    // On broadcast à tous les utilisateurs
+                    broadcastMessage('users', msg).catch(err => {
+                        console.error('[Auto-Notif] Broadcast failed:', err.message);
+                    });
+                    
+                    lastCatalogNotificationTime = now;
+                    console.log(`[Auto-Notif] Notification "Catalogue à jour" envoyée car nouveau produit #${id} ajouté.`);
+                } else {
+                    console.log(`[Auto-Notif] Notification ignorée (cooldown actif).`);
+                }
+            }
+
             res.json({ success: true, id });
         } catch (e) {
             console.error('Product save error:', e.message);
@@ -369,8 +415,15 @@ function createServer() {
     // ========== Order Routes ==========
 
     app.get('/api/orders', authMiddleware, async (req, res) => {
-        try { res.json(await getAllOrders(parseInt(req.query.limit) || 100)); }
+        try { res.json(await getAllOrders(parseInt(req.query.limit) || 1000)); }
         catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
+    });
+
+    app.get('/api/orders/search', authMiddleware, async (req, res) => {
+        try { 
+            const { searchOrders } = require('./services/database');
+            res.json(await searchOrders(req.query.q)); 
+        } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
     });
 
     app.delete('/api/orders/:id', authMiddleware, async (req, res) => {
@@ -481,9 +534,14 @@ function createServer() {
         try {
             const logPath = path.join(process.cwd(), 'debug.log');
             if (!fs.existsSync(logPath)) return res.send('Aucun log trouvé.');
+            
+            // Read last 1000 lines only for performance
             const content = fs.readFileSync(logPath, 'utf8');
+            const lines = content.split('\n');
+            const lastLines = lines.slice(-1000).join('\n');
+            
             res.header('Content-Type', 'text/plain');
-            res.send(content);
+            res.send(lastLines);
         } catch (e) { res.status(500).send(e.message); }
     });
 
@@ -822,7 +880,8 @@ function createServer() {
         catch (e) { res.status(500).json({ error: e.message }); }
     });
 
-    // ====== MARKETPLACE ======
+    // ========== MARKETPLACE API ==========
+
     // Tous les produits marketplace (optionnel: ?supplier_id=xxx)
     app.get('/api/marketplace/products', authMiddleware, async (req, res) => {
         try { res.json(await getMarketplaceProducts(req.query.supplier_id || null)); }
@@ -875,6 +934,29 @@ function createServer() {
     app.post('/api/marketplace/orders', authMiddleware, async (req, res) => {
         try {
             const result = await createMarketplaceOrder(req.body);
+            
+            // Notify Supplier via Telegram bot
+            const bot = getBotInstance();
+            if (bot && req.body.supplier_id) {
+                const { getSupplier } = require('./services/database');
+                const supplier = await getSupplier(req.body.supplier_id);
+                if (supplier && supplier.telegram_id) {
+                    const productsText = req.body.products.map(p => `• ${p.name} x${p.qty}`).join('\n');
+                    const msg = `📢 <b>NOUVELLE COMMANDE ADMIN</b>\n\n📌 <b>Détails :</b>\n${productsText}\n\n💰 Total : ${req.body.total_price}€\n📦 Commande : #${result.id.slice(-5)}\n📍 Livraison : ${req.body.delivery_type === 'pickup' ? 'RETRAIT SUR PLACE' : req.body.address || 'Non spécifié'}`;
+                    bot.telegram.sendMessage(supplier.telegram_id.replace('telegram_', ''), msg, { 
+                        parse_mode: 'HTML',
+                        reply_markup: {
+                            inline_keyboard: [
+                                [{ text: '✅ Accepter', callback_data: `mp_accept_${result.id}` }, { text: '❌ Refuser', callback_data: `mp_reject_${result.id}` }],
+                                [{ text: '📋 Mes Commandes', callback_data: 'mp_my_orders' }]
+                            ]
+                        }
+                    }).catch(err => {
+                        console.error('[Marketplace Notif] Error notifying supplier:', err.message);
+                    });
+                }
+            }
+            
             res.json({ success: true, order: result });
         } catch (e) { res.status(500).json({ error: e.message }); }
     });
@@ -886,6 +968,8 @@ function createServer() {
             res.json({ success: true });
         } catch (e) { res.status(500).json({ error: e.message }); }
     });
+
+    // ========== FIN MARKETPLACE API ==========
 
     app.use('/api/*', (req, res) => {
         res.status(404).json({ error: 'Route API non trouvée' });

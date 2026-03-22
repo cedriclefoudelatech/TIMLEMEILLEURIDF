@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin Panel - TIM LE MEILLEUR IDF</title>
+    <title id="page_title">Admin Panel</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap"
@@ -22,10 +22,18 @@
             --text-main: #ffffff;
             --text-muted: #9ba1a6;
             --border: rgba(255, 255, 255, 0.08);
-            --glass: blur(25px) saturate(200%);
+            --mp-grad: linear-gradient(135deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02));
+        }
 
-            --grad-1: hsla(339, 100%, 55%, 0.15);
-            --grad-2: hsla(197, 100%, 49%, 0.1);
+        /* --- Marketplace Qty Selector Fix --- */
+        .mp-qty-selector input[type="number"]::-webkit-inner-spin-button, 
+        .mp-qty-selector input[type="number"]::-webkit-outer-spin-button { 
+            -webkit-appearance: none; 
+            margin: 0; 
+        }
+        .mp-qty-selector input[type="number"] {
+            -moz-appearance: textfield;
+            appearance: none;
         }
 
         * {
@@ -1038,15 +1046,33 @@
         }
 
         @media (max-width: 480px) {
+            .mobile-filter-container {
+                flex-direction: column !important;
+                align-items: stretch !important;
+                gap: 15px !important;
+            }
+            .mobile-filter-container .btn-group {
+                width: 100% !important;
+                justify-content: space-between !important;
+            }
+            .mobile-filter-container .btn-group button {
+                flex: 1 !important;
+                min-width: 0 !important;
+                padding: 10px 5px !important;
+                font-size: 11px !important;
+            }
+            #insights-platform-filter {
+                width: 100% !important;
+                height: 44px !important;
+                font-size: 14px !important;
+            }
             .main {
                 padding: 12px;
                 padding-bottom: 100px;
             }
-
             .stat-value {
                 font-size: 28px;
             }
-
             h1, .page-title {
                 font-size: 20px;
             }
@@ -1540,6 +1566,61 @@
             background: var(--border);
             border-radius: 10px;
         }
+
+        /* Toggle Switches */
+        .switch-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border);
+            padding: 14px 18px;
+            border-radius: 12px;
+            transition: all 0.2s ease;
+        }
+        .switch-row:hover {
+            border-color: var(--accent);
+            background: rgba(255, 255, 255, 0.06);
+        }
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 44px;
+            height: 24px;
+        }
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: rgba(255,255,255,0.1);
+            transition: .3s;
+            border-radius: 24px;
+            border: 1px solid var(--border);
+        }
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 2px;
+            bottom: 2px;
+            background-color: white;
+            transition: .3s;
+            border-radius: 50%;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+        }
+        input:checked + .slider {
+            background-color: var(--accent);
+            border-color: var(--accent);
+        }
+        input:checked + .slider:before {
+            transform: translateX(20px);
+        }
     </style>
     <style>
         /* Modern Mobile Overrides & Fixes */
@@ -1627,13 +1708,13 @@
 
     <!-- Mobile Header -->
     <header class="mobile-header">
-        <div class="m-brand" id="mobile_title">TIM LE MEILLEUR IDF</div>
+        <div class="m-brand" id="mobile_title">ADMIN PANEL</div>
         <div class="m-profile">AD</div>
     </header>
 
     <!-- Sidebar Desktop -->
     <aside class="sidebar" id="sidebar">
-        <div class="sidebar-brand" id="brand_name">TIM LE MEILLEUR IDF</div>
+        <div class="sidebar-brand" id="brand_name">ADMIN PANEL</div>
 
         <div class="nav-group">
             <span class="nav-label">Navigation</span>
@@ -1647,8 +1728,8 @@
             <span class="nav-label">Outils</span>
             <a class="nav-item" onclick="switchSection('insights')" id="side-nav-insights"><i>📊</i> Insights</a>
             <a class="nav-item" onclick="switchSection('broadcast')" id="side-nav-broadcast"><i>📣</i> Diffusion</a>
-            <a class="nav-item" onclick="switchSection('suppliers')" id="side-nav-suppliers"><i>🏪</i> Fournisseurs</a>
             <a class="nav-item" onclick="switchSection('features')" id="side-nav-features"><i>📖</i> Guide</a>
+            <a class="nav-item" onclick="switchSection('suppliers')" id="side-nav-suppliers"><i>🏪</i> Fournisseurs</a>
         </div>
 
         <div class="nav-group">
@@ -1662,8 +1743,9 @@
     <!-- Bottom Nav Mobile -->
     <nav class="mobile-nav">
         <a class="m-nav-item active" onclick="switchSection('overview')" id="m-nav-overview"><i>🏠</i><span>Accueil</span></a>
+        <a class="m-nav-item" onclick="switchSection('insights')" id="m-nav-insights"><i>📊</i><span>Stats</span></a>
         <a class="m-nav-item" onclick="switchSection('users')" id="m-nav-users"><i>👥</i><span id="label_users_mobile">Clients</span></a>
-        <a class="m-nav-item" onclick="switchSection('products')" id="m-nav-products"><i>👟</i><span>Produits</span></a>
+        <a class="m-nav-item" onclick="switchSection('products')" id="m-nav-products"><i>👟</i><span>Prod</span></a>
         <a class="m-nav-item" onclick="switchSection('logistique')" id="m-nav-logistique"><i>🛵</i><span>Logs</span></a>
         <a class="m-nav-item" onclick="switchSection('broadcast')" id="m-nav-broadcast"><i>📣</i><span>Diff</span></a>
         <a class="m-nav-item" onclick="switchSection('suppliers')" id="m-nav-suppliers"><i>🏪</i><span>Fourn</span></a>
@@ -1685,35 +1767,35 @@
                     <div class="icon">👥</div>
                     <div>
                         <div class="stat-label">Total Utilisateurs</div>
-                        <div class="stat-value" id="statUsers">-</div>
+                        <div class="stat-value" id="ovStatUsers">-</div>
                     </div>
                 </div>
                 <div class="stat-card stat-active">
                     <div class="icon">⚡</div>
                     <div>
                         <div class="stat-label">Actifs (24h)</div>
-                        <div class="stat-value" id="statActive">-</div>
+                        <div class="stat-value" id="ovStatActive">-</div>
                     </div>
                 </div>
                 <div class="stat-card stat-orders">
                     <div class="icon">📦</div>
                     <div>
                         <div class="stat-label">Commandes</div>
-                        <div class="stat-value" id="statOrders">-</div>
+                        <div class="stat-value" id="ovStatOrders">-</div>
                     </div>
                 </div>
                 <div class="stat-card stat-revenue">
                     <div class="icon">💰</div>
                     <div>
                         <div class="stat-label">Chiffre d'Affaires</div>
-                        <div class="stat-value" id="statCA">-</div>
+                        <div class="stat-value" id="ovStatCA">-</div>
                     </div>
                 </div>
                 <div class="stat-card stat-livreurs">
                     <div class="icon">🚴</div>
                     <div>
                         <div class="stat-label">Livreurs Actifs</div>
-                        <div class="stat-value" id="statLivreurs">-</div>
+                        <div class="stat-value" id="ovStatLivreurs">-</div>
                     </div>
                 </div>
             </div>
@@ -1727,41 +1809,68 @@
                     <p style="color:var(--text-muted); margin-top:5px;">Performance globale de votre bot et logistique.
                     </p>
                 </div>
-                <div style="display:flex; gap:12px; align-items:center;">
+                <div class="mobile-filter-container" style="display:flex; gap:12px; align-items:center; flex-wrap: wrap; justify-content: flex-end;">
+                    <!-- Time Buttons first -->
                     <div class="btn-group"
-                        style="display:flex; gap:5px; background:rgba(255,255,255,0.03); padding:4px; border-radius:14px; border:1px solid var(--border);">
-                        <button class="btn btn-sm btn-outline active" style="min-width:60px;"
+                        style="display:flex; gap:5px; background:rgba(255,255,255,0.03); padding:4px; border-radius:14px; border:1px solid var(--border); overflow-x: auto;">
+                        <button class="btn btn-sm btn-outline active" style="min-width:55px;"
                             onclick="setTimeframe('hour', this)">Heure</button>
-                        <button class="btn btn-sm btn-outline" style="min-width:60px;"
+                        <button class="btn btn-sm btn-outline" style="min-width:55px;"
                             onclick="setTimeframe('day', this)">Jour</button>
-                        <button class="btn btn-sm btn-outline" style="min-width:60px;"
+                        <button class="btn btn-sm btn-outline" style="min-width:55px;"
                             onclick="setTimeframe('week', this)">Smn.</button>
-                        <button class="btn btn-sm btn-outline" style="min-width:60px;"
+                        <button class="btn btn-sm btn-outline" style="min-width:55px;"
                             onclick="setTimeframe('month', this)">Mois</button>
-                        <button class="btn btn-sm btn-outline" style="min-width:60px;"
+                        <button class="btn btn-sm btn-outline" style="min-width:55px;"
                             onclick="setTimeframe('year', this)">An</button>
                     </div>
-                    <button class="btn btn-accent" onclick="exportAnalyticsCSV()">📥 CSV</button>
+
+                    <div style="display:flex; gap:10px; align-items:center; flex: 1; min-width: 200px;">
+                        <select id="insights-platform-filter" onchange="renderMainChart(window.currentTimeframe || 'hour')" 
+                            style="background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.2); border-radius:12px; padding:0 15px; color:white; font-size:14px; font-weight:600; cursor:pointer; flex: 1; height: 42px; appearance: none; background-image: url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23FFFFFF%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E'); background-repeat: no-repeat; background-position: right 12px top 50%; background-size: 12px auto;">
+                            <option value="all" style="background:#222; color:#fff;">📱 Toutes Plateformes</option>
+                            <option value="telegram" style="background:#222; color:#fff;">🔹 Telegram Only</option>
+                            <option value="whatsapp" style="background:#222; color:#fff;">🔸 WhatsApp Only</option>
+                        </select>
+                        <button class="btn btn-accent" style="height: 42px; border-radius:12px; padding: 0 20px;" onclick="exportAnalyticsCSV()">📥 CSV</button>
+                    </div>
                 </div>
             </div>
 
-            <div class="stats-grid"
-                style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)) !important; gap:15px; margin-bottom:25px;">
+            <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)) !important; gap:12px; margin-bottom:25px;">
                 <div class="stat-card premium-card">
-                    <div class="stat-label">Temps Moyen</div>
-                    <div class="stat-value" id="avg-delivery-time" style="color:var(--success);">—</div>
-                    <div style="font-size:10px; color:var(--text-muted);">Moyenne de livraison</div>
+                    <div class="stat-label">Total Utilisateurs</div>
+                    <div class="stat-value" id="statUsers" style="font-size:24px;">-</div>
+                </div>
+                <div class="stat-card premium-card">
+                    <div class="stat-label">Actifs (24h)</div>
+                    <div class="stat-value" id="statActive" style="font-size:24px;">-</div>
+                </div>
+                <div class="stat-card premium-card" style="border-color: var(--accent);">
+                    <div class="stat-label">CA Global</div>
+                    <div class="stat-value" id="statCA" style="font-size:24px; color:var(--accent);">-</div>
+                </div>
+                <div class="stat-card premium-card">
+                    <div class="stat-label">Panier Moyen</div>
+                    <div class="stat-value" id="avg-basket-size" style="font-size:24px; color:var(--accent);">—</div>
+                    <div id="avg-basket-platform" style="font-size:10px; opacity:0.5; margin-top:5px;">Toutes plateformes</div>
+                </div>
+                <div class="stat-card premium-card">
+                    <div class="stat-label">Livraison Moyenne</div>
+                    <div class="stat-value" id="avg-delivery-time" style="font-size:24px; color:var(--success);">—</div>
                 </div>
                 <div class="stat-card premium-card">
                     <div class="stat-label">Commandes</div>
-                    <div class="stat-value" id="insights-total-orders">—</div>
-                    <div style="font-size:10px; color:var(--text-muted);">Volume total</div>
+                    <div class="stat-value" id="insights-total-orders" style="font-size:24px;">—</div>
                 </div>
                 <div class="stat-card premium-card">
-                    <div class="stat-label">Secteurs</div>
-                    <div class="stat-value" id="insights-total-cities">—</div>
-                    <div style="font-size:10px; color:var(--text-muted);">Zones actives</div>
+                    <div class="stat-label">Secteurs Actifs</div>
+                    <div class="stat-value" id="insights-total-cities" style="font-size:24px;">—</div>
                 </div>
+            </div>
+
+            <div class="section-header" style="margin-top:20px; margin-bottom:15px;">
+                <h3 style="margin:0; font-size:16px; opacity:0.8;">📈 Graphiques de Performance</h3>
             </div>
 
             <div class="stats-grid stats-grid-large" id="insights_charts_grid" style="gap:25px; margin-bottom:30px;">
@@ -1789,10 +1898,6 @@
                     <h3 style="margin-bottom:20px; font-size:18px;">📱 CA par Plateforme</h3>
                     <div style="flex-grow:1; position:relative; min-height:250px;">
                         <canvas id="canvas-platforms"></canvas>
-                    </div>
-                    <div style="margin-top:20px; display:flex; justify-content:space-between; font-size:12px;">
-                        <div id="stat-tg-basket">TG Basket: --</div>
-                        <div id="stat-wa-basket">WA Basket: --</div>
                     </div>
                 </div>
             </div>
@@ -1828,19 +1933,28 @@
                 <div style="display:flex; gap:10px; align-items:center; flex-wrap: wrap; justify-content: center;">
                     <button class="btn btn-sm btn-accent" onclick="addUserManually()">➕ Ajouter</button>
                     <span id="usersTotalCounter"
-                        style="background:var(--accent); color:white; padding:4px 12px; border-radius:20px; font-size:14px; font-weight:700;">Chargement...</span>
+                        style="background:rgba(255,255,255,0.05); color:white; padding:4px 12px; border-radius:10px; font-size:13px; font-weight:700; border:1px solid var(--border);">Chargement...</span>
+                    <span id="usersBlockedCounter"
+                        style="background:rgba(255,0,0,0.1); color:#ff4444; padding:4px 12px; border-radius:10px; font-size:13px; font-weight:700; border:1px solid rgba(255,0,0,0.3);">Bloqués: -</span>
+                    <span id="usersTgCounter"
+                        style="background:rgba(0,136,204,0.1); color:#0088cc; padding:4px 12px; border-radius:10px; font-size:13px; font-weight:700; border:1px solid rgba(0,136,204,0.3);">TG: -</span>
+                    <span id="usersWaCounter"
+                        style="background:rgba(37,211,102,0.1); color:#25D366; padding:4px 12px; border-radius:10px; font-size:13px; font-weight:700; border:1px solid rgba(37,211,102,0.3);">WA: -</span>
                 </div>
             </div>
             <div class="search-container">
-                <div class="section-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
-                    <div class="search-box" style="flex:1;">
+                <div class="section-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; gap:15px; flex-wrap:wrap;">
+                    <div style="display:flex; background:var(--hover); padding:4px; border-radius:12px; gap:4px;">
+                        <button class="btn btn-sm btn-outline active" id="btn-user-tab-active" onclick="switchUserTab('active')">👥 Clients</button>
+                        <button class="btn btn-sm btn-outline" id="btn-user-tab-blocked" onclick="switchUserTab('blocked')">🚫 Bloqués</button>
+                    </div>
+                    <div class="search-box" style="flex:1; min-width:200px;">
                         <input type="text" id="user-search" placeholder="Rechercher par nom, username ou ID..."
                             onkeyup="searchUsersUI()">
                         <div class="search-icon">🔍</div>
                     </div>
                     <button class="btn btn-outline btn-sm" onclick="syncAllUsersStatus()"
-                        style="margin-left:15px; height:45px; border-color:var(--accent); color:var(--accent)">🔄 Sync
-                        tous</button>
+                        style="height:45px; border-color:var(--accent); color:var(--accent)">🔄 Sync tous</button>
                 </div>
                 <table class="responsive-table">
                     <thead>
@@ -1902,11 +2016,18 @@
                     <input type="hidden" id="edit_prod_id">
 
                     <!-- ═══ ESSENTIEL : Nom + Prix + Photo ═══ -->
-                    <div style="display:flex; gap:12px; margin-bottom:14px;">
                         <div style="flex:1;">
                             <label style="font-size:12px; font-weight:600;">Nom *</label>
-                            <input id="prod_name" placeholder="ex: Jordan 4 Midnight Navy" style="margin-bottom:0; font-size:15px; font-weight:600;">
+                            <input id="prod_name" placeholder="ex: Jordan 4 Midnight Navy" style="margin-bottom:8px; font-size:15px; font-weight:600;">
                         </div>
+                    </div>
+
+                    <!-- Fournisseur (Sorti des options avancées pour visibilité) -->
+                    <div style="margin-bottom:14px;">
+                        <label style="font-size:12px; font-weight:600;">🏪 Fournisseur (Optionnel)</label>
+                        <select id="prod_supplier_id" style="margin-bottom:0; font-size:14px; background:rgba(255,255,255,0.05); border:1px solid var(--border); border-radius:10px; height:40px; color:white; width:100%; cursor:pointer;">
+                            <option value="">Aucun (vente directe)</option>
+                        </select>
                     </div>
 
                     <div style="display:flex; gap:12px; margin-bottom:14px;">
@@ -1929,8 +2050,7 @@
                                 onchange="handleFileUpload(this, 'prod')">
                             <div id="prod_preview" style="display:flex; flex-wrap:wrap; justify-content:center;"></div>
                         </div>
-                        <label style="font-size:10px; opacity:0.6; margin-top:5px; display:block;">JSON des Médias (Photo/Vidéo)</label>
-                        <textarea id="prod_image_url" placeholder='[{"url":"...","type":"photo"}]' style="height:35px; font-family:monospace; font-size:9px; background:rgba(255,255,255,0.02); min-height:unset; resize:vertical;"></textarea>
+                        <input type="hidden" id="prod_image_url">
                     </div>
 
                     <!-- ═══ OPTIONS AVANCÉES (accordéon) ═══ -->
@@ -1967,13 +2087,6 @@
                                 <input type="text" id="prod_promo" placeholder="ex: -10% ou PROMO 15€" style="margin-bottom:0; font-size:12px;">
                             </div>
 
-                            <!-- Fournisseur -->
-                            <div style="margin-bottom:14px;">
-                                <label style="font-size:11px;">🏪 Fournisseur</label>
-                                <select id="prod_supplier_id" style="margin-bottom:0; font-size:12px;">
-                                    <option value="">Aucun (vente directe)</option>
-                                </select>
-                            </div>
 
                             <!-- 🎁 CADEAU -->
                             <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px; background:rgba(255,165,0,0.06); padding:8px 10px; border-radius:8px; cursor:pointer;" onclick="document.getElementById('prod_is_bundle').click()">
@@ -2059,41 +2172,38 @@
             </div>
 
             <!-- Sub-section: Orders -->
-            <div id="sub-logistics-orders">
-                <div class="flex flex-mobile-column justify-between" style="margin-bottom:20px;">
-                    <div class="flex flex-wrap" style="gap:10px; align-items:center;">
+                <div class="flex flex-mobile-column justify-between items-center" style="margin-bottom:20px; gap:15px; flex-wrap:wrap;">
+                    <div class="flex flex-wrap" style="gap:10px; align-items:center; flex:1;">
                         <span id="orderTotalSum"
-                            style="background:var(--accent); color:white; padding:6px 15px; border-radius:30px; font-weight:bold; font-size:15px; white-space: nowrap;">—
-                            €</span>
-                        <div style="background:rgba(255,255,255,0.05); padding:5px; border-radius:10px; display:flex; gap:5px; overflow-x: auto; max-width: 100%;"
-                            id="orderFilterContainer">
-                            <button class="btn btn-sm btn-outline"
-                                onclick="filterData('orders', 'today', this)">Aujourd'hui</button>
-                            <button class="btn btn-sm btn-outline"
-                                onclick="filterData('orders', 'week', this)">Semaine</button>
-                            <button class="btn btn-sm btn-outline"
-                                onclick="filterData('orders', 'month', this)">Mois</button>
-                            <button class="btn btn-sm btn-outline active"
-                                onclick="filterData('orders', 'all', this)">Tout</button>
+                            style="background:var(--accent); color:white; padding:6px 15px; border-radius:30px; font-weight:bold; font-size:15px; white-space: nowrap;">— €</span>
+                        <div class="search-box" style="width:250px;">
+                            <input type="text" id="order-search" placeholder="ID ou Produit..." onkeyup="searchOrdersUI()">
+                            <div class="search-icon">🔍</div>
                         </div>
                     </div>
-                    <button class="btn btn-accent" onclick="loadData('orders')">🔄 Rafraîchir</button>
+                    <div style="display:flex; gap:10px; align-items:center;">
+                        <div style="background:rgba(255,255,255,0.05); padding:5px; border-radius:10px; display:flex; gap:5px; overflow-x: auto;" id="orderFilterContainer">
+                            <button class="btn btn-sm btn-outline" onclick="filterData('orders', 'today', this)">Aujourd'hui</button>
+                            <button class="btn btn-sm btn-outline active" onclick="filterData('orders', 'all', this)">Tout</button>
+                        </div>
+                        <button class="btn btn-accent btn-sm" onclick="loadData('orders')">🔄</button>
+                    </div>
                 </div>
-                <div class="card">
-                    <table id="orderTable" class="responsive-table">
+                <div class="card" style="padding: 15px; overflow-x: auto;">
+                    <table id="orderTable" class="responsive-table" style="min-width: 1000px;">
                         <thead>
-                            <tr>
-                                <th>Source</th>
-                                <th>Client</th>
-                                <th>Détails</th>
-                                <th>Total</th>
-                                <th>Adresse</th>
-                                <th>Ville</th>
-                                <th>Date</th>
-                                <th>Livré à</th>
-                                <th>Avis</th>
-                                <th>Statut</th>
-                                <th>Action</th>
+                            <tr style="background: rgba(255,255,255,0.05);">
+                                <th style="padding:15px; border-bottom:1px solid #333;">SRC (V.2)</th>
+                                <th style="padding:15px; border-bottom:1px solid #333;">CLIENT</th>
+                                <th style="padding:15px; border-bottom:1px solid #333;">ACTION (🔥)</th>
+                                <th style="padding:15px; border-bottom:1px solid #333;">STATUT</th>
+                                <th style="padding:15px; border-bottom:1px solid #333;">DÉTAILS</th>
+                                <th style="padding:15px; border-bottom:1px solid #333;">TOTAL</th>
+                                <th style="padding:15px; border-bottom:1px solid #333;">ADRESSE</th>
+                                <th style="padding:15px; border-bottom:1px solid #333;">VILLE</th>
+                                <th style="padding:15px; border-bottom:1px solid #333;">DATE</th>
+                                <th style="padding:15px; border-bottom:1px solid #333;">LIVRÉ À</th>
+                                <th style="padding:15px; border-bottom:1px solid #333;">AVIS</th>
                             </tr>
                         </thead>
                         <tbody></tbody>
@@ -2118,8 +2228,8 @@
                     </div>
                     <button class="btn btn-accent" onclick="loadData('livreurs')">🔄 Rafraîchir</button>
                 </div>
-                <div class="card" style="margin-bottom:20px">
-                    <table class="responsive-table" style="width:100%;border-collapse:collapse">
+                <div class="card" style="margin-bottom:20px; padding: 15px; overflow-x: auto;">
+                    <table class="responsive-table" style="width:100%; border-collapse:collapse; min-width: 600px;">
                         <thead>
                             <tr style="border-bottom:1px solid var(--border)">
                                 <th style="padding:10px;text-align:left">Livreur</th>
@@ -2139,8 +2249,8 @@
                     <div class="stat-badge">⭐️ <span id="log-total-reviews">0</span> avis reçus</div>
                     <button class="btn btn-accent" onclick="loadData('reviews')">🔄 Rafraîchir</button>
                 </div>
-                <div class="card">
-                    <table class="responsive-table" id="reviewsTable">
+                <div class="card" style="padding: 15px; overflow-x: auto;">
+                    <table class="responsive-table" id="reviewsTable" style="min-width: 800px;">
                         <thead>
                             <tr>
                                 <th>Date</th>
@@ -2334,12 +2444,12 @@
         </section>
 
         <!-- SECTION: Fournisseurs -->
-        <div id="section-suppliers" class="section">
+        <section class="section" id="section-suppliers">
             <div class="card" style="margin-bottom:20px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
                     <h1 style="margin:0;">🏪 Fournisseurs</h1>
-                    <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-                        <button class="btn btn-outline" onclick="switchSupplierTab('list')" id="tabBtnList" style="font-weight:600; background:rgba(106,90,205,0.15);">📋 Liste</button>
+                    <div style="display:flex; gap:8px;">
+                        <button class="btn btn-outline" onclick="switchSupplierTab('list')" id="tabBtnList" style="font-weight:600;">👥 Fournisseurs</button>
                         <button class="btn btn-outline" onclick="switchSupplierTab('marketplace')" id="tabBtnMarketplace">🏪 Marketplace</button>
                         <button class="btn btn-outline" onclick="switchSupplierTab('mpOrders')" id="tabBtnMpOrders">📋 Commandes</button>
                         <button class="btn btn-primary" onclick="openSupplierForm()">➕ Ajouter</button>
@@ -2348,7 +2458,7 @@
             </div>
 
             <!-- Onboarding Guide -->
-            <div class="card" style="margin-bottom:20px; border-left:4px solid var(--accent);">
+            <div id="supplierGuideCard" class="card" style="margin-bottom:20px; border-left:4px solid var(--accent);">
                 <h3>📘 Guide Fournisseur : Comment ça marche ?</h3>
                 <p style="font-size:13px; margin-top:10px;">
                     <b>1. Mise en place :</b> Ajoutez un fournisseur ici (ou directement depuis l'onglet <b>Utilisateurs</b> via le bouton <b>🏪 Fournisseur</b>) avec son <b>Nom</b> et son <b>ID Telegram</b> (marqué comme <b>Actif ✅</b>).
@@ -2414,7 +2524,17 @@
                     <div id="mpCartItems" style="flex:1; overflow-y:auto; margin-bottom:20px;">
                         <p style="text-align:center; color:var(--text-muted); margin-top:100px;">Panier vide 📭</p>
                     </div>
-                    <div id="mpCartSummary" style="border-top:1px solid var(--border); padding-top:20px;">
+                    <div id="mpCartSummary" style="border-top:1px solid var(--border); padding-top:15px;">
+                        <div style="margin-bottom:15px;">
+                            <label style="display:block; font-size:12px; font-weight:600; margin-bottom:5px; color:var(--text-muted);">📍 Adresse de livraison :</label>
+                            <input type="text" id="mpOrderAddress" class="form-control" placeholder="Ex: 123 Rue de Rivoli, Paris" style="padding:10px; font-size:13px; margin-bottom:10px;">
+                            
+                            <label style="display:block; font-size:12px; font-weight:600; margin-bottom:5px; color:var(--text-muted);">🚚 Mode de livraison :</label>
+                            <select id="mpOrderDeliveryType" class="form-control" style="padding:10px; font-size:13px;">
+                                <option value="delivery">🚀 Livraison (Chez vous)</option>
+                                <option value="pickup">🏁 Click & Collect (Sur place)</option>
+                            </select>
+                        </div>
                         <div style="display:flex; justify-content:space-between; font-weight:bold; font-size:18px; margin-bottom:15px;">
                             <span>Total :</span>
                             <span id="mpCartTotal">0.00€</span>
@@ -2448,7 +2568,8 @@
                     <div id="mpOrdersList"></div>
                 </div>
             </div>
-        </div>
+
+        </section>
 
         <!-- FEATURES / GUIDE -->
         <section class="section" id="section-features">
@@ -2587,6 +2708,10 @@
                         <label>Titre Dashboard</label>
                         <input id="set_title">
                     </div>
+                    <div style="grid-column: span 2;">
+                        <label>URL du Dashboard (utilisée pour les liens externes)</label>
+                        <input id="set_dashboard_url" placeholder="https://votre-app.railway.app/dashboard">
+                    </div>
                 </div>
                 <label style="margin-top:15px;">Couleur Accent</label>
                 <input type="color" id="set_color" style="height:45px; padding:5px; max-width:120px;">
@@ -2639,13 +2764,104 @@
                     </div>
                 </div>
 
-                <h3 style="margin-top:25px;">Liens</h3>
-                <label>URL du Dashboard (pour le bot)</label>
-                <input id="set_dashboard_url" placeholder="https://votre-domaine.com/dashboard">
-                <label style="margin-top:10px;">Lien Contact Privé (Telegram)</label>
-                <input id="set_private_contact_url" placeholder="https://t.me/votre_profil">
-                <label style="margin-top:10px;">Lien Canal Telegram</label>
-                <input id="set_channel_url" placeholder="https://t.me/votre_canal">
+                <div style="display:flex; flex-direction:column; gap:15px; margin-top:20px;">
+                    <div>
+                        <label>✉️ Lien Contact Privé (Telegram)</label>
+                        <input id="set_private_contact_url" placeholder="https://t.me/nom_utilisateur">
+                        <small style="opacity:0.6;">C'est le lien vers votre compte privé Telegram, PAS vers le canal.</small>
+                    </div>
+                    <div>
+                        <label>✉️ Lien Contact Privé (WhatsApp)</label>
+                        <input id="set_private_contact_wa_url" placeholder="https://wa.me/33612345678">
+                    </div>
+                    <div>
+                        <label>📢 Lien Canal Telegram</label>
+                        <input id="set_channel_url" placeholder="https://t.me/+votre_lien_canal">
+                        <small style="opacity:0.6;">Utilisé pour les boutons "Canal" du bot.</small>
+                    </div>
+                </div>
+
+                <h3 style="margin-top:25px; margin-bottom:15px; font-size:18px;">Activation des plateformes & services</h3>
+                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:12px;">
+                    <div class="switch-row">
+                        <div class="flex align-center gap-10">
+                            <span style="font-size:20px;">🔹</span>
+                            <div>
+                                <div style="font-weight:600; font-size:14px;">Bot Telegram</div>
+                                <div style="font-size:12px; opacity:0.6;">Activer/Désactiver le canal TG</div>
+                            </div>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="set_enable_telegram">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div class="switch-row">
+                        <div class="flex align-center gap-10">
+                            <span style="font-size:20px;">🔸</span>
+                            <div>
+                                <div style="font-weight:600; font-size:14px;">Bot WhatsApp</div>
+                                <div style="font-size:12px; opacity:0.6;">Activer/Désactiver le service WA</div>
+                            </div>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="set_enable_whatsapp">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div class="switch-row">
+                        <div class="flex align-center gap-10">
+                            <span style="font-size:20px;">🏪</span>
+                            <div>
+                                <div style="font-weight:600; font-size:14px;">Marketplace</div>
+                                <div style="font-size:12px; opacity:0.6;">Ventes par fournisseurs externes</div>
+                            </div>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="set_enable_marketplace">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div class="switch-row">
+                        <div class="flex align-center gap-10">
+                            <span style="font-size:20px;">⭐</span>
+                            <div>
+                                <div style="font-weight:600; font-size:14px;">Points Fidélité</div>
+                                <div style="font-size:12px; opacity:0.6;">Système de récompenses</div>
+                            </div>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="set_enable_fidelity">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div class="switch-row">
+                        <div class="flex align-center gap-10">
+                            <span style="font-size:20px;">🎁</span>
+                            <div>
+                                <div style="font-weight:600; font-size:14px;">Parrainage</div>
+                                <div style="font-size:12px; opacity:0.6;">Gagnez du crédit en invitant</div>
+                            </div>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="set_enable_referral">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div class="switch-row">
+                        <div class="flex align-center gap-10">
+                            <span style="font-size:20px;">❓</span>
+                            <div>
+                                <div style="font-weight:600; font-size:14px;">Menu Aide</div>
+                                <div style="font-size:12px; opacity:0.6;">Guides et support direct</div>
+                            </div>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="set_enable_help_menu">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                </div>
 
                 <button class="btn btn-accent" style="margin-top:20px;" onclick="saveSettings()">Sauvegarder</button>
             </div>
@@ -3093,11 +3309,9 @@
                     <div><label>Libellé 'Pris en Charge'</label><input id="set_status_taken_label"
                             placeholder="PRIS EN CHARGE"></div>
                     <div><label>Icône 'Pris en Charge'</label><input id="set_ui_icon_taken" placeholder="🚚"></div>
-                    <div><label>Libellé 'Livrée'</label><input id="set_status_delivered_label" placeholder="LIVRÉE">
-                    </div>
+                    <div><label>Libellé 'Livrée'</label><input id="set_status_delivered_label" placeholder="LIVRÉE"></div>
                     <div><label>Icône 'Succès / Livré'</label><input id="set_ui_icon_success" placeholder="✅"></div>
-                    <div><label>Libellé 'Annulée'</label><input id="set_status_cancelled_label" placeholder="ANNULÉE">
-                    </div>
+                    <div><label>Libellé 'Annulée'</label><input id="set_status_cancelled_label" placeholder="ANNULÉE"></div>
                     <div><label>Icône 'Erreur / Annulée'</label><input id="set_ui_icon_error" placeholder="❌"></div>
                 </div>
 
@@ -3107,28 +3321,53 @@
             <!-- Onglet Automatisations -->
             <div id="sub-settings-auto" class="card" style="display:none;">
                 <h3>Automatisations & Relances (Push)</h3>
-                <div
-                    style="background:rgba(255,255,255,0.05); padding:20px; border-radius:12px; border:1px solid var(--border);">
+                <div style="background:rgba(255,255,255,0.05); padding:20px; border-radius:12px; border:1px solid var(--border);">
                     <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:15px;">
                         <div>
                             <h4 style="margin:0;">🛒 Panier Abandonné</h4>
-                            <p style="margin:5px 0 0; font-size:12px; opacity:0.6;">Envoyé automatiquement après 30
-                                minutes d'inactivité.</p>
+                            <p style="margin:5px 0 0; font-size:12px; opacity:0.6;">Envoyé automatiquement après 30 minutes d'inactivité.</p>
                         </div>
                         <div class="checkbox-wrapper">
-                            <input type="checkbox" id="set_enable_abandoned_cart_notifications"
-                                style="width: 20px; height: 20px;">
+                            <input type="checkbox" id="set_enable_abandoned_cart_notifications" style="width: 20px; height: 20px;">
                         </div>
                     </div>
-
                     <label>Message de relance</label>
-                    <textarea id="set_msg_abandoned_cart" style="height:100px; margin-top:8px;"
-                        placeholder="Votre panier vous attend ! ..."></textarea>
-                    <small style="opacity:0.6;">Utilisez du HTML pour le formatage (<b>gras</b>,
-                        <i>italique</i>).</small>
+                    <textarea id="set_msg_abandoned_cart" style="height:100px; margin-top:8px;" placeholder="Votre panier vous attend ! ..."></textarea>
                 </div>
 
-                <button class="btn btn-accent" style="margin-top:20px;" onclick="saveSettings()">Sauvegarder</button>
+                <div style="background:rgba(255,255,255,0.05); padding:20px; border-radius:12px; border:1px solid var(--border); margin-top:20px;">
+                    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:15px;">
+                        <div>
+                            <h4 style="margin:0;">📢 Abonnement Canal Obligatoire</h4>
+                            <p style="margin:5px 0 0; font-size:12px; opacity:0.6;">Bloque l'accès au bot tant que l'utilisateur n'a pas rejoint votre canal.</p>
+                        </div>
+                        <div class="checkbox-wrapper">
+                            <input type="checkbox" id="set_force_subscribe" style="width: 20px; height: 20px;">
+                        </div>
+                    </div>
+                    <label>ID du Canal (Telegram)</label>
+                    <input id="set_force_subscribe_channel_id" placeholder="ex: -100123456789">
+                    <small style="opacity:0.6;">L'ID doit commencer par -100. Le bot doit être admin du canal.</small>
+                </div>
+                </div>
+
+                <div style="background:rgba(255,255,255,0.05); padding:20px; border-radius:12px; border:1px solid var(--border); margin-top:20px;">
+                    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:15px;">
+                        <div>
+                            <h4 style="margin:0;">🚀 Livraison Prioritaire</h4>
+                            <p style="margin:5px 0 0; font-size:12px; opacity:0.6;">Permet aux clients de payer un supplément pour passer en priorité.</p>
+                        </div>
+                        <div class="checkbox-wrapper">
+                            <input type="checkbox" id="set_priority_delivery_enabled" style="width: 20px; height: 20px;">
+                        </div>
+                    </div>
+                    <div style="max-width:200px;">
+                        <label>Prix de l'option (€)</label>
+                        <input type="number" id="set_priority_delivery_price" placeholder="ex: 15">
+                    </div>
+                </div>
+
+                <button class="btn btn-accent" style="margin-top:20px;" onclick="saveSettings()">Sauvegarder tout</button>
             </div>
 
             <!-- Onglet Zone Danger -->
@@ -3258,6 +3497,7 @@
             return new Date(val);
         }
 
+        window.switchSection = switchSection;
         async function switchSection(id) {
             // Mapping for titles
             const titles = {
@@ -3351,22 +3591,63 @@
                 }
 
                 return `
-                <tr>
-                    <td data-label="Source"><span class="badge" style="background:${o.platform === 'whatsapp' ? 'rgba(37,211,102,0.1)' : 'rgba(0,136,204,0.1)'}; color:${o.platform === 'whatsapp' ? '#25D366' : '#0088cc'}; border:1px solid currentColor; font-size:9px; font-weight:800; padding:1px 5px;">${o.platform?.toUpperCase() || 'TG'}</span></td>
-                    <td data-label="Client"><b>${o.first_name}</b></td>
-                    <td data-label="Détails">${o.product_name} (x${o.quantity})</td>
-                    <td data-label="Total"><b>${o.total_price}€</b></td>
-                    <td data-label="Adresse"><small style="font-size:11px; white-space: normal; display: block; max-width: 150px;">${o.address || '—'}</small></td>
-                    <td data-label="Ville"><small>${o.city || '—'}</small></td>
-                    <td data-label="Date">
+                <tr style="border-bottom: 2px solid #222;">
+                    <td><span class="badge" style="background:${o.platform === 'whatsapp' ? 'rgba(37,211,102,0.1)' : 'rgba(0,136,204,0.1)'}; color:${o.platform === 'whatsapp' ? '#25D366' : '#0088cc'}; border:1px solid currentColor; font-size:9px; font-weight:800; padding:1px 5px;">${o.platform?.toUpperCase() || 'TG'}</span></td>
+                    <td><b>${o.first_name}</b></td>
+                    <td style="background: rgba(255,165,0,0.05); min-width: 160px;">
+                        <div style="display:flex; flex-direction:column; gap:4px;">
+                            ${o.is_approved === false ? `
+                                <button class="btn btn-accent btn-sm" style="width:100%; background:linear-gradient(135deg, #00b400, #008000); box-shadow:0 4px 10px rgba(0,180,0,0.3);" onclick="approveUserAccount('${o.user_id}', '${o.first_name}')">✅ ACCORDER L'ACCÈS</button>
+                            ` : ''}
+                            <select onchange="updateOrderStatus('${o.id}', this.value)" style="margin:0; padding:4px; font-size:11px; width:100%;">
+                                <option value="pending" ${o.status === 'pending' ? 'selected' : ''}>${s.status_pending_label || 'EN ATTENTE'}</option>
+                                <option value="taken" ${o.status === 'taken' ? 'selected' : ''}>${s.status_taken_label || 'PRIS EN CHARGE'}</option>
+                                <option value="arrival_1h" ${o.status === 'arrival_1h' ? 'selected' : ''}>🚚 Arrivée -1h</option>
+                                <option value="arrival_30min" ${o.status === 'arrival_30min' ? 'selected' : ''}>⏳ 30 min</option>
+                                <option value="arrival_10min" ${o.status === 'arrival_10min' ? 'selected' : ''}>⏳ 10 min</option>
+                                <option value="arrival_5min" ${o.status === 'arrival_5min' ? 'selected' : ''}>⚡ 5 min</option>
+                                <option value="arrived" ${o.status === 'arrived' ? 'selected' : ''}>📍 Arrivé</option>
+                                <option value="delivered" ${o.status === 'delivered' ? 'selected' : ''}>${s.status_delivered_label || 'LIVRÉE'}</option>
+                                <option value="cancelled" ${o.status === 'cancelled' ? 'selected' : ''}>${s.status_cancelled_label || 'ANNULÉE'}</option>
+                            </select>
+                            <div style="margin-top:4px;">
+                                ${!o.livreur_name ? `
+                                    <select onchange="assignDriver('${o.id}', this.value, this.options[this.selectedIndex].text)" style="margin:0; padding:4px; font-size:10px; background:rgba(255,165,0,0.1); border:1px solid orange; width:100%;">
+                                        <option value="">👤 Assigner livreur...</option>
+                                        ${livreurOptions}
+                                    </select>
+                                ` : `
+                                    <div style="display:flex; flex-direction:column; gap:4px;">
+                                        <small style="font-size:10px; color:var(--accent); font-weight:900; background:rgba(0,180,255,0.05); padding:4px; border-radius:4px;">🚴 ${o.livreur_name}</small>
+                                        <button class="btn btn-sm" style="padding:2px 8px; font-size:10px; background:rgba(255,165,0,0.1); border:1px solid orange; color:orange; font-weight:700;" onclick="assignDriver('${o.id}', '', '')" title="Réassigner">🔄 Réassigner</button>
+                                    </div>
+                                `}
+                            </div>
+                            <button class="btn btn-outline btn-sm" style="color:var(--danger); margin-top:5px; border-color:rgba(255,0,0,0.2); width:100%;" onclick="delOrder('${o.id}')">🗑️ Supprimer</button>
+                        </div>
+                    </td>
+                    <td style="text-align:center;">
+                        <span class="badge badge-${o.status}">${label}</span>
+                        ${(() => {
+                            if (!o.created_at) return '';
+                            const diff = (new Date() - new Date(o.created_at)) / (1000 * 60 * 60);
+                            if (diff < 24) return `<div style="margin-top:4px; font-size:10px; font-weight:900; color:#ff0050; border:1px solid #ff0050; border-radius:4px; padding:1px 4px; display:inline-block;">🔥 NOUVEAU (-24H)</div>`;
+                            return '';
+                        })()}
+                    </td>
+                    <td>${o.product_name} (x${o.quantity})</td>
+                    <td><b>${o.total_price}€</b></td>
+                    <td><small style="font-size:11px; white-space: normal; display: block; max-width: 150px;">${o.address || '—'}</small></td>
+                    <td><small>${o.city || '—'}</small></td>
+                    <td>
                         <small>🕐 ${createdTime}</small>
                         ${o.scheduled_at ? `<br><span style="padding:2px 6px; background:rgba(255,165,0,0.2); border:1px solid orange; color:orange; font-size:10px; border-radius:4px; font-weight:bold; margin-top:4px; display:inline-block;">📅 ${o.scheduled_at}</span>` : ''}
                     </td>
-                    <td data-label="Livré à">
+                    <td>
                         <small>${o.status === 'delivered' ? '✅ ' + deliveredTime : (o.livreur_name ? '⏳ En cours' : '—')}</small>
                         ${o.livreur_name ? `<br><small style="color:var(--accent); font-weight:700;">🚴 ${o.livreur_name}</small>` : ''}
                     </td>
-                    <td data-label="Avis/Suivi">
+                    <td>
                         ${o.feedback_rating ? `
                             <div style="color:orange; font-size:12px; font-weight:bold;">${'⭐'.repeat(o.feedback_rating)}</div>
                             <div style="font-size:11px; font-style:italic; color:var(--text-muted); line-height:1.2; max-width:150px;">"${o.feedback_text || ''}"</div>
@@ -3387,36 +3668,6 @@
                         ` : ''}
 
                         ${(!o.feedback_rating && !o.delay_reason && !o.client_reply && (!o.help_requests || o.help_requests.length === 0)) ? '<small style="color:var(--text-muted)">—</small>' : ''}
-                    </td>
-                    <td data-label="Statut"><span class="badge badge-${o.status}">${label}</span></td>
-                    <td data-label="Action">
-                        <div style="display:flex; flex-direction:column; gap:4px;">
-                            <select onchange="updateOrderStatus('${o.id}', this.value)" style="margin:0; padding:4px; font-size:11px;">
-                                <option value="pending" ${o.status === 'pending' ? 'selected' : ''}>${s.status_pending_label || 'EN ATTENTE'}</option>
-                                <option value="taken" ${o.status === 'taken' ? 'selected' : ''}>${s.status_taken_label || 'PRIS EN CHARGE'}</option>
-                                <option value="arrival_1h" ${o.status === 'arrival_1h' ? 'selected' : ''}>🚚 Arrivée -1h</option>
-                                <option value="arrival_30min" ${o.status === 'arrival_30min' ? 'selected' : ''}>⏳ 30 min</option>
-                                <option value="arrival_10min" ${o.status === 'arrival_10min' ? 'selected' : ''}>⏳ 10 min</option>
-                                <option value="arrival_5min" ${o.status === 'arrival_5min' ? 'selected' : ''}>⚡ 5 min</option>
-                                <option value="arrived" ${o.status === 'arrived' ? 'selected' : ''}>📍 Arrivé</option>
-                                <option value="delivered" ${o.status === 'delivered' ? 'selected' : ''}>${s.status_delivered_label || 'LIVRÉE'}</option>
-                                <option value="cancelled" ${o.status === 'cancelled' ? 'selected' : ''}>${s.status_cancelled_label || 'ANNULÉE'}</option>
-                            </select>
-                            <div style="margin-top:4px;">
-                                ${!o.livreur_name ? `
-                                    <select onchange="assignDriver('${o.id}', this.value, this.options[this.selectedIndex].text)" style="margin:0; padding:4px; font-size:10px; background:rgba(255,165,0,0.1); border:1px solid orange;">
-                                        <option value="">👤 Assigner livreur...</option>
-                                        ${livreurOptions}
-                                    </select>
-                                ` : `
-                                    <div style="display:flex; flex-direction:column; gap:4px;">
-                                        <small style="font-size:10px; color:var(--accent); font-weight:900; background:rgba(0,180,255,0.05); padding:4px; border-radius:4px;">🚴 ${o.livreur_name}</small>
-                                        <button class="btn btn-sm" style="padding:2px 8px; font-size:10px; background:rgba(255,165,0,0.1); border:1px solid orange; color:orange; font-weight:700;" onclick="assignDriver('${o.id}', '', '')" title="Réassigner">🔄 Réassigner</button>
-                                    </div>
-                                `}
-                            </div>
-                            <button class="btn btn-outline btn-sm" style="color:var(--danger); margin-top:5px; border-color:rgba(255,0,0,0.2);" onclick="delOrder('${o.id}')">🗑️ Supprimer</button>
-                        </div>
                     </td>
                 </tr>
                 `;
@@ -3555,9 +3806,11 @@
             }
             const section = document.getElementById('section-' + id) || document.getElementById('section-logistique');
             try {
-                // Toujours recharger les settings pour éviter les données stales
-                window.appSettings = await api('/settings', 'GET', null, silent);
-                updateNavbarIcons();
+                // Settings & Stats : One fetch, then use global window.appSettings/window.appStats
+                if (!window.appSettings || !silent) {
+                    window.appSettings = await api('/settings', 'GET', null, silent);
+                    updateNavbarIcons();
+                }
 
                 if (id === 'overview' || id === 'insights' || !window.appStats) {
                     const statsTask = api('/stats', 'GET', null, silent).then(data => {
@@ -3565,6 +3818,9 @@
                         window.appStats = data;
                         if (data) {
                             if (document.getElementById('usersTotalCounter')) document.getElementById('usersTotalCounter').innerText = (data.totalUsers || 0) + ' clients';
+                            if (document.getElementById('usersBlockedCounter')) document.getElementById('usersBlockedCounter').innerText = 'Bloqués: ' + (data.totalBlocked || 0);
+                            if (document.getElementById('usersTgCounter')) document.getElementById('usersTgCounter').innerText = 'TG: ' + (data.totalUsersTelegram || 0);
+                            if (document.getElementById('usersWaCounter')) document.getElementById('usersWaCounter').innerText = 'WA: ' + (data.totalUsersWhatsapp || 0);
                             if (document.getElementById('livreursTotalCounter')) document.getElementById('livreursTotalCounter').innerText = (data.totalLivreurs || 0) + ' livreurs';
                         }
                         return data;
@@ -3575,21 +3831,38 @@
                     }
                 }
 
-                if (id === 'overview') {
-                    const s = window.appStats;
-                    if (!s) { console.warn('[STATS] appStats is null, showing defaults'); }
+                if (id === 'overview' || id === 'insights') {
+                    const s = window.appStats || {};
                     const setStat = (id, val) => {
                         const el = document.getElementById(id);
                         if (el) el.innerText = (val !== undefined && val !== null) ? val : '—';
                     };
-                    setStat('statUsers', s.totalUsers);
-                    setStat('statActive', s.activeUsers);
-                    setStat('statOrders', s.totalOrders || 0);
-                    setStat('statCA', (s.totalCA || 0) + ' €');
-                    setStat('statLivreurs', s.activeLivreurs || 0);
+                    // Update OVERVIEW
+                    setStat('ovStatUsers', s.totalUsers || 0);
+                    setStat('ovStatActive', s.activeUsers || 0);
+                    setStat('ovStatOrders', s.totalOrders || 0);
+                    setStat('ovStatCA', (s.totalCA || 0).toLocaleString() + ' €');
+                    setStat('ovStatLivreurs', s.totalLivreurs || 0);
+
+                    // Update INSIGHTS
+                    setStat('statUsers', s.totalUsers || 0);
+                    setStat('statActive', s.activeUsers || 0);
+                    setStat('statCA', (s.totalCA || 0).toLocaleString() + ' €');
                 }
                 if (id === 'users') {
-                    const users = await api('/users', 'GET', null, silent);
+                    const tab = window._userTab || 'active';
+                    if (tab === 'blocked') {
+                        try {
+                            const blocked = await api('/users/blocked', 'GET', null, silent);
+                            window._cachedUsers = blocked;
+                            renderUsersTable(blocked);
+                        } catch(e) { 
+                            window._cachedUsers = [];
+                            renderUsersTable([]);
+                        }
+                        return;
+                    }
+                    const users = await api(`/users?limit=100`, 'GET', null, silent);
                     window._cachedUsers = users;
                     renderUsersTable(users);
                 }
@@ -3599,9 +3872,6 @@
                         loadSupplierDropdown()
                     ]);
                     window._cachedProducts = products;
-
-                    // Charger le dropdown fournisseurs pour le formulaire produit
-                    await loadSupplierDropdown();
 
                     // Update Bundle Select
                     const bundleSelect = document.getElementById('bundle_offered_id');
@@ -3691,16 +3961,17 @@
                 }
                 if (id === 'orders') {
                     try {
+                        const timeframe = window._orderTimeframe || 'all';
                         const [orders, livreurs] = await Promise.all([
-                            api('/orders', 'GET', null, silent),
+                            api(`/orders?limit=1000&timeframe=${timeframe}`, 'GET', null, silent),
                             api('/livreurs', 'GET', null, silent)
                         ]);
                         window._cachedOrders = orders;
                         window._cachedLivreurs = livreurs;
-                        filterData('orders', 'all');
+                        filterData('orders', timeframe);
                     } catch (e) {
                         console.error("Orders load failed", e);
-                        document.querySelector('#orderTable tbody').innerHTML = '<tr><td colspan="8" style="padding:20px; color:var(--danger)">Erreur de chargement des commandes.</td></tr>';
+                        document.querySelector('#orderTable tbody').innerHTML = '<tr><td colspan="11" style="padding:20px; color:var(--danger)">Erreur de chargement des commandes.</td></tr>';
                     }
                 }
                 if (id === 'livreurs') {
@@ -3829,9 +4100,6 @@
                         if (historyTbody) historyTbody.innerHTML = '<tr><td colspan="7" style="color:var(--danger);padding:20px">Erreur de chargement.</td></tr>';
                     }
                 }
-                if (id === 'suppliers') {
-                    await loadSuppliers();
-                }
 
                 if (id === 'reviews') {
                     try {
@@ -3842,9 +4110,18 @@
                         document.getElementById('reviews-tbody').innerHTML = '<tr><td colspan="6" style="color:var(--danger);padding:20px">Erreur de chargement des avis.</td></tr>';
                     }
                 }
+                if (id === 'suppliers') {
+                    try {
+                        await loadSuppliers();
+                    } catch (e) {
+                        console.error('Suppliers load error:', e);
+                        document.getElementById('suppliersList').innerHTML = '<p style="color:var(--danger);padding:20px">Erreur de chargement des fournisseurs.</p>';
+                    }
+                }
                 if (id === 'insights') {
                     const data = await api('/analytics', 'GET', null, silent);
                     window.lastAnalytics = data;
+                    window.currentAnalyticsRaw = data.rawDelivered || [];
 
                     if (document.getElementById('avg-delivery-time')) document.getElementById('avg-delivery-time').innerText = (data.avgDeliveryTime || 0) + ' min';
                     if (document.getElementById('insights-total-orders')) document.getElementById('insights-total-orders').innerText = data.totalOrders || 0;
@@ -3869,9 +4146,6 @@
                     if (chartInstances.platforms) chartInstances.platforms.destroy();
                     const tgData = data.byPlatform?.telegram || { ca: 0, count: 0 };
                     const waData = data.byPlatform?.whatsapp || { ca: 0, count: 0 };
-                    
-                    document.getElementById('stat-tg-basket').innerText = `TG: ${(tgData.ca / (tgData.count || 1)).toFixed(2)}€`;
-                    document.getElementById('stat-wa-basket').innerText = `WA: ${(waData.ca / (waData.count || 1)).toFixed(2)}€`;
 
                     chartInstances.platforms = new Chart(document.getElementById('canvas-platforms'), {
                         type: 'doughnut',
@@ -3915,141 +4189,144 @@
                 }
                 if (id === 'settings') {
                     const s = await api('/settings');
+                    window.appSettings = s; // Mise à jour globale
+                    const setVal = (id, val) => {
+                        const el = document.getElementById(id);
+                        if (el) {
+                            if (el.type === 'checkbox') el.checked = !!val;
+                            else el.value = val === undefined || val === null ? '' : val;
+                        }
+                    };
                     
                     // Payment Modes Initialization
                     const pmContainer = document.getElementById('payment_modes_container');
-                    pmContainer.innerHTML = '';
-                    let pModes = [];
-                    try {
-                        pModes = typeof s.payment_modes_config === 'string' ? JSON.parse(s.payment_modes_config) : (s.payment_modes_config || []);
-                    } catch(e) { console.error('Parse PM config failed', e); }
-                    if (!pModes || pModes.length === 0) {
-                        // Defaults
-                        addPaymentModeRow({id:'CASH', label:'Espèces', icon:'💵'});
-                    } else {
-                        pModes.forEach(m => addPaymentModeRow(m));
+                    if (pmContainer) {
+                        pmContainer.innerHTML = '';
+                        let pModes = [];
+                        try {
+                            pModes = typeof s.payment_modes_config === 'string' ? JSON.parse(s.payment_modes_config) : (s.payment_modes_config || []);
+                        } catch(e) { console.error('Parse PM config failed', e); }
+                        if (!pModes || pModes.length === 0) {
+                            addPaymentModeRow({id:'CASH', label:'Espèces', icon:'💵'});
+                        } else {
+                            pModes.forEach(m => addPaymentModeRow(m));
+                        }
                     }
 
-                    document.getElementById('set_bot_name').value = s.bot_name;
-                    document.getElementById('set_title').value = s.dashboard_title || 'Admin Panel';
-                    document.getElementById('set_color').value = s.accent_color || '#ff0050';
+                    setVal('set_bot_name', s.bot_name);
+                    setVal('set_title', s.dashboard_title || 'Admin Panel');
+                    setVal('set_color', s.accent_color || '#ff0050');
 
                     // Admin Dynamic List
                     const container = document.getElementById('admins_list_container');
-                    container.innerHTML = '';
-                    const adminIds = String(s.admin_telegram_id || '')
-                        .replace(/[\[\]"]/g, '') // Remove brackets and quotes if stored as JSON string
-                        .split(/[\s,]+/)
-                        .filter(id => id.trim() !== '');
-                    if (adminIds.length === 0) {
-                        addAdminRow('');
-                    } else {
-                        adminIds.forEach(id => addAdminRow(id));
+                    if (container) {
+                        container.innerHTML = '';
+                        const adminIds = String(s.admin_telegram_id || '')
+                            .replace(/[\[\]"]/g, '') // Remove brackets and quotes if stored as JSON string
+                            .split(/[\s,]+/)
+                            .filter(id => id.trim() !== '');
+                        if (adminIds.length === 0) {
+                            addAdminRow('');
+                        } else {
+                            adminIds.forEach(id => addAdminRow(id));
+                        }
                     }
-                    document.getElementById('set_current_password').value = s.admin_password || '';
-                    document.getElementById('set_dashboard_url').value = s.dashboard_url || '';
-                    document.getElementById('set_private_contact_url').value = s.private_contact_url || '';
-                    document.getElementById('set_channel_url').value = s.channel_url || '';
-                    document.getElementById('set_pts_ratio').value = s.points_ratio || 1;
-                    document.getElementById('set_pts_exchange').value = s.points_exchange || 100;
-                    document.getElementById('set_pts_credit_value').value = s.points_credit_value || 5;
-                    document.getElementById('set_ref_bonus').value = s.ref_bonus || 5;
-                    document.getElementById('set_fidelity_thresholds').value = s.fidelity_bonus_thresholds || '5,10';
+                    setVal('set_current_password', s.admin_password || '');
+                    setVal('set_dashboard_url', s.dashboard_url || '');
+                    setVal('set_private_contact_url', s.private_contact_url || '');
+                    setVal('set_private_contact_wa_url', s.private_contact_wa_url || '');
+                    setVal('set_channel_url', s.channel_url || '');
+
+                    // Plateformes
+                    setVal('set_enable_telegram', s.enable_telegram);
+                    setVal('set_enable_whatsapp', s.enable_whatsapp);
+                    setVal('set_enable_marketplace', s.enable_marketplace);
+                    setVal('set_enable_fidelity', s.enable_fidelity);
+                    setVal('set_enable_referral', s.enable_referral);
+                    setVal('set_enable_help_menu', s.enable_help_menu);
+
+                    setVal('set_pts_ratio', s.points_ratio || 1);
+                    setVal('set_pts_exchange', s.points_exchange || 100);
+                    setVal('set_pts_credit_value', s.points_credit_value || 5);
+                    setVal('set_ref_bonus', s.ref_bonus || 5);
+                    setVal('set_fidelity_thresholds', s.fidelity_bonus_thresholds || '5,10');
                     renderPaliersGrid(s.fidelity_bonus_thresholds || '5,10');
-                    document.getElementById('set_fidelity_bonus_val').value = s.fidelity_bonus_amount || 10;
-                    document.getElementById('set_fidelity_min_spend').value = s.fidelity_min_spend || 50;
+                    setVal('set_fidelity_bonus_val', s.fidelity_bonus_amount || 10);
+                    setVal('set_fidelity_min_spend', s.fidelity_min_spend || 50);
 
                     // Composants UI
-                    document.getElementById('set_ui_icon_catalog').value = s.ui_icon_catalog || '🍔';
-                    document.getElementById('set_label_catalog').value = s.label_catalog || 'Catalogue Produits';
-                    document.getElementById('set_ui_icon_orders').value = s.ui_icon_orders || '📦';
-                    document.getElementById('set_label_my_orders').value = s.label_my_orders || 'Mes Commandes';
-                    document.getElementById('set_ui_icon_contact').value = s.ui_icon_contact || '📱';
-                    document.getElementById('set_label_contact').value = s.label_contact || 'Mon contact privé';
-                    document.getElementById('set_ui_icon_profile').value = s.ui_icon_profile || '🎁';
-                    document.getElementById('set_label_profile').value = s.label_profile || 'Mon Profil & Parrainage';
-                    document.getElementById('set_ui_icon_livreur').value = s.ui_icon_livreur || '🛵';
-                    document.getElementById('set_label_livreur').value = s.label_livreur_space || 'Espace Livreur';
-                    document.getElementById('set_ui_icon_admin').value = s.ui_icon_admin || '⚙️';
-                    document.getElementById('set_label_admin_bot').value = s.label_admin_bot || 'Gestion Bot';
-                    document.getElementById('set_ui_icon_web').value = s.ui_icon_web || '🌐';
-                    document.getElementById('set_label_admin_web').value = s.label_admin_web || 'Dashboard Web';
-                    document.getElementById('set_ui_icon_wallet').value = s.ui_icon_wallet || '💳';
-                    document.getElementById('set_ui_icon_points').value = s.ui_icon_points || '⭐️';
-                    document.getElementById('set_ui_icon_channel').value = s.ui_icon_channel || '📢';
-                    document.getElementById('set_label_channel').value = s.label_channel || 'Lien Canal Telegram';
-                    document.getElementById('set_ui_icon_info').value = s.ui_icon_info || 'ℹ️';
-                    document.getElementById('set_label_info').value = s.label_info || 'Informations';
-                    document.getElementById('set_ui_icon_support').value = s.ui_icon_support || '❓';
-                    document.getElementById('set_label_support').value = s.label_support || 'Aide & Support';
-                    document.getElementById('set_ui_icon_leave_review').value = s.ui_icon_leave_review || '⭐️';
-                    document.getElementById('set_label_leave_review').value = s.label_leave_review || 'Laisser un avis / Commentaire';
-                    document.getElementById('set_ui_icon_view_reviews').value = s.ui_icon_view_reviews || '👥';
-                    document.getElementById('set_label_view_reviews').value = s.label_view_reviews || 'Consulter les avis';
-                    document.getElementById('set_ui_icon_welcome').value = s.ui_icon_welcome || '🏠';
-                    document.getElementById('set_label_welcome').value = s.label_welcome || 'Message d\'accueil';
-
-                    // Nouveaux champs
-                    document.getElementById('set_welcome_msg').value = s.welcome_message || '';
-                    document.getElementById('set_payment_modes').value = s.payment_modes || '💵 Espèces';
-                    document.getElementById('set_msg_qty').value = s.msg_choose_qty || 'Choisissez la quantité souhaitée :';
-                    document.getElementById('set_msg_help_intro').value = s.msg_help_intro || 'Besoin d\'aide ?';
-                    document.getElementById('set_show_broadcasts_btn').checked = s.show_broadcasts_btn === true || s.show_broadcasts_btn === 'true';
-                    document.getElementById('set_show_reviews_btn').checked = s.show_reviews_btn === true || s.show_reviews_btn === 'true';
-
-                    document.getElementById('set_enable_abandoned_cart_notifications').checked = s.enable_abandoned_cart_notifications === true || s.enable_abandoned_cart_notifications === 'true';
-                    document.getElementById('set_msg_abandoned_cart').value = s.msg_abandoned_cart || '';
-
-                    document.getElementById('set_status_pending_label').value = s.status_pending_label || 'EN ATTENTE';
-                    document.getElementById('set_ui_icon_pending').value = s.ui_icon_pending || '⏳';
-                    document.getElementById('set_status_taken_label').value = s.status_taken_label || 'PRIS EN CHARGE';
-                    document.getElementById('set_ui_icon_taken').value = s.ui_icon_taken || '🚚';
-                    document.getElementById('set_status_delivered_label').value = s.status_delivered_label || 'LIVRÉE';
-                    document.getElementById('set_ui_icon_success').value = s.ui_icon_success || '✅';
-                    document.getElementById('set_status_cancelled_label').value = s.status_cancelled_label || 'ANNULÉE';
-                    document.getElementById('set_ui_icon_error').value = s.ui_icon_error || '❌';
+                    setVal('set_ui_icon_catalog', s.ui_icon_catalog || '🍔');
+                    setVal('set_label_catalog', s.label_catalog || 'Catalogue Produits');
+                    setVal('set_ui_icon_orders', s.ui_icon_orders || '📦');
+                    setVal('set_label_my_orders', s.label_my_orders || 'Mes Commandes');
+                    setVal('set_ui_icon_contact', s.ui_icon_contact || '📱');
+                    setVal('set_label_contact', s.label_contact || 'Mon contact privé');
+                    setVal('set_ui_icon_profile', s.ui_icon_profile || '🎁');
+                    setVal('set_label_profile', s.label_profile || 'Mon Profil & Parrainage');
+                    setVal('set_ui_icon_livreur', s.ui_icon_livreur || '🛵');
+                    setVal('set_label_livreur', s.label_livreur_space || 'Espace Livreur');
+                    setVal('set_ui_icon_admin', s.ui_icon_admin || '⚙️');
+                    setVal('set_label_admin_bot', s.label_admin_bot || 'Gestion Bot');
+                    setVal('set_ui_icon_web', s.ui_icon_web || '🌐');
+                    setVal('set_label_admin_web', s.label_admin_web || 'Dashboard Web');
+                    setVal('set_ui_icon_wallet', s.ui_icon_wallet || '💳');
+                    setVal('set_ui_icon_points', s.ui_icon_points || '🪙');
+                    
+                    // --- ALL FIELDS (SAFENED TO PREVENT CRASHES) ---
+                    setVal('set_status_pending_label', s.status_pending_label);
+                    setVal('set_ui_icon_pending', s.ui_icon_pending);
+                    setVal('set_status_confirmed_label', s.status_confirmed_label);
+                    setVal('set_ui_icon_confirmed', s.ui_icon_confirmed);
+                    setVal('set_status_preparing_label', s.status_preparing_label);
+                    setVal('set_ui_icon_preparing', s.ui_icon_preparing);
+                    setVal('set_status_taken_label', s.status_taken_label);
+                    setVal('set_ui_icon_taken', s.ui_icon_taken);
+                    setVal('set_status_delivered_label', s.status_delivered_label);
+                    setVal('set_ui_icon_success', s.ui_icon_success);
+                    setVal('set_status_cancelled_label', s.status_cancelled_label);
+                    setVal('set_ui_icon_error', s.ui_icon_error);
 
                     // Bot Content
-                    document.getElementById('set_msg_order_received_admin').value = s.msg_order_received_admin || '';
-                    document.getElementById('set_msg_order_confirmed_client').value = s.msg_order_confirmed_client || '';
-                    document.getElementById('set_btn_livreur_space').value = s.btn_livreur_space || '🛵 Espace Livreur';
-                    document.getElementById('set_btn_back_menu').value = s.btn_back_menu || '◀️ Retour Menu';
-                    document.getElementById('set_msg_status_taken').value = s.msg_status_taken || '';
-                    document.getElementById('set_msg_status_delivered').value = s.msg_status_delivered || '';
-                    document.getElementById('set_msg_delay_report').value = s.msg_delay_report || '';
-                    document.getElementById('set_msg_arrival_soon').value = s.msg_arrival_soon || '';
-                    document.getElementById('set_msg_review_prompt').value = s.msg_review_prompt || '';
-                    document.getElementById('set_msg_review_thanks').value = s.msg_review_thanks || '';
-                    document.getElementById('set_btn_leave_review').value = s.btn_leave_review || '✍️ Laisser un avis';
-                    document.getElementById('set_btn_view_reviews').value = s.btn_view_reviews || '⭐️ Consulter les avis';
-                    document.getElementById('set_btn_confirm_review').value = s.btn_confirm_review || 'Confirmer la note';
-                    document.getElementById('set_btn_back_menu_nav').value = s.btn_back_menu_nav || '◀️ Retour Menu';
-                    document.getElementById('set_btn_cart_resume').value = s.btn_cart_resume || '🛒 Reprendre Panier';
-                    document.getElementById('set_btn_client_mode').value = s.btn_client_mode || '👤 Mode Client';
-                    document.getElementById('set_msg_thanks_participation').value = s.msg_thanks_participation || 'Merci pour votre participation !';
-                    document.getElementById('set_msg_your_answer').value = s.msg_your_answer || 'Votre réponse :';
-                    document.getElementById('set_label_reviews').value = s.label_reviews || '';
-                    document.getElementById('set_label_users').value = s.label_users || '';
-                    document.getElementById('set_default_wa_name').value = s.default_wa_name || '';
+                    setVal('set_msg_order_received_admin', s.msg_order_received_admin);
+                    setVal('set_msg_order_confirmed_client', s.msg_order_confirmed_client);
+                    setVal('set_btn_livreur_space', s.btn_livreur_space);
+                    setVal('set_btn_back_menu', s.btn_back_menu);
+                    setVal('set_msg_status_taken', s.msg_status_taken);
+                    setVal('set_msg_status_delivered', s.msg_status_delivered);
+                    setVal('set_msg_delay_report', s.msg_delay_report);
+                    setVal('set_msg_arrival_soon', s.msg_arrival_soon);
+                    setVal('set_msg_review_prompt', s.msg_review_prompt);
+                    setVal('set_msg_review_thanks', s.msg_review_thanks);
+                    setVal('set_btn_leave_review', s.btn_leave_review);
+                    setVal('set_btn_view_reviews', s.btn_view_reviews);
+                    setVal('set_btn_confirm_review', s.btn_confirm_review);
+                    setVal('set_btn_back_menu_nav', s.btn_back_menu_nav);
+                    setVal('set_btn_cart_resume', s.btn_cart_resume);
+                    setVal('set_btn_client_mode', s.btn_client_mode);
+                    setVal('set_msg_thanks_participation', s.msg_thanks_participation);
+                    setVal('set_msg_your_answer', s.msg_your_answer);
+                    setVal('set_label_reviews', s.label_reviews);
+                    setVal('set_label_users', s.label_users);
+                    setVal('set_default_wa_name', s.default_wa_name);
 
-                    // Chargement dynamique de tous les nouveaux champs (boutons, messages, etc.)
+                    // Dynamically load others
                     const dynFields = [
-                        'btn_back_generic','btn_back_quick_menu','btn_back_to_cart','btn_back_to_qty',
-                        'btn_back_to_address','btn_back_to_options','btn_back_to_livreur_menu','btn_next','btn_previous',
-                        'btn_clear_cart','btn_cancel_order','btn_cancel_my_order','btn_abandon_delivery',
-                        'btn_send_now','btn_help_support','btn_where_is_delivery','btn_cancel','btn_cancel_alt',
-                        'btn_dont_use_credit','btn_set_available','btn_notify_30min','btn_notify_10min',
-                        'btn_rate_5','btn_rate_4','btn_rate_3','btn_rate_1',
-                        'msg_session_expired','msg_product_not_found','msg_order_not_available','msg_order_not_found',
-                        'msg_order_creation_error','msg_not_livreur','msg_access_denied',
-                        'msg_catalog_empty','msg_cart_empty','msg_no_reviews_yet','msg_no_information',
-                        'msg_no_active_deliveries','msg_empty_delivery_history','msg_no_active_orders',
-                        'msg_cart_cleared','msg_thanks_for_feedback','msg_location_updated','msg_livreur_welcome'
+                        'btn_back_generic', 'btn_back_quick_menu', 'btn_back_to_cart', 'btn_back_to_qty',
+                        'btn_back_to_address', 'btn_back_to_options', 'btn_back_to_livreur_menu', 'btn_next', 'btn_previous',
+                        'btn_clear_cart', 'btn_cancel_order', 'btn_cancel_my_order', 'btn_abandon_delivery',
+                        'btn_send_now', 'btn_help_support', 'btn_where_is_delivery', 'btn_cancel', 'btn_cancel_alt',
+                        'btn_dont_use_credit', 'btn_set_available', 'btn_notify_30min', 'btn_notify_10min',
+                        'btn_rate_5', 'btn_rate_4', 'btn_rate_3', 'btn_rate_1',
+                        'msg_session_expired', 'msg_product_not_found', 'msg_order_not_available', 'msg_order_not_found',
+                        'msg_order_creation_error', 'msg_not_livreur', 'msg_access_denied',
+                        'msg_catalog_empty', 'msg_cart_empty', 'msg_no_reviews_yet', 'msg_no_information',
+                        'msg_no_active_deliveries', 'msg_empty_delivery_history', 'msg_no_active_orders',
+                        'msg_cart_cleared', 'msg_thanks_for_feedback', 'msg_location_updated', 'msg_livreur_welcome',
+                        'welcome_msg', 'payment_modes', 'msg_qty', 'msg_help_intro', 'show_broadcasts_btn',
+                        'show_reviews_btn', 'enable_abandoned_cart_notifications', 'msg_abandoned_cart',
+                        'force_subscribe', 'force_subscribe_channel_id', 'priority_delivery_enabled', 'priority_delivery_price'
                     ];
-                    dynFields.forEach(key => {
-                        const el = document.getElementById('set_' + key);
-                        if (el) el.value = s[key] || '';
-                    });
+                    dynFields.forEach(key => setVal('set_' + key, s[key]));
                 }
             } catch (err) {
                 console.error('[LOAD DATA] Error:', err);
@@ -4436,19 +4713,28 @@
             const data = window.lastAnalytics;
             if (!data) return;
 
+            const platform = document.getElementById('insights-platform-filter').value;
             const chartId = 'canvas-main-chart';
             if (chartInstances.main) chartInstances.main.destroy();
 
             let label = "";
             let sourceData = {};
 
+            // Determine source data based on platform filter
+            const baseData = (platform === 'all') ? data : (data.byPlatform[platform] || {});
+
             switch (tf) {
-                case 'hour': label = "CA par Heure"; sourceData = data.byHour; break;
-                case 'day': label = "CA par Jour"; sourceData = data.byDay; break;
-                case 'week': label = "CA par Semaine"; sourceData = data.byWeek; break;
-                case 'month': label = "CA par Mois"; sourceData = data.byMonth; break;
-                case 'year': label = "CA par Année"; sourceData = data.byYear; break;
+                case 'hour': label = "CA par Heure"; sourceData = baseData.byHour || {}; break;
+                case 'day': label = "CA par Jour"; sourceData = baseData.byDay || {}; break;
+                case 'week': label = "CA par Semaine"; sourceData = baseData.byWeek || {}; break;
+                case 'month': label = "CA par Mois"; sourceData = baseData.byMonth || {}; break;
+                case 'year': label = "CA par Année"; sourceData = baseData.byYear || {}; break;
             }
+
+            // Update Average Basket Card
+            const avgBasket = (platform === 'all') ? data.avgBasket : (data.byPlatform[platform]?.avgBasket || 0);
+            document.getElementById('avg-basket-size').innerText = (avgBasket || 0).toFixed(2) + ' €';
+            document.getElementById('avg-basket-platform').innerText = (platform === 'all') ? 'Toutes plateformes' : (platform === 'telegram' ? 'Telegram Only' : 'WhatsApp Only');
 
             const entries = Object.entries(sourceData).sort((a, b) => a[0].localeCompare(b[0]));
 
@@ -4522,12 +4808,18 @@
         }
 
         function exportAnalyticsCSV() {
-            const data = window.currentAnalyticsRaw;
+            const platform = document.getElementById('insights-platform-filter')?.value || 'all';
+            let data = window.currentAnalyticsRaw || [];
+            
+            if (platform !== 'all') {
+                data = data.filter(d => d.platform === platform);
+            }
+
             if (!data || data.length === 0) return showToast('Aucune donnée à exporter.', 'info');
 
-            const headers = ["ID", "Date", "Client", "Produit", "Quantité", "Prix total (€)", "Ville", "Livreur"];
+            const headers = ["ID", "Date", "Plateforme", "Client", "Produit", "Quantité", "Prix total (€)", "Ville", "Livreur"];
             const rows = data.map(o => [
-                o.id, o.date, o.client, o.product, o.qty, o.price, o.city, o.livreur
+                o.id, o.date, o.platform || 'tg', o.client, o.product, o.qty, o.price, o.city, o.livreur
             ]);
 
             let csvContent = "data:text/csv;charset=utf-8,\uFEFF" // Added BOM for Excel UTF-8
@@ -4537,7 +4829,7 @@
             const encodedUri = encodeURI(csvContent);
             const link = document.createElement("a");
             link.setAttribute("href", encodedUri);
-            link.setAttribute("download", `analytics_timlemeilleur_${new Date().toISOString().split('T')[0]}.csv`);
+            link.setAttribute("download", `analytics_export_${new Date().toISOString().split('T')[0]}.csv`);
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
@@ -4596,10 +4888,16 @@
             }
         }
 
-        function editProdByIndex(idx) {
+        async function editProdByIndex(idx) {
             const products = window._cachedProducts;
             if (!products || !products[idx]) return;
             const p = products[idx];
+
+            // On s'assure que la liste des fournisseurs est chargée AVANT de setter la valeur
+            await loadSupplierDropdown();
+            
+            // On switch l'onglet
+            switchProductTab('add');
 
             document.getElementById('prod_form_title').textContent = 'Modifier : ' + p.name;
             document.getElementById('edit_prod_id').value = p.id;
@@ -4610,8 +4908,8 @@
             document.getElementById('prod_unit_value').value = p.unit_value || '';
             document.getElementById('prod_promo').value = p.promo || '';
             document.getElementById('prod_image_url').value = p.image_url || '';
-
             document.getElementById('prod_supplier_id').value = p.supplier_id || '';
+
             document.getElementById('prod_is_bundle').checked = !!p.is_bundle;
             if (p.bundle_config) {
                 document.getElementById('bundle_trigger_qty').value = p.bundle_config.trigger_qty || 1;
@@ -4786,7 +5084,24 @@
             if (uMob) uMob.innerText = usersLabel;
 
             const brand = document.getElementById('brand_name');
-            if (brand && s.bot_name) brand.innerText = s.bot_name;
+            const mobTitle = document.getElementById('mobile_title');
+            const pgTitle = document.getElementById('page_title');
+            if (s.bot_name) {
+                if (brand) brand.innerText = s.bot_name;
+                if (mobTitle) mobTitle.innerText = s.bot_name;
+                if (pgTitle) pgTitle.innerText = `${s.bot_name} - Admin`;
+            }
+        }
+
+        async function approveUserAccount(userId, firstName) {
+            if (!confirm(`Souhaitez-vous accorder l'accès à ${firstName} ?`)) return;
+            try {
+                await api('/users/approve', 'POST', { userId });
+                showToast(`Accès accordé à ${firstName}`, 'success');
+                refreshData(); 
+            } catch (e) {
+                showToast(`Erreur : ${e.message}`, 'error');
+            }
         }
 
         async function updateOrderStatus(orderId, status) {
@@ -4812,15 +5127,37 @@
             return (...a) => { clearTimeout(t); t = setTimeout(() => f(...a), ms); };
         }
 
+        window._userTab = 'active';
+
+        function switchUserTab(tab) {
+            window._userTab = tab;
+            document.getElementById('btn-user-tab-active').classList.toggle('active', tab === 'active');
+            document.getElementById('btn-user-tab-blocked').classList.toggle('active', tab === 'blocked');
+            loadData('users');
+        }
+
         const searchUsersUI = debounce(async () => {
             const q = document.getElementById('user-search').value;
             if (q.length < 2) {
-                if (window._cachedUsers) renderUsersTable(window._cachedUsers);
+                loadData('users');
                 return;
             }
             try {
-                const results = await api('/users/search?q=' + encodeURIComponent(q));
+                const results = await api('/users/search?q=' + encodeURIComponent(q) + '&tab=' + (window._userTab || 'active'));
                 renderUsersTable(results);
+            } catch (e) { }
+        }, 300);
+
+        const searchOrdersUI = debounce(async () => {
+            const q = document.getElementById('order-search').value;
+            if (q.length < 2) {
+                loadData('orders');
+                return;
+            }
+            try {
+                const results = await api('/orders/search?q=' + encodeURIComponent(q));
+                window._cachedOrders = results;
+                renderOrdersTable(results);
             } catch (e) { }
         }, 300);
 
@@ -4870,6 +5207,12 @@
                                     <b>${u.first_name || 'Inconnu'}</b>
                                     <span class="badge" style="background:${u.platform === 'whatsapp' ? 'rgba(37,211,102,0.1)' : 'rgba(0,136,204,0.1)'}; color:${u.platform === 'whatsapp' ? '#25D366' : '#0088cc'}; border:1px solid currentColor; font-size:9px; font-weight:800; padding:1px 5px;">${u.platform?.toUpperCase() || 'TG'}</span>
                                 </div>
+                                 ${(() => {
+                                    if (!u.created_at) return '';
+                                    const diff = (new Date() - new Date(u.created_at)) / (1000 * 60 * 60);
+                                    if (diff < 24) return '<span class="badge" style="background:rgba(255,215,0,0.1); color:#ffd700; border:1px solid #ffd700; font-size:10px;">🌟 NOUVEAU (-24H)</span>';
+                                    return '';
+                                })()}
                                 ${u.is_blocked ?
                                     (u.data && u.data.blocked_by_admin === false ?
                                         '<span class="badge" style="background:rgba(255,50,50,0.1); color:#ff5050; margin-left:5px; border:1px solid rgba(255,20,20,0.2)">BOT BLOQUÉ PAR CLIENT</span>' :
@@ -4987,7 +5330,7 @@
 
         // Logic for Logistics Tabs
         function switchLogisticsTab(tab) {
-            const sections = ['orders', 'livreurs', 'reviews'];
+            const sections = ['orders', 'livreurs', 'reviews', 'suppliers'];
             sections.forEach(s => {
                 const sub = document.getElementById('sub-logistics-' + s);
                 if (sub) sub.style.display = (s === tab ? 'block' : 'none');
@@ -5138,13 +5481,10 @@
 
         async function saveSettings() {
             try {
-                const getVal = (id) => {
+                const getVal = (id, prop = 'value') => {
                     const el = document.getElementById(id);
-                    if (!el) {
-                        console.warn(`⚠️ Element ${id} not found during save`);
-                        return '';
-                    }
-                    return el.type === 'checkbox' ? el.checked : el.value;
+                    if (!el) return prop === 'checked' ? false : '';
+                    return el[prop];
                 };
 
                 const s = {
@@ -5155,6 +5495,7 @@
                     admin_password: getVal('set_current_password'),
                     dashboard_url: getVal('set_dashboard_url'),
                     private_contact_url: getVal('set_private_contact_url'),
+                    private_contact_wa_url: getVal('set_private_contact_wa_url'),
                     channel_url: getVal('set_channel_url'),
                     points_ratio: parseFloat(getVal('set_pts_ratio')) || 1,
                     points_exchange: parseInt(getVal('set_pts_exchange')) || 100,
@@ -5170,10 +5511,10 @@
                     msg_choose_qty: getVal('set_msg_qty'),
 
                     payment_modes_config: JSON.stringify(Array.from(document.querySelectorAll('.payment-mode-row')).map(row => ({
-                        icon: row.querySelector('.set-pm-icon')?.value || '💰',
-                        label: row.querySelector('.set-pm-label')?.value || 'Espèces',
-                        id: row.querySelector('.set-pm-id')?.value?.toUpperCase().replace(/\s+/g, '_') || 'NONE'
-                    })).filter(pm => pm.id !== 'NONE')),
+                        icon: row.querySelector('.set-pm-icon').value,
+                        label: row.querySelector('.set-pm-label').value,
+                        id: row.querySelector('.set-pm-id').value.toUpperCase().replace(/\s+/g, '_')
+                    })).filter(pm => pm.id !== '')),
 
                     ui_icon_catalog: getVal('set_ui_icon_catalog'),
                     label_catalog: getVal('set_label_catalog'),
@@ -5219,11 +5560,23 @@
                     label_users: getVal('set_label_users'),
                     default_wa_name: getVal('set_default_wa_name'),
 
-                    show_broadcasts_btn: getVal('set_show_broadcasts_btn') === true,
-                    show_reviews_btn: getVal('set_show_reviews_btn') === true,
+                    show_broadcasts_btn: getVal('set_show_broadcasts_btn', 'checked'),
+                    show_reviews_btn: getVal('set_show_reviews_btn', 'checked'),
 
-                    enable_abandoned_cart_notifications: getVal('set_enable_abandoned_cart_notifications') === true,
+                    enable_abandoned_cart_notifications: getVal('set_enable_abandoned_cart_notifications', 'checked'),
                     msg_abandoned_cart: getVal('set_msg_abandoned_cart'),
+                    force_subscribe: getVal('set_force_subscribe', 'checked'),
+                    force_subscribe_channel_id: getVal('set_force_subscribe_channel_id'),
+                    priority_delivery_enabled: getVal('set_priority_delivery_enabled', 'checked'),
+                    priority_delivery_price: parseFloat(getVal('set_priority_delivery_price')) || 15,
+
+                    // Toggles Plateformes & Services
+                    enable_telegram: getVal('set_enable_telegram', 'checked'),
+                    enable_whatsapp: getVal('set_enable_whatsapp', 'checked'),
+                    enable_marketplace: getVal('set_enable_marketplace', 'checked'),
+                    enable_fidelity: getVal('set_enable_fidelity', 'checked'),
+                    enable_referral: getVal('set_enable_referral', 'checked'),
+                    enable_help_menu: getVal('set_enable_help_menu', 'checked'),
 
                     // Content
                     msg_order_received_admin: getVal('set_msg_order_received_admin'),
@@ -5412,411 +5765,6 @@
             modal.classList.add('active');
         }
 
-        // ====== SUPPLIERS / FOURNISSEURS ======
-        let suppliersData = [];
-
-        async function loadSuppliers() {
-            try {
-                suppliersData = await api('/suppliers', 'GET', null, true) || [];
-                renderSuppliers();
-            } catch(e) { console.error('loadSuppliers error:', e); }
-        }
-
-        function renderSuppliers() {
-            const el = document.getElementById('suppliersList');
-            if (!suppliersData.length) {
-                el.innerHTML = '<p style="text-align:center; color:var(--text-muted);">Aucun fournisseur. Cliquez sur "Ajouter" pour en créer un.</p>';
-                return;
-            }
-            el.innerHTML = suppliersData.map(s => `
-                <div style="display:flex; justify-content:space-between; align-items:center; padding:12px; border-bottom:1px solid var(--border); flex-wrap:wrap; gap:8px;">
-                    <div>
-                        <b>${s.name}</b> ${s.is_active ? '<span style="color:green;">✅</span>' : '<span style="color:red;">❌</span>'}
-                        <div style="font-size:12px; color:var(--text-muted);">
-                            ${s.phone || ''} ${s.telegram_id ? '| TG: '+s.telegram_id : ''} ${s.commission_pct ? '| Commission: '+s.commission_pct+'%' : ''}
-                        </div>
-                    </div>
-                    <div style="display:flex; gap:5px;">
-                        <button class="btn btn-sm btn-outline" onclick="editSupplier('${s.id}')">✏️</button>
-                        <button class="btn btn-sm btn-outline" style="color:red;" onclick="deleteSupplierUI('${s.id}')">🗑</button>
-                    </div>
-                </div>
-            `).join('');
-        }
-
-        function openSupplierForm() {
-            document.getElementById('supplierFormCard').style.display = 'block';
-            document.getElementById('supplierFormTitle').textContent = '➕ Nouveau Fournisseur';
-            document.getElementById('supplierId').value = '';
-            document.getElementById('supplierName').value = '';
-            document.getElementById('supplierPhone').value = '';
-            document.getElementById('supplierTelegramId').value = '';
-            document.getElementById('supplierPlatform').value = 'telegram';
-            document.getElementById('supplierCommission').value = '';
-            document.getElementById('supplierActive').value = 'true';
-            document.getElementById('supplierNotes').value = '';
-        }
-
-        function closeSupplierForm() {
-            document.getElementById('supplierFormCard').style.display = 'none';
-        }
-
-        function editSupplier(id) {
-            const s = suppliersData.find(x => x.id === id);
-            if (!s) return;
-            document.getElementById('supplierFormCard').style.display = 'block';
-            document.getElementById('supplierFormTitle').textContent = '✏️ Modifier: ' + s.name;
-            document.getElementById('supplierId').value = s.id;
-            document.getElementById('supplierName').value = s.name || '';
-            document.getElementById('supplierPhone').value = s.phone || '';
-            document.getElementById('supplierTelegramId').value = s.telegram_id || '';
-            document.getElementById('supplierPlatform').value = s.platform || 'telegram';
-            document.getElementById('supplierCommission').value = s.commission_pct || '';
-            document.getElementById('supplierActive').value = s.is_active ? 'true' : 'false';
-            document.getElementById('supplierNotes').value = s.notes || '';
-        }
-
-        async function saveSupplier() {
-            const data = {
-                name: document.getElementById('supplierName').value.trim(),
-                phone: document.getElementById('supplierPhone').value.trim(),
-                telegram_id: document.getElementById('supplierTelegramId').value.trim(),
-                platform: document.getElementById('supplierPlatform').value,
-                commission_pct: parseFloat(document.getElementById('supplierCommission').value) || 0,
-                is_active: document.getElementById('supplierActive').value === 'true',
-                notes: document.getElementById('supplierNotes').value.trim()
-            };
-            if (!data.name) return alert('Le nom est obligatoire');
-            const id = document.getElementById('supplierId').value;
-            if (id) data.id = id;
-
-            try {
-                await api('/suppliers', 'POST', data, true);
-                closeSupplierForm();
-                await loadSuppliers();
-                await loadSupplierDropdown(); // Rafraîchir le dropdown produit
-            } catch(e) { alert('Erreur: ' + e.message); }
-        }
-
-        async function deleteSupplierUI(id) {
-            if (!confirm('Supprimer ce fournisseur ?')) return;
-            try {
-                await api('/suppliers/' + id, 'DELETE', null, true);
-                await loadSuppliers();
-                await loadSupplierDropdown(); // Rafraîchir le dropdown produit
-            } catch(e) { alert('Erreur: ' + e.message); }
-        }
-
-        async function promoteToSupplier(platformId, platform, name) {
-            try {
-                const suppliers = await api('/suppliers', 'GET', null, true) || [];
-                const existing = suppliers.find(s => s.telegram_id === String(platformId));
-                if (existing) {
-                    showToast('Cet utilisateur est déjà fournisseur !', 'info');
-                    switchSection('suppliers');
-                    return;
-                }
-            } catch(e) {}
-
-            if (!confirm(`Promouvoir "${name}" en fournisseur ?`)) return;
-
-            try {
-                await api('/suppliers', 'POST', {
-                    name: name || 'Fournisseur',
-                    telegram_id: String(platformId),
-                    platform: platform || 'telegram',
-                    is_active: true,
-                    commission_pct: 0,
-                    notes: 'Promu depuis la liste utilisateurs'
-                }, true);
-                showToast('✅ ' + name + ' est maintenant fournisseur !', 'success');
-                switchSection('suppliers');
-            } catch(e) { showToast('Erreur: ' + e.message, 'error'); }
-        }
-
-        // ========== MARKETPLACE FUNCTIONS ==========
-        let mpProductsData = [];
-        let mpOrdersData = [];
-
-        function switchSupplierTab(tab) {
-            const listEls = ['supplierFormCard', 'supplierGuideCard', 'supplierListCard'];
-            const mpTab = document.getElementById('marketplaceTab');
-            const mpOrdersTab = document.getElementById('mpOrdersTab');
-
-            // Hide all
-            listEls.forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
-            if (mpTab) mpTab.style.display = 'none';
-            if (mpOrdersTab) mpOrdersTab.style.display = 'none';
-
-            // Show selected
-            if (tab === 'list') listEls.forEach(id => { const el = document.getElementById(id); if (el && id !== 'supplierFormCard') el.style.display = ''; });
-            if (tab === 'marketplace' && mpTab) mpTab.style.display = '';
-            if (tab === 'mpOrders' && mpOrdersTab) mpOrdersTab.style.display = '';
-
-            // Update tab button styles
-            ['tabBtnList', 'tabBtnMarketplace', 'tabBtnMpOrders'].forEach(id => {
-                const btn = document.getElementById(id);
-                if (btn) {
-                    btn.style.fontWeight = '400';
-                    btn.style.background = 'transparent';
-                }
-            });
-            const activeBtn = { list: 'tabBtnList', marketplace: 'tabBtnMarketplace', mpOrders: 'tabBtnMpOrders' }[tab];
-            const activeBtnEl = document.getElementById(activeBtn);
-            if (activeBtnEl) { activeBtnEl.style.fontWeight = '600'; activeBtnEl.style.background = 'rgba(106,90,205,0.15)'; }
-
-            // Load data
-            if (tab === 'marketplace') loadMarketplaceProducts();
-            if (tab === 'mpOrders') loadMarketplaceOrders();
-        }
-
-        async function loadMarketplaceProducts() {
-            const filterSupplier = document.getElementById('mpFilterSupplier')?.value || '';
-            const url = filterSupplier ? `/api/marketplace/products?supplier_id=${filterSupplier}` : '/api/marketplace/products';
-            try {
-                mpProductsData = await api(url, 'GET', null, true) || [];
-                renderMarketplaceProducts();
-                // Populate supplier filter
-                const select = document.getElementById('mpFilterSupplier');
-                if (select && select.options.length <= 1) {
-                    const suppliers = await api('/api/suppliers', 'GET', null, true) || [];
-                    suppliers.forEach(s => {
-                        if (!Array.from(select.options).find(o => o.value === s.id)) {
-                            const opt = document.createElement('option');
-                            opt.value = s.id;
-                            opt.textContent = s.name;
-                            select.appendChild(opt);
-                        }
-                    });
-                }
-            } catch(e) { console.error('loadMarketplaceProducts:', e); }
-        }
-
-        function renderMarketplaceProducts() {
-            const grid = document.getElementById('mpProductsGrid');
-            const countEl = document.getElementById('mpProductCount');
-            if (!grid) return;
-
-            if (countEl) countEl.textContent = `${mpProductsData.length} produit(s)`;
-
-            if (mpProductsData.length === 0) {
-                grid.innerHTML = '<div class="card" style="grid-column:1/-1; text-align:center; padding:40px;"><p style="color:var(--text-muted);">📭 Aucun produit marketplace.<br><small>Les fournisseurs peuvent ajouter des produits via le bot Telegram.</small></p></div>';
-                return;
-            }
-
-            grid.innerHTML = mpProductsData.map(p => {
-                const statusColor = p.is_available && p.stock > 0 ? '#27ae60' : '#e74c3c';
-                const statusText = p.is_available && p.stock > 0 ? 'En vente' : 'Indisponible';
-                const imgHtml = p.image_url ? `<img src="${p.image_url}" style="width:100%; height:140px; object-fit:cover; border-radius:8px 8px 0 0;" onerror="this.style.display='none'">` : `<div style="height:80px; background:linear-gradient(135deg, #6a5acd22, #9370db22); border-radius:8px 8px 0 0; display:flex; align-items:center; justify-content:center; font-size:32px;">📦</div>`;
-                return `
-                    <div class="card" style="padding:0; overflow:hidden;">
-                        ${imgHtml}
-                        <div style="padding:12px;">
-                            <div style="display:flex; justify-content:space-between; align-items:start;">
-                                <h4 style="margin:0 0 4px;">${p.name}</h4>
-                                <span style="background:${statusColor}22; color:${statusColor}; padding:2px 8px; border-radius:10px; font-size:11px; white-space:nowrap;">${statusText}</span>
-                            </div>
-                            <div style="font-size:22px; font-weight:700; color:var(--accent); margin:6px 0;">${p.price}€</div>
-                            <div style="display:flex; gap:8px; font-size:12px; color:var(--text-muted); margin-bottom:6px;">
-                                <span>📦 Stock: <b>${p.stock || 0}</b></span>
-                                ${p.category ? '<span>🏷 ' + p.category + '</span>' : ''}
-                            </div>
-                            ${p.description ? '<p style="font-size:12px; color:var(--text-muted); margin:4px 0 8px;">' + p.description.substring(0, 80) + '</p>' : ''}
-                            <div style="display:flex; gap:6px; margin-top:8px;">
-                                <button class="btn btn-sm btn-accent" onclick="addMarketplaceToCart('${p.id}')" style="flex:1;">🛒 Commander</button>
-                                <button class="btn btn-sm btn-outline" onclick="editMpProduct('${p.id}')" title="Modifier">✏️</button>
-                                <button class="btn btn-sm btn-outline" style="color:red;" onclick="deleteMpProduct('${p.id}')" title="Supprimer">🗑</button>
-                            </div>
-                        </div>
-                    </div>`;
-            }).join('');
-        }
-
-        async function editMpProduct(id) {
-            const p = mpProductsData.find(x => x.id === id);
-            if (!p) return;
-            const newPrice = prompt('Nouveau prix :', p.price);
-            if (newPrice === null) return;
-            const newStock = prompt('Nouveau stock :', p.stock);
-            if (newStock === null) return;
-            try {
-                await api('/api/marketplace/products', 'POST', {
-                    id: p.id,
-                    price: parseFloat(newPrice) || p.price,
-                    stock: parseInt(newStock) || p.stock,
-                    is_available: parseInt(newStock) > 0
-                }, true);
-                showToast('✅ Produit mis à jour', 'success');
-                loadMarketplaceProducts();
-            } catch(e) { showToast('Erreur: ' + e.message, 'error'); }
-        }
-
-        async function deleteMpProduct(id) {
-            if (!confirm('Supprimer ce produit marketplace ?')) return;
-            try {
-                await api('/api/marketplace/products/' + id, 'DELETE', null, true);
-                showToast('🗑 Produit supprimé', 'success');
-                loadMarketplaceProducts();
-            } catch(e) { showToast('Erreur: ' + e.message, 'error'); }
-        }
-
-        async function loadMarketplaceOrders() {
-            try {
-                mpOrdersData = await api('/api/marketplace/orders', 'GET', null, true) || [];
-                renderMarketplaceOrders();
-            } catch(e) { console.error('loadMarketplaceOrders:', e); }
-        }
-
-        function renderMarketplaceOrders() {
-            const el = document.getElementById('mpOrdersList');
-            if (!el) return;
-
-            if (mpOrdersData.length === 0) {
-                el.innerHTML = '<p style="text-align:center; color:var(--text-muted); padding:20px;">📭 Aucune commande marketplace.</p>';
-                return;
-            }
-
-            el.innerHTML = `<div style="overflow-x:auto;"><table style="width:100%; border-collapse:collapse;">
-                <thead><tr style="border-bottom:2px solid var(--border); text-align:left;">
-                    <th style="padding:8px;">ID</th>
-                    <th style="padding:8px;">Fournisseur</th>
-                    <th style="padding:8px;">Produits</th>
-                    <th style="padding:8px;">Total</th>
-                    <th style="padding:8px;">Statut</th>
-                    <th style="padding:8px;">Date</th>
-                    <th style="padding:8px;">Actions</th>
-                </tr></thead>
-                <tbody>${mpOrdersData.map(o => {
-                    const statusColors = { pending: '#f39c12', accepted: '#3498db', ready: '#27ae60', collected: '#95a5a6', cancelled: '#e74c3c' };
-                    const statusLabels = { pending: '⏳ En attente', accepted: '✅ Acceptée', ready: '📦 Prête', collected: '🏁 Récupérée', cancelled: '❌ Annulée' };
-                    const items = Array.isArray(o.products) ? o.products.map(p => p.name + ' x' + p.qty).join(', ') : 'N/A';
-                    const date = o.created_at ? new Date(o.created_at).toLocaleDateString('fr-FR', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' }) : '';
-                    return '<tr style="border-bottom:1px solid var(--border);">' +
-                        '<td style="padding:8px; font-family:monospace;">#' + o.id.slice(-6) + '</td>' +
-                        '<td style="padding:8px;">' + (o.supplier_name || o.supplier_id?.slice(0,8) || '?') + '</td>' +
-                        '<td style="padding:8px; font-size:12px;">' + items + '</td>' +
-                        '<td style="padding:8px; font-weight:600;">' + o.total_price + '€</td>' +
-                        '<td style="padding:8px;"><span style="background:' + (statusColors[o.status]||'#999') + '22; color:' + (statusColors[o.status]||'#999') + '; padding:2px 8px; border-radius:10px; font-size:11px;">' + (statusLabels[o.status] || o.status) + '</span></td>' +
-                        '<td style="padding:8px; font-size:12px;">' + date + '</td>' +
-                        '<td style="padding:8px;">' + (o.status === 'ready' ? '<button class="btn btn-sm" style="background:#27ae60; color:#fff; border:none;" onclick="collectMpOrder(\'' + o.id + '\')">🏁 Récupérée</button>' : '') + '</td>' +
-                    '</tr>';
-                }).join('')}</tbody></table></div>`;
-        }
-
-        async function collectMpOrder(orderId) {
-            try {
-                await api('/api/marketplace/orders/' + orderId + '/status', 'POST', { status: 'collected' }, true);
-                showToast('✅ Commande récupérée', 'success');
-                loadMarketplaceOrders();
-            } catch(e) { showToast('Erreur: ' + e.message, 'error'); }
-        }
-        // Panier Marketplace Logic
-        let mpCart = [];
-        function toggleMpCart() {
-            const drawer = document.getElementById('mpCartDrawer');
-            if (drawer) {
-                drawer.style.display = (drawer.style.display === 'none' || drawer.style.display === '') ? 'flex' : 'none';
-            }
-        }
-
-        function addMarketplaceToCart(productId) {
-            const p = mpProductsData.find(x => x.id === productId);
-            if (!p) return;
-            const existing = mpCart.find(x => x.id === productId);
-            if (existing) {
-                existing.qty++;
-            } else {
-                mpCart.push({ ...p, qty: 1 });
-            }
-            renderMpCart();
-            showToast(`✅ ${p.name} ajouté`, 'success');
-        }
-
-        function renderMpCart() {
-            const listEl = document.getElementById('mpCartItems');
-            const badge = document.getElementById('mpCartBadge');
-            if (!listEl) return;
-
-            if (mpCart.length === 0) {
-                listEl.innerHTML = '<p style="text-align:center; color:var(--text-muted); margin-top:100px;">Panier vide 📭</p>';
-                if (badge) badge.style.display = 'none';
-                document.getElementById('mpCartTotal').innerText = '0.00€';
-                return;
-            }
-
-            if (badge) {
-                badge.style.display = 'flex';
-                badge.innerText = mpCart.reduce((a, b) => a + b.qty, 0);
-            }
-
-            let total = 0;
-            listEl.innerHTML = mpCart.map((it, idx) => {
-                total += it.price * it.qty;
-                return `
-                    <div style="display:flex; align-items:center; gap:10px; margin-bottom:15px; padding:10px; background:rgba(255,255,255,0.03); border-radius:12px; border:1px solid var(--border);">
-                        ${it.image_url ? `<img src="${it.image_url}" style="width:40px; height:40px; object-fit:cover; border-radius:8px;">` : `<div style="width:40px; height:40px; background:var(--border); border-radius:8px; display:flex; align-items:center; justify-content:center;">📦</div>`}
-                        <div style="flex:1; min-width:0;">
-                            <div style="font-weight:700; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${it.name}</div>
-                            <div style="font-size:12px; color:var(--accent);">${it.price}€</div>
-                        </div>
-                        <div style="display:flex; align-items:center; gap:8px;">
-                            <button class="btn btn-sm btn-outline" style="padding:0; width:24px; height:24px;" onclick="updateMpCartQty(${idx}, -1)">-</button>
-                            <span style="font-weight:bold; font-size:13px;">${it.qty}</span>
-                            <button class="btn btn-sm btn-outline" style="padding:0; width:24px; height:24px;" onclick="updateMpCartQty(${idx}, 1)">+</button>
-                        </div>
-                    </div>`;
-            }).join('');
-            document.getElementById('mpCartTotal').innerText = `${total.toFixed(2)}€`;
-        }
-
-        function updateMpCartQty(idx, delta) {
-            if (!mpCart[idx]) return;
-            mpCart[idx].qty += delta;
-            if (mpCart[idx].qty <= 0) mpCart.splice(idx, 1);
-            renderMpCart();
-        }
-
-        async function checkoutMarketplace() {
-            if (mpCart.length === 0) return showToast('Panier vide !', 'error');
-            
-            // Group elements by supplier
-            const orders = {};
-            mpCart.forEach(it => {
-                if (!orders[it.supplier_id]) orders[it.supplier_id] = [];
-                orders[it.supplier_id].push(it);
-            });
-
-            if (!confirm(`Passer ${Object.keys(orders).length} commande(s) aux fournisseurs ?`)) return;
-
-            try {
-                for (const supplierId in orders) {
-                    const products = orders[supplierId].map(it => ({
-                        id: it.id,
-                        name: it.name,
-                        price: it.price,
-                        qty: it.qty,
-                        image_url: it.image_url
-                    }));
-                    const totalPrice = products.reduce((a, b) => a + (b.price * b.qty), 0);
-                    
-                    await api('/marketplace/orders', 'POST', {
-                        supplier_id: supplierId,
-                        products: products,
-                        total_price: totalPrice
-                    }, true);
-                }
-                
-                showToast('🚀 Commandes envoyées !', 'success');
-                mpCart = [];
-                renderMpCart();
-                toggleMpCart();
-                switchSupplierTab('mpOrders');
-            } catch(e) {
-                showToast('Erreur: ' + e.message, 'error');
-            }
-        }
-        // ========== FIN MARKETPLACE FUNCTIONS ==========
-
         // --- PREMIUM TIMING LOGIC (Popover + Custom Selection) ---
         let selectedDates = { start: null, end: null };
         let selectedTimes = { start: null, end: null };
@@ -5911,14 +5859,477 @@
         }
 
         // Init — afficher la section active
+
+        let suppliersData = [];
+
+        async function loadSuppliers() {
+            try {
+                suppliersData = await api('/suppliers', 'GET', null, true) || [];
+                renderSuppliers();
+            } catch(e) { console.error('loadSuppliers error:', e); }
+        }
+
+        function renderSuppliers() {
+            const el = document.getElementById('suppliersList');
+            if (!suppliersData.length) {
+                el.innerHTML = '<p style="text-align:center; color:var(--text-muted);">Aucun fournisseur. Cliquez sur "Ajouter" pour en créer un.</p>';
+                return;
+            }
+            el.innerHTML = suppliersData.map(s => `
+                <div style="display:flex; justify-content:space-between; align-items:center; padding:12px; border-bottom:1px solid var(--border); flex-wrap:wrap; gap:8px;">
+                    <div>
+                        <b>${s.name}</b> ${s.is_active ? '<span style="color:green;">✅</span>' : '<span style="color:red;">❌</span>'}
+                        <div style="font-size:12px; color:var(--text-muted);">
+                            ${s.phone || ''} ${s.telegram_id ? '| TG: '+s.telegram_id : ''} ${s.commission_pct ? '| Commission: '+s.commission_pct+'%' : ''}
+                        </div>
+                    </div>
+                    <div style="display:flex; gap:5px;">
+                        <button class="btn btn-sm btn-outline" onclick="editSupplier('${s.id}')">✏️</button>
+                        <button class="btn btn-sm btn-outline" style="color:red;" onclick="deleteSupplierUI('${s.id}')">🗑</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function openSupplierForm() {
+            document.getElementById('supplierFormCard').style.display = 'block';
+            document.getElementById('supplierFormTitle').textContent = '➕ Nouveau Fournisseur';
+            document.getElementById('supplierId').value = '';
+            document.getElementById('supplierName').value = '';
+            document.getElementById('supplierPhone').value = '';
+            document.getElementById('supplierTelegramId').value = '';
+            document.getElementById('supplierPlatform').value = 'telegram';
+            document.getElementById('supplierCommission').value = '';
+            document.getElementById('supplierActive').value = 'true';
+            document.getElementById('supplierNotes').value = '';
+        }
+
+        function closeSupplierForm() {
+            document.getElementById('supplierFormCard').style.display = 'none';
+        }
+
+        function editSupplier(id) {
+            const s = suppliersData.find(x => x.id === id);
+            if (!s) return;
+            document.getElementById('supplierFormCard').style.display = 'block';
+            document.getElementById('supplierFormTitle').textContent = '✏️ Modifier: ' + s.name;
+            document.getElementById('supplierId').value = s.id;
+            document.getElementById('supplierName').value = s.name || '';
+            document.getElementById('supplierPhone').value = s.phone || '';
+            document.getElementById('supplierTelegramId').value = s.telegram_id || '';
+            document.getElementById('supplierPlatform').value = s.platform || 'telegram';
+            document.getElementById('supplierCommission').value = s.commission_pct || '';
+            document.getElementById('supplierActive').value = s.is_active ? 'true' : 'false';
+            document.getElementById('supplierNotes').value = s.notes || '';
+        }
+
+        async function saveSupplier() {
+            const data = {
+                name: document.getElementById('supplierName').value.trim(),
+                phone: document.getElementById('supplierPhone').value.trim(),
+                telegram_id: document.getElementById('supplierTelegramId').value.trim(),
+                platform: document.getElementById('supplierPlatform').value,
+                commission_pct: parseFloat(document.getElementById('supplierCommission').value) || 0,
+                is_active: document.getElementById('supplierActive').value === 'true',
+                notes: document.getElementById('supplierNotes').value.trim()
+            };
+            if (!data.name) return alert('Le nom est obligatoire');
+            const id = document.getElementById('supplierId').value;
+            if (id) data.id = id;
+
+            try {
+                await api('/suppliers', 'POST', data, true);
+                closeSupplierForm();
+                await loadSuppliers();
+                await loadSupplierDropdown();
+            } catch(e) { alert('Erreur: ' + e.message); }
+        }
+
+        async function deleteSupplierUI(id) {
+            if (!confirm('Supprimer ce fournisseur ?')) return;
+            try {
+                await api('/suppliers/' + id, 'DELETE', null, true);
+                await loadSuppliers();
+                await loadSupplierDropdown();
+            } catch(e) { alert('Erreur: ' + e.message); }
+        }
+
+        async function promoteToSupplier(platformId, platform, name) {
+            try {
+                const suppliers = await api('/suppliers', 'GET', null, true) || [];
+                const existing = suppliers.find(s => s.telegram_id === String(platformId));
+                if (existing) {
+                    showToast('Cet utilisateur est déjà fournisseur !', 'info');
+                    switchSection('suppliers');
+                    return;
+                }
+            } catch(e) {}
+
+            if (!confirm(`Promouvoir "${name}" en fournisseur ?`)) return;
+
+            try {
+                await api('/suppliers', 'POST', {
+                    name: name || 'Fournisseur',
+                    telegram_id: String(platformId),
+                    platform: platform || 'telegram',
+                    is_active: true,
+                    commission_pct: 0,
+                    notes: 'Promu depuis la liste utilisateurs'
+                }, true);
+                showToast('✅ ' + name + ' est maintenant fournisseur !', 'success');
+                switchSection('suppliers');
+            } catch(e) { showToast('Erreur: ' + e.message, 'error'); }
+        }
+        // ========== MARKETPLACE FUNCTIONS ==========
+        let mpProductsData = [];
+        let mpOrdersData = [];
+        let currentSupplierTab = 'list';
+
+        function switchSupplierTab(tab) {
+            currentSupplierTab = tab;
+
+            // Elements for each tab
+            const listEls = ['supplierFormCard', 'supplierListCard', 'supplierGuideCard'];
+            const mpTab = document.getElementById('marketplaceTab');
+            const mpOrdersTab = document.getElementById('mpOrdersTab');
+
+            // Hide all
+            listEls.forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
+            if (mpTab) mpTab.style.display = 'none';
+            if (mpOrdersTab) mpOrdersTab.style.display = 'none';
+
+            // Show selected
+            if (tab === 'list') listEls.forEach(id => { const el = document.getElementById(id); if (el && id !== 'supplierFormCard') el.style.display = ''; });
+            if (tab === 'marketplace' && mpTab) mpTab.style.display = '';
+            if (tab === 'mpOrders' && mpOrdersTab) mpOrdersTab.style.display = '';
+
+            // Update tab button styles
+            ['tabBtnList', 'tabBtnMarketplace', 'tabBtnMpOrders'].forEach(id => {
+                const btn = document.getElementById(id);
+                if (btn) {
+                    btn.style.fontWeight = '400';
+                    btn.style.background = 'transparent';
+                }
+            });
+            const activeBtn = { list: 'tabBtnList', marketplace: 'tabBtnMarketplace', mpOrders: 'tabBtnMpOrders' }[tab];
+            const activeBtnEl = document.getElementById(activeBtn);
+            if (activeBtnEl) { activeBtnEl.style.fontWeight = '600'; activeBtnEl.style.background = 'rgba(106,90,205,0.15)'; }
+
+            // Load data
+            if (tab === 'marketplace') loadMarketplaceProducts();
+            if (tab === 'mpOrders') loadMarketplaceOrders();
+        }
+
+        async function loadMarketplaceProducts() {
+            const filterSupplier = document.getElementById('mpFilterSupplier')?.value || '';
+            const url = filterSupplier ? `/marketplace/products?supplier_id=${filterSupplier}` : '/marketplace/products';
+            try {
+                mpProductsData = await api(url, 'GET', null, true) || [];
+                renderMarketplaceProducts();
+                // Populate supplier filter
+                const select = document.getElementById('mpFilterSupplier');
+                if (select && select.options.length <= 1) {
+                    const suppliers = await api('/suppliers', 'GET', null, true) || [];
+                    suppliers.forEach(s => {
+                        if (!Array.from(select.options).find(o => o.value === s.id)) {
+                            const opt = document.createElement('option');
+                            opt.value = s.id;
+                            opt.textContent = s.name;
+                            select.appendChild(opt);
+                        }
+                    });
+                }
+            } catch(e) { console.error('loadMarketplaceProducts:', e); }
+        }
+
+        function renderMarketplaceProducts() {
+            const grid = document.getElementById('mpProductsGrid');
+            const countEl = document.getElementById('mpProductCount');
+            if (!grid) return;
+
+            if (countEl) countEl.textContent = `${mpProductsData.length} produit(s)`;
+
+            if (mpProductsData.length === 0) {
+                grid.innerHTML = '<div class="card" style="grid-column:1/-1; text-align:center; padding:40px;"><p style="color:var(--text-muted);">📭 Aucun produit marketplace.<br><small>Les fournisseurs peuvent ajouter des produits via le bot Telegram.</small></p></div>';
+                return;
+            }
+
+            grid.innerHTML = mpProductsData.map(p => {
+                const statusColor = p.is_available && p.stock > 0 ? '#27ae60' : '#e74c3c';
+                const statusText = p.is_available && p.stock > 0 ? 'En vente' : 'Indisponible';
+                const imgHtml = p.image_url ? `<img src="${p.image_url}" style="width:100%; height:140px; object-fit:cover; border-radius:8px 8px 0 0;" onerror="this.style.display='none'">` : `<div style="height:80px; background:linear-gradient(135deg, #6a5acd22, #9370db22); border-radius:8px 8px 0 0; display:flex; align-items:center; justify-content:center; font-size:32px;">📦</div>`;
+                return `
+                    <div class="card" style="padding:0; overflow:hidden;">
+                        ${imgHtml}
+                        <div style="padding:12px;">
+                            <div style="display:flex; justify-content:space-between; align-items:start;">
+                                <h4 style="margin:0 0 4px;">${p.name}</h4>
+                                <span style="background:${statusColor}22; color:${statusColor}; padding:2px 8px; border-radius:10px; font-size:11px; white-space:nowrap;">${statusText}</span>
+                            </div>
+                            <div style="font-size:22px; font-weight:700; color:var(--accent); margin:6px 0;">${p.price}€</div>
+                            <div style="display:flex; gap:8px; font-size:12px; color:var(--text-muted); margin-bottom:6px;">
+                                <span>📦 Stock: <b>${p.stock || 0}</b></span>
+                                ${p.category ? '<span>🏷 ' + p.category + '</span>' : ''}
+                            </div>
+                            ${p.description ? '<p style="font-size:12px; color:var(--text-muted); margin:4px 0 8px;">' + p.description.substring(0, 80) + '</p>' : ''}
+                            <div style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
+                                <div class="mp-qty-selector" style="display:flex; border:1px solid var(--border); border-radius:10px; overflow:hidden; background: rgba(255,255,255,0.05);">
+                                    <button class="btn btn-sm" style="background:none; border:none; border-radius:0; width:30px; padding:0; color:#fff; font-size:18px; line-height:1;" onclick="const inp=document.getElementById('qty-mp-${p.id}'); if(inp.value>1)inp.value--;">-</button>
+                                    <input type="number" value="1" min="1" id="qty-mp-${p.id}" 
+                                        style="width:40px; text-align:center; background:none; border:none; color:#fff !important; font-size:16px; font-weight:800; padding:4px 0; margin:0;"
+                                        oninput="if(this.value<1)this.value=1;">
+                                    <button class="btn btn-sm" style="background:none; border:none; border-radius:0; width:30px; padding:0; color:#fff; font-size:18px; line-height:1;" onclick="const inp=document.getElementById('qty-mp-${p.id}'); inp.value++;">+</button>
+                                </div>
+                                <button class="btn btn-sm btn-accent" onclick="addWithQty('${p.id}')" style="flex:1; border-radius:10px; height: 36px; font-weight: 700;">🛒 Ajouter</button>
+                            </div>
+                            <div style="display:flex; gap:6px; margin-top:8px;">
+                                <button class="btn btn-sm btn-outline" style="flex:1;" onclick="editMpProduct('${p.id}')">✏️ Modifier</button>
+                                <button class="btn btn-sm btn-outline" style="color:var(--danger); border-color:var(--danger);" onclick="deleteMpProduct('${p.id}')">🗑 Supprimer</button>
+                            </div>
+                        </div>
+                    </div>`;
+            }).join('');
+        }
+
+        async function editMpProduct(id) {
+            const p = mpProductsData.find(x => x.id === id);
+            if (!p) return;
+            const newPrice = prompt('Nouveau prix :', p.price);
+            if (newPrice === null) return;
+            const newStock = prompt('Nouveau stock :', p.stock);
+            if (newStock === null) return;
+            try {
+                await api('/marketplace/products', 'POST', {
+                    id: p.id,
+                    price: parseFloat(newPrice) || p.price,
+                    stock: parseInt(newStock) || p.stock,
+                    is_available: parseInt(newStock) > 0
+                }, true);
+                showToast('✅ Produit mis à jour', 'success');
+                loadMarketplaceProducts();
+            } catch(e) { showToast('Erreur: ' + e.message, 'error'); }
+        }
+
+        async function deleteMpProduct(id) {
+            if (!confirm('Supprimer ce produit marketplace ?')) return;
+            try {
+                await api('/marketplace/products/' + id, 'DELETE', null, true);
+                showToast('🗑 Produit supprimé', 'success');
+                loadMarketplaceProducts();
+            } catch(e) { showToast('Erreur: ' + e.message, 'error'); }
+        }
+
+        async function loadMarketplaceOrders() {
+            try {
+                mpOrdersData = await api('/marketplace/orders', 'GET', null, true) || [];
+                renderMarketplaceOrders();
+            } catch(e) { console.error('loadMarketplaceOrders:', e); }
+        }
+
+        function renderMarketplaceOrders() {
+            const el = document.getElementById('mpOrdersList');
+            if (!el) return;
+
+            if (mpOrdersData.length === 0) {
+                el.innerHTML = '<p style="text-align:center; color:var(--text-muted); padding:20px;">📭 Aucune commande marketplace.</p>';
+                return;
+            }
+
+            el.innerHTML = `<div style="overflow-x:auto;"><table style="width:100%; border-collapse:collapse;">
+                <thead><tr style="border-bottom:2px solid var(--border); text-align:left;">
+                    <th style="padding:8px;">ID</th>
+                    <th style="padding:8px;">Fournisseur</th>
+                    <th style="padding:8px;">Produits</th>
+                    <th style="padding:8px;">Total</th>
+                    <th style="padding:8px;">Statut</th>
+                    <th style="padding:8px;">Date</th>
+                    <th style="padding:8px;">Actions</th>
+                </tr></thead>
+                <tbody>${mpOrdersData.map(o => {
+                    const statusColors = { pending: '#f39c12', accepted: '#3498db', ready: '#27ae60', collected: '#95a5a6', cancelled: '#e74c3c' };
+                    const statusLabels = { pending: '⏳ En attente', accepted: '✅ Acceptée', ready: '📦 Prête', collected: '🏁 Récupérée', cancelled: '❌ Annulée' };
+                    const items = Array.isArray(o.products) ? o.products.map(p => p.name + ' x' + p.qty).join(', ') : 'N/A';
+                    const date = o.created_at ? new Date(o.created_at).toLocaleDateString('fr-FR', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' }) : '';
+                    return '<tr style="border-bottom:1px solid var(--border);">' +
+                        '<td style="padding:8px; font-family:monospace;">#' + o.id.slice(-6) + '</td>' +
+                        '<td style="padding:8px;">' + (o.supplier_name || o.supplier_id?.slice(0,8) || '?') + '</td>' +
+                        '<td style="padding:8px; font-size:12px;">' + items + '</td>' +
+                        '<td style="padding:8px; font-weight:600;">' + o.total_price + '€</td>' +
+                        '<td style="padding:8px;"><span style="background:' + (statusColors[o.status]||'#999') + '22; color:' + (statusColors[o.status]||'#999') + '; padding:2px 8px; border-radius:10px; font-size:11px;">' + (statusLabels[o.status] || o.status) + '</span></td>' +
+                        '<td style="padding:8px; font-size:12px;">' + date + '</td>' +
+                        '<td style="padding:8px; display:flex; gap:4px;">' + 
+                            (o.status === 'ready' ? '<button class="btn btn-sm" style="background:#27ae60; color:#fff; border:none;" onclick="updateMarketplaceStatus(\'' + o.id + '\', \'collected\')">🏁 Récupérée</button>' : '') + 
+                            (o.status === 'pending' || o.status === 'accepted' ? '<button class="btn btn-sm btn-outline" style="color:var(--danger); border-color:var(--danger);" onclick="updateMarketplaceStatus(\'' + o.id + '\', \'cancelled\')">🗑 Annuler</button>' : '') +
+                        '</td>' +
+                    '</tr>';
+                }).join('')}</tbody></table></div>`;
+        }
+
+        async function updateMarketplaceStatus(orderId, status) {
+            if (status === 'cancelled' && !confirm('Êtes-vous sûr de vouloir annuler cette commande ?')) return;
+            try {
+                await api('/marketplace/orders/' + orderId + '/status', 'POST', { status }, true);
+                const labels = { collected: 'récupérée', cancelled: 'annulée' };
+                showToast(`✅ Commande ${labels[status] || status} !`, 'success');
+                loadMarketplaceOrders();
+            } catch(e) { showToast('Erreur: ' + e.message, 'error'); }
+        }
+        // Panier Marketplace Logic
+        let mpCart = [];
+        function toggleMpCart() {
+            const drawer = document.getElementById('mpCartDrawer');
+            if (drawer) {
+                drawer.style.display = (drawer.style.display === 'none' || drawer.style.display === '') ? 'flex' : 'none';
+            }
+        }
+
+        function addWithQty(productId) {
+            const qty = parseInt(document.getElementById('qty-mp-'+productId).value) || 1;
+            for(let i=0; i<qty; i++) addMarketplaceToCart(productId);
+            // reset quantity input
+            document.getElementById('qty-mp-'+productId).value = 1;
+        }
+
+        function addMarketplaceToCart(productId) {
+            const p = mpProductsData.find(x => x.id === productId);
+            if (!p) return;
+            const existing = mpCart.find(x => x.id === productId);
+            if (existing) {
+                existing.qty++;
+            } else {
+                mpCart.push({ ...p, qty: 1 });
+            }
+            renderMpCart();
+            showToast(`✅ ${p.name} ajouté`, 'success');
+        }
+
+        function renderMpCart() {
+            const listEl = document.getElementById('mpCartItems');
+            const badge = document.getElementById('mpCartBadge');
+            if (!listEl) return;
+
+            if (mpCart.length === 0) {
+                listEl.innerHTML = '<p style="text-align:center; color:var(--text-muted); margin-top:100px;">Panier vide 📭</p>';
+                if (badge) badge.style.display = 'none';
+                document.getElementById('mpCartTotal').innerText = '0.00€';
+                return;
+            }
+
+            if (badge) {
+                badge.style.display = 'flex';
+                badge.innerText = mpCart.reduce((a, b) => a + b.qty, 0);
+            }
+
+            let total = 0;
+            listEl.innerHTML = mpCart.map((it, idx) => {
+                total += it.price * it.qty;
+                return `
+                    <div style="display:flex; align-items:center; gap:10px; margin-bottom:15px; padding:10px; background:rgba(255,255,255,0.03); border-radius:12px; border:1px solid var(--border);">
+                        ${it.image_url ? `<img src="${it.image_url}" style="width:40px; height:40px; object-fit:cover; border-radius:8px;">` : `<div style="width:40px; height:40px; background:var(--border); border-radius:8px; display:flex; align-items:center; justify-content:center;">📦</div>`}
+                        <div style="flex:1; min-width:0;">
+                            <div style="font-weight:700; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${it.name}</div>
+                            <div style="font-size:12px; color:var(--accent);">${it.price}€</div>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <button class="btn btn-sm btn-outline" style="padding:0; width:24px; height:24px;" onclick="updateMpCartQty(${idx}, -1)">-</button>
+                            <span style="font-weight:bold; font-size:13px;">${it.qty}</span>
+                            <button class="btn btn-sm btn-outline" style="padding:0; width:24px; height:24px;" onclick="updateMpCartQty(${idx}, 1)">+</button>
+                        </div>
+                    </div>`;
+            }).join('');
+            document.getElementById('mpCartTotal').innerText = `${total.toFixed(2)}€`;
+        }
+
+        function updateMpCartQty(idx, delta) {
+            if (!mpCart[idx]) return;
+            mpCart[idx].qty += delta;
+            if (mpCart[idx].qty <= 0) mpCart.splice(idx, 1);
+            renderMpCart();
+        }
+
+        async function checkoutMarketplace() {
+            if (mpCart.length === 0) return showToast('Panier vide !', 'error');
+            
+            // Group elements by supplier
+            const orders = {};
+            mpCart.forEach(it => {
+                if (!orders[it.supplier_id]) orders[it.supplier_id] = [];
+                orders[it.supplier_id].push(it);
+            });
+
+            const address = document.getElementById('mpOrderAddress').value;
+            const deliveryType = document.getElementById('mpOrderDeliveryType').value;
+
+            if (deliveryType === 'delivery' && !address) {
+                return showToast('Veuillez entrer une adresse de livraison !', 'error');
+            }
+
+            if (!confirm(`Passer ${Object.keys(orders).length} commande(s) aux fournisseurs ?`)) return;
+
+            try {
+                for (const supplierId in orders) {
+                    const products = orders[supplierId].map(it => ({
+                        id: it.id,
+                        name: it.name,
+                        price: it.price,
+                        qty: it.qty,
+                        image_url: it.image_url
+                    }));
+                    const totalPrice = products.reduce((a, b) => a + (b.price * b.qty), 0);
+                    
+                    await api('/marketplace/orders', 'POST', {
+                        supplier_id: supplierId,
+                        products: products,
+                        total_price: totalPrice,
+                        address: address,
+                        delivery_type: deliveryType
+                    }, true);
+                }
+                
+                showToast('🚀 Commandes envoyées !', 'success');
+                document.getElementById('mpOrderAddress').value = '';
+                mpCart = [];
+                renderMpCart();
+                toggleMpCart();
+                switchSupplierTab('mpOrders');
+            } catch(e) {
+                showToast('Erreur: ' + e.message, 'error');
+            }
+        }
+        // ========== FIN MARKETPLACE FUNCTIONS ==========
+
         (async () => {
             initCustomTimers();
             const initSection = location.hash.replace('#', '') || 'overview';
+            
+            // 1. Initial essential data
+            try {
+                const [settings, stats] = await Promise.all([
+                    api('/settings', 'GET', null, false),
+                    api('/stats', 'GET', null, false)
+                ]);
+                window.appSettings = settings;
+                window.appStats = stats;
+                _loadedSections['settings'] = true;
+            } catch (err) { console.warn("Initial data load failed", err); }
+
+            // 2. Main section load
             await switchSection(initSection);
 
-            const allSections = ['overview', 'users', 'products', 'logistique', 'broadcast', 'suppliers', 'settings', 'insights', 'reviews'];
+            // 3. Sequential preload (one by one, avoiding server pressure)
+            const allSections = ['users', 'products', 'logistique', 'broadcast', 'insights', 'reviews', 'suppliers'];
             const toPreload = allSections.filter(s => s !== initSection);
-            await Promise.allSettled(toPreload.map(s => loadData(s, true).then(() => { _loadedSections[s] = true; })));
+            
+            for (const s of toPreload) {
+                if (_loadedSections[s]) continue;
+                // Preload in the background with a small delay between each
+                setTimeout(async () => {
+                    try {
+                        await loadData(s, true);
+                        _loadedSections[s] = true;
+                    } catch (e) { }
+                }, 100);
+            }
         })();
     </script>
 </body>

@@ -243,6 +243,19 @@ class WhatsAppSessionChannel extends Channel {
         await this.start();
     }
 
+    _resolveMedia(url) {
+        if (typeof url !== 'string') return url;
+        if (url.startsWith('http') || url.startsWith('data:')) return url;
+        // Si c'est un chemin commençant par /public/ ou relatif, on le résout par rapport au CWD
+        let relative = url.startsWith('/') ? url.substring(1) : url;
+        const absolute = path.join(process.cwd(), relative);
+        if (fs.existsSync(absolute)) return absolute;
+        // Fallback spécifique pour web/public/...
+        const webPublic = path.join(process.cwd(), 'web', relative);
+        if (fs.existsSync(webPublic)) return webPublic;
+        return url;
+    }
+
     onMessage(handler) { this.messageHandler = handler; }
 
     async sendMessage(userId, text, options = {}) {
@@ -255,19 +268,16 @@ class WhatsAppSessionChannel extends Channel {
         try {
             let result;
             if (options.source || options.media_url) {
-                const fs = require('fs');
                 let mediaSource = options.source;
-                let mediaUrl = options.media_url;
+                let mediaUrl = this._resolveMedia(options.media_url);
 
                 // Si c'est un chemin local et qu'on n'a pas encore de buffer (source)
-                if (!mediaSource && mediaUrl && typeof mediaUrl === 'string' && !mediaUrl.startsWith('http') && !mediaUrl.startsWith('data:')) {
-                    if (fs.existsSync(mediaUrl)) {
-                        try {
-                            mediaSource = fs.readFileSync(mediaUrl);
-                            mediaUrl = null;
-                        } catch (e) {
-                            console.error(`[WA-Send] Error reading local file ${mediaUrl}:`, e.message);
-                        }
+                if (!mediaSource && typeof mediaUrl === 'string' && fs.existsSync(mediaUrl)) {
+                    try {
+                        mediaSource = fs.readFileSync(mediaUrl);
+                        mediaUrl = null;
+                    } catch (e) {
+                        console.error(`[WA-Send] Error reading local file ${mediaUrl}:`, e.message);
                     }
                 }
 
@@ -323,7 +333,9 @@ class WhatsAppSessionChannel extends Channel {
             if (textMenu) textMenu += "\n\n";
             textMenu += "*📋 OPTIONS DISPONIBLES :*\n";
             buttons.forEach((b, i) => {
-                textMenu += `*${i+1}* — ${b.title}\n`;
+                const label = b.title || b.text || 'Option';
+                const link = b.url ? `\n🔗 ${b.url}` : '';
+                textMenu += `*${i+1}* — ${label}${link}\n`;
             });
             textMenu += "\n_Répondez avec le chiffre correspondant._";
         }
@@ -331,18 +343,15 @@ class WhatsAppSessionChannel extends Channel {
         // 1. Tentative envoi avec média (si présent)
         if (options.source || options.media_url) {
             try {
-                const fs = require('fs');
                 let mediaSource = options.source;
-                let mediaUrl = options.media_url;
+                let mediaUrl = this._resolveMedia(options.media_url);
 
                 // Détecter chemin local absolute pour WhatsApp
-                if (!mediaSource && mediaUrl && typeof mediaUrl === 'string' && !mediaUrl.startsWith('http') && !mediaUrl.startsWith('data:')) {
-                    if (fs.existsSync(mediaUrl)) {
-                        try {
-                            mediaSource = fs.readFileSync(mediaUrl);
-                            mediaUrl = null;
-                        } catch (e) { }
-                    }
+                if (!mediaSource && typeof mediaUrl === 'string' && fs.existsSync(mediaUrl)) {
+                    try {
+                        mediaSource = fs.readFileSync(mediaUrl);
+                        mediaUrl = null;
+                    } catch (e) { }
                 }
 
                 const mediaType = options.media_type === 'video' ? 'video' : 'image';

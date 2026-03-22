@@ -8,6 +8,7 @@ if (process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID) {
     console.log('[System] Detected Railway Environment');
     console.log('[System] Deployment ID:', process.env.RAILWAY_DEPLOYMENT_ID || 'Unknown');
     console.log('[System] Replica Index:', process.env.RAILWAY_REPLICA_INDEX || '0');
+    console.log('[System] Process ID:', process.pid);
 }
 
 const { createServer, setBotInstance } = require('./server');
@@ -55,10 +56,19 @@ async function main() {
         try {
             const settings = ctx.state.settings;
 
-            // Check if maintenance mode is enabled
+            // 1. Check if the platform itself is enabled
+            if (ctx.platform === 'telegram' && settings.enable_telegram === false) {
+                if (ctx.callbackQuery) return ctx.answerCbQuery("ℹ️ Le service Telegram est actuellement désactivé.", { show_alert: true }).catch(() => {});
+                return ctx.reply("ℹ️ <b>Service Temporairement Indisponible</b>\n\nLe bot Telegram est actuellement désactivé par l'administration. Veuillez nous contacter sur WhatsApp ou réessayer plus tard.", { parse_mode: 'HTML' }).catch(() => {});
+            }
+            if (ctx.platform === 'whatsapp' && settings.enable_whatsapp === false) {
+                return ctx.reply("ℹ️ *Service Temporairement Indisponible*\n\nLe service WhatsApp est actuellement désactivé. Veuillez utiliser notre bot Telegram ou réessayer plus tard.").catch(() => {});
+            }
+
+            // 2. Check if maintenance mode is enabled
             if (settings && (settings.maintenance_mode === true || settings.maintenance_mode === 'true')) {
-                const adminContact = settings.maintenance_contact || 'https://t.me/Lejardinidf';
-                const maintenanceMessage = settings.maintenance_message || '🔧 <b>Le bot est actuellement en maintenance.</b>\n\nNous revenons bientôt !\n\nContactez l\'admin : @Lejardinidf';
+                const adminContact = settings.maintenance_contact || '';
+                const maintenanceMessage = settings.maintenance_message || '🔧 <b>Le bot est actuellement en maintenance.</b>\n\nNous revenons bientôt !';
 
                 if (ctx.callbackQuery) {
                     await ctx.answerCbQuery(maintenanceMessage, { show_alert: true }).catch(() => { });
@@ -111,7 +121,7 @@ async function main() {
     setupOrderSystem(dispatcher);
 
     // Marketplace fournisseurs
-    const { handleMarketplaceText, handleMarketplacePhoto } = setupMarketplaceHandlers(dispatcher);
+    const { handleMarketplaceText, handleMarketplacePhoto, handleMarketplaceVideo } = setupMarketplaceHandlers(dispatcher);
     await initMarketplaceState();
     console.log('🏪 Marketplace fournisseurs initialisée');
 
@@ -173,7 +183,7 @@ async function main() {
                     const userName = ctx.from.first_name || 'Utilisateur';
                     await recordPollFreeResponse(bcId, userId, userName, text);
                     const replyText = `✅ <b>Votre réponse a été enregistrée :</b>\n\n<i>"${text}"</i>\n\nMerci pour votre participation !`;
-
+                    
                     if (bcIndex !== undefined) {
                         await ctx.reply(replyText);
                         return ctx.reply("🔄 Menu Principal", await getMainMenuKeyboard(ctx, ctx.state.settings, ctx.state.user));
@@ -195,27 +205,37 @@ async function main() {
 
     // Marketplace photo handler
     dispatcher.on('photo', async (ctx, next) => {
+        console.log(`[Marketplace-Photo] Photo received from ${ctx.from.id}`);
         const mpPhotoResult = handleMarketplacePhoto(ctx);
-        if (mpPhotoResult !== false) { await mpPhotoResult; return; }
+        if (mpPhotoResult !== false) { 
+            console.log(`[Marketplace-Photo] Photo handled by marketplace`);
+            await mpPhotoResult; 
+            return; 
+        }
         await next();
     });
+
+    // Marketplace video handler
+    dispatcher.on('video', async (ctx, next) => {
+        console.log(`[Marketplace-Video] Video received from ${ctx.from.id}`);
+        const mpVideoResult = handleMarketplaceVideo(ctx);
+        if (mpVideoResult !== false) { 
+            console.log(`[Marketplace-Video] Video handled by marketplace`);
+            await mpVideoResult; 
+            return; 
+        }
+        await next();
+    });
+
 
     // 2. Initialisation des Canaux
     const replicaIndex = process.env.RAILWAY_REPLICA_INDEX || '0';
     if (replicaIndex === '0') {
-        console.log('[System] Replica 0: Starting all channels...');
+        console.log('[System] Replica 0: Starting all channels (WA + TG)...');
         await initChannels();
     } else {
-        console.log(`[System] Replica ${replicaIndex}: WhatsApp disabled to avoid session conflict. Telegram only.`);
-        // Note: Seule la réplica 0 gère WA pour éviter le conflit 440 sur Baileys
-        const tgToken = process.env.BOT_TOKEN;
-        if (tgToken) {
-            const { TelegramChannel } = require('./channels/TelegramChannel');
-            const tg = new TelegramChannel(tgToken);
-            await tg.initialize();
-            registry.register(tg);
-            await registry.startAll();
-        }
+        console.log(`[System] Replica ${replicaIndex}: Bot background channels disabled to avoid conflicts.`);
+        // Note: Seule la réplica 0 gère WA et TG pour éviter les conflits 440 (Baileys) et 409 (Telegram getUpdates)
     }
 
     // 3. Liaison Canaux -> Dispatcher
@@ -252,7 +272,7 @@ async function main() {
         const tgChannel = registry.query('telegram');
         const bot = tgChannel?.getBotInstance();
         if (bot) {
-            startAutomatedTimer(bot);
+            // startAutomatedTimer(bot); // RETIRÉ — Notification catalogue à jour
             setInterval(() => checkPlannedOrders(bot), 60000);
             setInterval(() => checkAbandonedCarts(bot), 1800000);
             setInterval(() => runAutomatedSync(bot), 900000);
@@ -334,17 +354,40 @@ function startAutomatedTimer(bot) {
 async function runAutomatedSync(bot) {
     try {
         const users = await getAllUsersForBroadcast('telegram', 'user');
-        if (!users) return;
-        for (const u of users) {
-             try {
-                const chatId = String(u.platform_id || '').replace('telegram_', '');
-                if (chatId) await bot.telegram.sendChatAction(chatId, 'typing');
-                if (u.is_blocked && (!u.data || u.data.blocked_by_admin !== true)) await markUserUnblocked(u.id);
-            } catch (err) {
-                if (err.code === 403) await markUserBlocked(u.id, false);
-            }
+        if (!users || users.length === 0) return;
+        
+        console.log(`[Sync] Starting sync for ${users.length} users...`);
+        
+        // Process in batches of 20 to avoid rate limits and event loop blocking
+        const batchSize = 20;
+        for (let i = 0; i < users.length; i += batchSize) {
+            const batch = users.slice(i, i + batchSize);
+            await Promise.allSettled(batch.map(async (u) => {
+                try {
+                    const chatId = String(u.platform_id || '').replace('telegram_', '');
+                    if (!chatId) return;
+                    
+                    // On teste si l'utilisateur a bloqué le bot
+                    await bot.telegram.sendChatAction(chatId, 'typing');
+                    
+                    // Si on arrive ici, le bot n'est pas bloqué
+                    if (u.is_blocked && (!u.data || u.data.blocked_by_admin !== true)) {
+                        await markUserUnblocked(u.id);
+                    }
+                } catch (err) {
+                    // 403 = l'utilisateur a bloqué le bot
+                    if (err.code === 403) {
+                        await markUserBlocked(u.id, false);
+                    }
+                }
+            }));
+            // Petit délai entre les batchs pour laisser respirer l'API
+            await new Promise(r => setTimeout(r, 500));
         }
-    } catch (e) { }
+        console.log(`[Sync] Finished sync for ${users.length} users.`);
+    } catch (e) {
+        console.error('❌ Error runAutomatedSync:', e.message);
+    }
 }
 
 main().catch(console.error);

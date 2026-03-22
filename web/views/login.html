@@ -211,39 +211,12 @@
       letter-spacing: 2px;
       color: rgba(255, 255, 255, 0.15);
     }
-
-    /* --- Mobile optimisations --- */
-    @media (max-width: 480px) {
-      .login-container {
-        padding: 16px;
-        justify-content: flex-end;
-        padding-bottom: max(24px, env(safe-area-inset-bottom));
-      }
-
-      .login-card {
-        padding: 28px 20px;
-        border-radius: 28px;
-        width: 100%;
-        max-width: 100%;
-      }
-
-      input[type="password"] {
-        font-size: 16px !important;
-        min-height: 52px;
-        padding: 14px 18px;
-      }
-
-      .login-btn {
-        min-height: 52px;
-        font-size: 16px;
-      }
-    }
   </style>
 </head>
 
 <body>
   <div class="login-container">
-    <div class="brand-logo">TIM <span>LE MEILLEUR IDF</span></div>
+    <div class="brand-logo" id="login_brand_logo">Admin <span>Panel</span></div>
 
     <div class="login-card">
       <h1>Administration</h1>

@@ -17,6 +17,9 @@ const { createPersistentMap } = require('../services/persistent_map');
 const authenticatedAdmins = createPersistentMap('authenticatedAdmins');
 const pendingAdminLogins = new Set();
 const pendingPasswordReset = new Set();
+const awaitingAdminChat = new Map(); // Map pour admin_id -> target_id_du_client (format platform_id)
+const activeAdminSessions = new Set(); // Admins currently in active chat mode
+const activeUserSessions = new Set(); // Users currently in active chat mode
 
 async function initAdminState() {
     await authenticatedAdmins.load();
@@ -80,17 +83,23 @@ async function showAdminMenu(ctx, isEdit = false) {
         `Ventes totales : <b>${stats.totalCA}€</b>\n\n` +
         `Choisissez une section pour gérer votre bot :`;
 
-    const keyboard = Markup.inlineKeyboard([
+    const rows = [
         [Markup.button.callback('📊 Statistiques', 'admin_stats'), Markup.button.callback('📈 Analytiques', 'admin_analytics')],
-        [Markup.button.callback('📦 Commandes Récentes', 'admin_orders')],
-        [Markup.button.callback('🚴 Gestion Livreurs', 'admin_livreurs')],
-        [Markup.button.callback('👥 Gestion Utilisateurs', 'admin_users')],
-        [Markup.button.callback('🛒 Gestion Produits', 'admin_products')],
-        [Markup.button.callback('🏪 Marketplace Fournisseurs', 'mp_browse')],
-        [Markup.button.callback('📢 Diffusion Message', 'admin_broadcast')],
-        [Markup.button.callback('✨ Fonctionnalités', 'admin_features'), Markup.button.callback('⚙️ Paramètres', 'admin_settings')],
-        [Markup.button.callback('◀️ Quitter la console', 'main_menu')]
-    ]);
+        [Markup.button.callback('📦 Commandes', 'admin_orders'), Markup.button.callback('🚴 Livreurs', 'admin_livreurs')],
+        [Markup.button.callback('👥 Utilisateurs', 'admin_users'), Markup.button.callback('🛒 Produits', 'admin_products')]
+    ];
+
+    const row4 = [];
+    if (settings.enable_marketplace !== false) {
+        row4.push(Markup.button.callback('🏪 Marketplace', 'mp_browse'));
+    }
+    row4.push(Markup.button.callback('📢 Diffusion', 'admin_broadcast'));
+    rows.push(row4);
+
+    rows.push([Markup.button.callback('✨ Fonctionnalités', 'admin_features'), Markup.button.callback('⚙️ Paramètres', 'admin_settings')]);
+    rows.push([Markup.button.callback('◀️ Quitter la console', 'main_menu')]);
+
+    const keyboard = Markup.inlineKeyboard(rows);
 
     if (isEdit) {
         return safeEdit(ctx, text, keyboard);
@@ -124,6 +133,42 @@ function setupAdminHandlers(bot) {
         try {
             await registerUser({ id: targetId, first_name: 'Utilisateur Manuel', username: 'inconnu' });
             ctx.reply(`✅ Utilisateur <code>${targetId}</code> ajouté manuellement avec succès !`, { parse_mode: 'HTML' });
+        } catch (e) {
+            ctx.reply(`❌ Erreur : ${e.message}`);
+        }
+    });
+
+    /**
+     * Approbation rapide d'un client
+     */
+    bot.action(/^approve_(.+)$/, async (ctx) => {
+        if (!(await isAdmin(ctx))) return ctx.answerCbQuery('❌ Accès réservé aux administrateurs.');
+        const userId = ctx.match[1];
+        const { approveUser } = require('../services/database');
+        
+        try {
+            await approveUser(userId);
+            await ctx.answerCbQuery('✅ Utilisateur approuvé avec succès !', true);
+            await safeEdit(ctx, ctx.callbackQuery.message.text + `\n\n✅ <b>APPROUVÉ PAR ${ctx.from.first_name}</b>`);
+            
+            // Notifier le client
+            const settings = ctx.state?.settings || await require('../services/database').getAppSettings();
+            await sendTelegramMessage(userId, `🎉 <b>Félicitations !</b>\n\nVotre accès a été validé par l'administrateur. Vous pouvez maintenant découvrir notre catalogue et passer commande.\n\nCliquez sur /start pour commencer !`);
+        } catch (e) {
+            console.error('[Admin-Approve] Error:', e.message);
+            await ctx.answerCbQuery('❌ Erreur lors de l\'approbation.', true);
+        }
+    });
+
+    bot.command(/^approve_(.+)$/, async (ctx) => {
+        if (!(await isAdmin(ctx))) return;
+        const userId = ctx.match[1];
+        const { approveUser } = require('../services/database');
+        
+        try {
+            await approveUser(userId);
+            ctx.reply(`✅ L'utilisateur <code>${userId}</code> a été approuvé.`, { parse_mode: 'HTML' });
+            await sendTelegramMessage(userId, `🎉 <b>Accès validé !</b>\n\nL'admin a autorisé votre compte. Tapez /start pour commander.`);
         } catch (e) {
             ctx.reply(`❌ Erreur : ${e.message}`);
         }
@@ -327,11 +372,52 @@ function setupAdminHandlers(bot) {
 
         const buttons = [
             [Markup.button.callback(u.is_livreur ? '🚫 Retirer Livreur' : '🚴 Passer Livreur', `admin_user_toggle_livreur_${u.id}`)],
+            [Markup.button.callback('💬 Contacter ce client', `admin_chat_user_${u.id}`)],
             [Markup.button.callback('💰 Modifier Solde', `admin_user_edit_balance_${u.id}`), Markup.button.callback('⭐ Modifier Points', `admin_user_edit_points_${u.id}`)],
             [Markup.button.callback(u.is_blocked ? '✅ Débloquer' : '🚫 Bloquer', `admin_user_block_${u.id}`)],
             [Markup.button.callback('◀️ Retour', 'admin_users')]
         ];
         await safeEdit(ctx, msg, Markup.inlineKeyboard(buttons));
+    });
+    
+    // Support Chat - Admin vers Client
+    bot.action(/^admin_chat_user_(.+)$/, async (ctx) => {
+        if (!(await isAdmin(ctx))) return;
+        const targetIdString = ctx.match[1];
+        const targetId = targetIdString.replace('telegram_', '').replace('whatsapp_', '');
+        awaitingAdminChat.set(String(ctx.from.id), targetIdString);
+        activeAdminSessions.add(String(ctx.from.id));
+        await ctx.answerCbQuery();
+        return safeEdit(ctx, `💬 <b>CONVERSATION ACTIVE</b>\n\nVous discutez avec <code>${targetId}</code>.\n\nTous vos prochains messages (texte, photo, vidéo) lui seront transmis.\n\nCliquez sur le bouton ci-dessous pour <b>TERMINER</b> et reprendre le comportement normal.`,
+            Markup.inlineKeyboard([[Markup.button.callback('🛑 TERMINER LA CONVERSATION', `admin_chat_end_${targetIdString}`)]])
+        );
+    });
+
+    bot.action(/^admin_chat_end_(.+)$/, async (ctx) => {
+        const adminId = String(ctx.from.id);
+        const targetIdString = ctx.match[1];
+        awaitingAdminChat.delete(adminId);
+        activeAdminSessions.delete(adminId);
+        await ctx.answerCbQuery('Conversation terminée.');
+        
+        // Notifier le client
+        await sendTelegramMessage(targetIdString, `🏁 <b>L'administrateur a mis fin à la discussion.</b>\n\nLe bot reprend son fonctionnement normal. Tapez /start pour voir le menu.`);
+        
+        return showAdminMenu(ctx, true);
+    });
+
+    bot.command('chat', async (ctx) => {
+        if (!(await isAdmin(ctx))) return;
+        const args = ctx.message.text.split(' ');
+        if (args.length < 2) return ctx.reply('❌ Usage: /chat <ID_UTILISATEUR>');
+        
+        const targetIdString = args[1];
+        awaitingAdminChat.set(String(ctx.from.id), targetIdString);
+        activeAdminSessions.add(String(ctx.from.id));
+        
+        return ctx.reply(`💬 <b>CONVERSATION INITIALISÉE</b>\n\nVous discutez avec <code>${targetIdString}</code>.\n\nTous vos messages lui seront relayés.`,
+            Markup.inlineKeyboard([[Markup.button.callback('🛑 TERMINER', `admin_chat_end_${targetIdString}`)]])
+        );
     });
 
     const pendingUserEdit = new Map();
@@ -486,6 +572,45 @@ function setupAdminHandlers(bot) {
             await safeEdit(ctx, '🚀 Diffusion en cours...');
             const res = await broadcastMessage('users', message, options);
             return safeEdit(ctx, `✅ Diffusion terminée !\n\n📊 Cibles : ${res.total}\n✅ Succès : ${res.success}\n❌ Échecs : ${res.failed}`, Markup.inlineKeyboard([[Markup.button.callback('◀️ Menu Admin', 'admin_menu')]]));
+        }
+
+        // Support Chat Logic (Admin -> User)
+        const adminId = String(ctx.from.id);
+        if (awaitingAdminChat.has(adminId) && (await isAdmin(ctx))) {
+            const targetId = awaitingAdminChat.get(adminId);
+            // On ne delete PAS le chat ici pour garder la persistance
+            
+            // Si c'est une commande spécifiquement pour arrêter
+            if (ctx.message.text === '/stopchat' || ctx.message.text === '/end') {
+                awaitingAdminChat.delete(adminId);
+                activeAdminSessions.delete(adminId);
+                return ctx.reply('🏁 Conversation terminée.');
+            }
+
+            const text = ctx.message.text || ctx.message.caption || '';
+            const options = { parse_mode: 'HTML' };
+            
+            // On prépare le bouton de réponse pour le client
+            options.reply_markup = {
+                inline_keyboard: [
+                    [{ text: '💬 Répondre à l\'Admin', callback_data: `user_chat_reply_admin` }],
+                    [{ text: '🛑 Terminer la discussion', callback_data: `cancel_user_support` }]
+                ]
+            };
+
+            if (ctx.message.photo) {
+                options.photo = ctx.message.photo[ctx.message.photo.length - 1].file_id;
+            } else if (ctx.message.video) {
+                options.video = ctx.message.video.file_id;
+                options.caption = text;
+            }
+
+            try {
+                await sendTelegramMessage(targetId, `👮 <b>MESSAGE DE L'ADMINISTRATION</b>\n\n${text ? `"${text}"` : (options.photo ? '📸 Photo reçue' : '🎥 Vidéo reçue')}`, options);
+                return ctx.reply(`✅ <b>Message transmis au client !</b>`, { parse_mode: 'HTML' });
+            } catch (e) {
+                return ctx.reply(`❌ <b>Échec de l'envoi :</b> ${e.message}`, { parse_mode: 'HTML' });
+            }
         }
         return next();
     });
@@ -655,14 +780,10 @@ function setupAdminHandlers(bot) {
             `Explorez chaque section du bot en détail.\nCliquez sur un onglet pour en savoir plus :`;
 
         await safeEdit(ctx, msg, Markup.inlineKeyboard([
-            [Markup.button.callback('🛒 Catalogue & Commandes', 'feat_catalog')],
-            [Markup.button.callback('🚴 Système Livreur', 'feat_livreur')],
-            [Markup.button.callback('💬 Chat & Communication', 'feat_chat')],
-            [Markup.button.callback('🎁 Fidélité & Parrainage', 'feat_fidelity')],
-            [Markup.button.callback('📣 Diffusion (Broadcast)', 'feat_broadcast')],
-            [Markup.button.callback('📊 Statistiques & Dashboard', 'feat_stats')],
-            [Markup.button.callback('👥 Gestion Utilisateurs', 'feat_users')],
-            [Markup.button.callback('⚙️ Paramètres Bot', 'feat_settings')],
+            [Markup.button.callback('🛒 Catalogue', 'feat_catalog'), Markup.button.callback('🚴 Livreur', 'feat_livreur')],
+            [Markup.button.callback('💬 Chat', 'feat_chat'), Markup.button.callback('🎁 Fidélité', 'feat_fidelity')],
+            [Markup.button.callback('📣 Diffusion', 'feat_broadcast'), Markup.button.callback('📊 Stats', 'feat_stats')],
+            [Markup.button.callback('👥 Utilisateurs', 'feat_users'), Markup.button.callback('⚙️ Paramètres', 'feat_settings')],
             [Markup.button.callback('◀️ Menu Admin', 'admin_menu')]
         ]));
     });
