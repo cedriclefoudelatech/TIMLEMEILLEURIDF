@@ -40,51 +40,27 @@ function setupStartHandler(bot) {
             const settings = ctx.state?.settings || await getAppSettings();
             const docId = `${ctx.platform}_${user.id}`;
 
-            // Quitter tout contexte produit
-            try { const { clearActiveMediaGroup } = require('../services/utils'); clearActiveMediaGroup(docId); } catch(e) {}
-
-            // ═══ NETTOYAGE COMPLET : supprimer TOUS les messages du bot dans le chat ═══
+            // --- NETTOYAGE COMPLET (TIM Specifique) ---
             try {
                 const chatId = ctx.chat?.id;
                 const currentMsgId = ctx.message?.message_id;
-
-                if (chatId && currentMsgId && ctx.platform === 'telegram' && ctx.telegram) {
-                    // 1. D'abord supprimer tous les messages trackés en DB
+                if (chatId && currentMsgId && ctx.platform === 'telegram') {
                     const tracked = await getTrackedMessages(docId);
                     const trackedSet = new Set((tracked || []).map(Number));
-
-                    // 2. Balayer les 50 derniers messages (IDs décroissants avant le /start)
-                    //    Telegram permet de supprimer les messages de moins de 48h
                     const deletePromises = [];
-                    for (let id = currentMsgId - 1; id >= currentMsgId - 50 && id > 0; id--) {
-                        deletePromises.push(
-                            ctx.telegram.deleteMessage(chatId, id).catch(() => {})
-                        );
+                    for (let id = currentMsgId - 1; id >= currentMsgId - 60 && id > 0; id--) {
+                        deletePromises.push(ctx.telegram.deleteMessage(chatId, id).catch(() => {}));
                     }
-                    // Ajouter les trackés qui seraient plus anciens
                     for (const tid of trackedSet) {
-                        if (tid < currentMsgId - 50) {
-                            deletePromises.push(
-                                ctx.telegram.deleteMessage(chatId, tid).catch(() => {})
-                            );
-                        }
+                        if (tid < currentMsgId - 60) deletePromises.push(ctx.telegram.deleteMessage(chatId, tid).catch(() => {}));
                     }
-
-                    // Exécuter en parallèle (les erreurs sont silencieuses)
                     await Promise.allSettled(deletePromises);
-
-                    // 3. Vider la liste des messages trackés en DB
                     const { supabase, COL_USERS } = require('../services/database');
-                    await supabase.from(COL_USERS).update({
-                        tracked_messages: [],
-                        last_menu_id: null
-                    }).eq('id', docId);
+                    await supabase.from(COL_USERS).update({ tracked_messages: [], last_menu_id: null }).eq('id', docId);
                 }
-            } catch (e) {
-                console.error('[START] Cleanup error:', e.message);
-            }
+            } catch (e) { }
 
-            // Vérifier si un code de parrainage
+            // Vérifier parrainage
             let referrerId = null;
             const payload = (ctx.message && ctx.message.text) ? ctx.message.text.split(' ')[1] : null;
             if (payload && payload.startsWith('ref_')) {
@@ -96,137 +72,93 @@ function setupStartHandler(bot) {
             ctx.state.user = registeredUser;
             await incrementDailyStat('start_commands');
 
-            // --- NOUVEAU : FORCE SUBSCRIBE ---
+            // Force Subscription
             if (ctx.platform === 'telegram' && settings.force_subscribe) {
                 const isSubscribed = await checkSubscription(bot, ctx, settings);
                 if (!isSubscribed) {
                     const subText = `⚠️ <b>ABONNEMENT REQUIS</b>\n\n` +
                         `Bonjour <b>${user.first_name}</b>,\n\n` +
-                        `Pour continuer et accéder à nos services, vous devez d'abord rejoindre notre canal officiel.\n\n` +
-                        `C'est ici que nous publions nos nouveautés et promotions ! 🚀`;
+                        `Pour accéder à nos services, vous devez d'abord rejoindre notre canal officiel.\n\n` +
+                        `C'est ici que nous publions nos nouveautés ! 🚀`;
                     
                     const subKeyboard = Markup.inlineKeyboard([
                         [Markup.button.url('📢 Rejoindre le Canal', settings.channel_url || 'https://t.me/channel')],
-                        [Markup.button.callback(settings.btn_verify_sub || '✅ Vérifier / Nouveau Lien', 'check_sub')]
+                        [Markup.button.callback(settings.btn_verify_sub || '✅ Vérifier mon abonnement', 'check_sub')]
                     ]);
 
-                    return await safeEdit(ctx, subText, {
-                        photo: settings.welcome_photo || null,
-                        ...subKeyboard
-                    });
+                    return await safeEdit(ctx, subText, { photo: settings.welcome_photo || null, ...subKeyboard });
                 } else if (registeredUser.is_approved === false) {
-                    // Si abonné, on auto-approuve s'il était en attente
-                    const { supabase, COL_USERS, ts } = require('../services/database');
-                    await supabase.from(COL_USERS).update({ is_approved: true, updated_at: ts() }).eq('id', registeredUser.id);
+                    // Auto-approve if they are subscribed and was pending
+                    const { approveUser } = require('../services/database');
+                    await approveUser(registeredUser.id);
                     registeredUser.is_approved = true;
                 }
             }
 
-            // --- NOUVEAU : SYSTÈME D'APPROBATION ---
+            // Système d'approbation (si désactivé dans les réglages, registeredUser.is_approved sera déjà true)
             const isApproved = registeredUser.is_approved !== false || (await isAdmin(ctx));
 
             if (!isApproved) {
-                // Alerte Admin avec bouton d'approbation
-                const userType = registeredUser.is_livreur ? '🚚 Livreur' : '👤 Client';
+                // Notifier l'admin
                 const adminMsg = `🆕 <b>DEMANDE D'ACCÈS</b>\n\n` +
-                    `${userType} : <b>${user.first_name}</b>\n` +
-                    `🆔 ID : <code>${user.id}</code> (Platform: ${ctx.platform})\n` +
+                    `👤 Client : <b>${user.first_name}</b>\n` +
+                    `🆔 ID : <code>${user.id}</code>\n` +
                     `Username : @${user.username || 'Inconnu'}\n\n` +
-                    `<i>Cliquez sur le bouton ci-dessous pour lui donner accès.</i>`;
+                    `<i>Validation manuelle requise car l'auto-approbation est désactivée.</i>`;
 
                 const adminKeyboard = Markup.inlineKeyboard([
-                    [Markup.button.callback(`✅ ACCEPTER ${registeredUser.is_livreur ? 'LE LIVREUR' : 'LE CLIENT'}`, `approve_${ctx.platform}_${user.id}`)]
+                    [Markup.button.callback('✅ ACCEPTER L\'ACCÈS', `approve_${ctx.platform}_${user.id}`)]
                 ]);
 
                 await notifyAdmins(bot, adminMsg, adminKeyboard).catch(() => {});
 
-                const isWa = ctx.platform === 'whatsapp';
-                const restrictedText = `🛑 <b>ACCÈS RESTREINT</b>\n\n` +
+                const restrictedText = `🛑 <b>ACCÈS EN ATTENTE</b>\n\n` +
                     `Bonjour <b>${user.first_name}</b>,\n\n` +
-                    `Pour accéder au bot, vous devez d'abord envoyer un message à l'administrateur.\n` +
-                    `Une fois que l'admin aura validé votre accès, vous pourrez commander.\n\n` +
-                    (isWa ? `📝 <i>Une fois validé, écrivez <b>/start</b> pour actualiser le menu.</i>\n\n` +
-                            `👇 <b>Cliquez sur les liens ci-dessous :</b>\n` +
-                            (settings.private_contact_wa_url ? `• *WhatsApp Admin :* ${settings.private_contact_wa_url}\n` : '') +
-                            (settings.private_contact_url ? `• *Telegram Admin :* ${settings.private_contact_url}\n` : '') +
-                            (settings.channel_url ? `• *Notre Canal :* ${settings.channel_url}\n` : '') : 
-                            `👇 <b>Veuillez cliquer ci-dessous :</b>`);
+                    `Votre compte est en cours de validation par l'administrateur.\n` +
+                    `Un message vous sera envoyé dès que vous pourrez commander.\n\n` +
+                    `👇 <b>En attendant, rejoignez-nous :</b>`;
                 
                 const b = [];
-                if (settings.private_contact_url) b.push([Markup.button.url('✉️ Telegram : Admin', settings.private_contact_url)]);
-                if (settings.private_contact_wa_url) b.push([Markup.button.url('✉️ WhatsApp : Admin', settings.private_contact_wa_url)]);
-                b.push([Markup.button.url('📢 S’abonner au canal', settings.channel_url || 'https://t.me/channel')]);
-                b.push([Markup.button.callback('🔄 Rafraîchir mon statut', 'start')]);
+                if (settings.private_contact_url) b.push([Markup.button.url('✉️ Telegram Admin', settings.private_contact_url)]);
+                b.push([Markup.button.url('📢 Canal Officiel', settings.channel_url || 'https://t.me/channel')]);
+                b.push([Markup.button.callback('🔄 Rafraîchir mon statut', 'main_menu')]);
                 
-                const restrictedKeyboard = Markup.inlineKeyboard(b);
-
-                return await safeEdit(ctx, restrictedText, {
-                    photo: settings.welcome_photo || null,
-                    ...restrictedKeyboard
-                });
+                return await safeEdit(ctx, restrictedText, { photo: settings.welcome_photo || null, ...Markup.inlineKeyboard(b) });
             }
 
-            let welcomeText = '';
-
-            // Notification Admin pour les nouveaux (déjà approuvés par chance ou anciens)
             if (isNew) {
-                const newMsg = `👤 <b>NOUVEL UTILISATEUR !</b>\n\n` +
-                    `Nom : ${user.first_name}\n` +
-                    `Username : @${user.username || 'Inconnu'}\n` +
-                    `ID : <code>${user.id}</code>\n` +
-                    (referrerId ? `🎁 Parrainé par : <code>${referrerId}</code>` : `🔍 Arrivé en direct`);
-                await notifyAdmins(bot, newMsg).catch(() => {});
+                await notifyAdmins(bot, `👤 <b>NOUVEL UTILISATEUR !</b>\n\nNom : ${user.first_name}\nID : <code>${user.id}</code>`).catch(() => {});
             }
 
+            // Welcome Logic
+            let welcomeText = '';
             let hasActive = false;
+            
             if (registeredUser.is_livreur) {
                 const { getLivreurOrders } = require('../services/database');
                 const activeOrders = await getLivreurOrders(registeredUser.id);
                 hasActive = activeOrders.length > 0;
-
-                const city = registeredUser.current_city || registeredUser.data?.current_city || 'Non défini';
-                const isAvail = registeredUser.is_available || registeredUser.data?.is_available;
-
-                welcomeText = `${settings.ui_icon_livreur} <b>Bienvenue, ${user.first_name} !</b>\n\n` +
-                    `📍 Secteur : <b>${city.toUpperCase()}</b>\n` +
-                    `🔘 Statut : <b>${isAvail ? (settings.ui_icon_success || '✅') + ' DISPONIBLE' : (settings.ui_icon_error || '❌') + ' INDISPONIBLE'}</b>\n\n`;
-
-                if (hasActive) {
-                    welcomeText += `🚀 <b>VOUS AVEZ ${activeOrders.length} COMMANDE(S) EN COURS !</b>\n\n` +
-                        activeOrders.map(o => `📦 #${o.id.slice(-5)} - ${o.address || '?'}`).join('\n') +
-                        `\n\n<i>Cliquez sur "Mes livraisons en cours" pour les gérer.</i>`;
-                }
+                welcomeText = `${settings.ui_icon_livreur} <b>Bienvenue, ${user.first_name} !</b>\n\n📍 Secteur : <b>${(registeredUser.current_city || 'Inconnu').toUpperCase()}</b>\n🔘 Statut : <b>${registeredUser.is_available ? '✅ DISPONIBLE' : '❌ INDISPONIBLE'}</b>`;
             } else {
-                const paymentLine = settings.payment_modes
-                    ? `\n🚨 <b>Le paiement s'effectue en : ${settings.payment_modes}</b>‼️\n`
-                    : '';
+                const paymentLine = settings.payment_modes ? `\n🚨 <b>Paiement en : ${settings.payment_modes}</b>\n` : '';
                 if (isNew) {
                     welcomeText = `✨ <b>Bienvenue sur ${settings.bot_name}, ${user.first_name} !</b>\n\n` +
                         `${settings.welcome_message || ''}\n${paymentLine}\n` +
-                        `📍 <i>En utilisant ce service, vous acceptez d'être localisé tacitement.</i>\n\n` +
                         `🔗 <b>Votre lien de parrainage :</b>\n` +
                         `<code>https://t.me/${ctx.botInfo?.username || 'bot'}?start=${registeredUser.referral_code}</code>`;
-                    if (!referrerId) pendingReferralInput.set(docId, true);
                 } else {
-                    const defaultBack = `👋 <b>Ravi de vous revoir, ${user.first_name} !</b>\n\nVous êtes déjà membre du ${settings.bot_name}.${paymentLine}`;
-                    welcomeText = settings.msg_welcome_back 
-                        ? settings.msg_welcome_back.replace('{first_name}', user.first_name).replace('{bot_name}', settings.bot_name).replace('{payment_line}', paymentLine)
-                        : defaultBack;
+                    welcomeText = (settings.msg_welcome_back || "👋 <b>Ravi de vous revoir, {first_name} !</b>\n\nVous êtes déjà membre de {bot_name}.{payment_line}")
+                        .replace('{first_name}', user.first_name)
+                        .replace('{bot_name}', settings.bot_name)
+                        .replace('{payment_line}', paymentLine);
                 }
             }
             
             const supplier = await getSupplierByTelegramId(String(ctx.from.id));
             const isFournisseur = !!supplier;
-
             const keyboard = registeredUser.is_livreur ? await getLivreurMenuKeyboard(ctx, settings, registeredUser, hasActive) : await getMainMenuKeyboard(ctx, settings, registeredUser, isFournisseur);
-            await safeEdit(ctx, welcomeText, {
-                photo: settings.welcome_photo || null,
-                ...keyboard
-            });
-
-            if (ctx.telegram) {
-                ctx.telegram.setChatMenuButton(ctx.chat.id, { type: 'commands' }).catch(() => { });
-            }
+            
+            await safeEdit(ctx, welcomeText, { photo: settings.welcome_photo || null, ...keyboard });
 
         } catch (error) {
             console.error('❌ Erreur /start:', error);

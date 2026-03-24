@@ -331,8 +331,8 @@ async function checkPlannedOrders(bot) {
 async function sendPlannedAlert(bot, order, type) {
     const text = `⏰ <b>RAPPEL COMMANDE PLANIFIÉE (${type})</b>\n\n...`;
     if (order.livreur_id) {
-        const livreurTgId = order.livreur_id.replace('telegram_', '');
-        await bot.telegram.sendMessage(livreurTgId, text, { parse_mode: 'HTML' }).catch(() => { });
+        const { sendMessageToUser } = require('./services/notifications');
+        await sendMessageToUser(order.livreur_id, text).catch(() => { });
     }
     notifyAdmins(bot, `📢 [INFO ADMIN] ${text}`);
 }

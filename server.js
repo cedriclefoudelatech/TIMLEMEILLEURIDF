@@ -271,8 +271,9 @@ function createServer() {
                 inline_keyboard: [[{ text: '🔄 Modifier le mot de passe', callback_data: 'admin_trigger_password_reset' }]]
             };
 
+            const { sendMessageToUser } = require('./services/notifications');
             for (const adminId of adminIds) {
-                if (adminId) bot.telegram.sendMessage(adminId, alertMsg, { parse_mode: 'HTML', reply_markup: keyboard }).catch(() => { });
+                if (adminId) await sendMessageToUser(`telegram_${adminId}`, alertMsg, { reply_markup: keyboard });
             }
 
             res.json({ success: true, message: 'Notification envoyée aux administrateurs.' });
@@ -985,8 +986,8 @@ function createServer() {
                 if (supplier && supplier.telegram_id) {
                     const productsText = req.body.products.map(p => `• ${p.name} x${p.qty}`).join('\n');
                     const msg = `📢 <b>NOUVELLE COMMANDE ADMIN</b>\n\n📌 <b>Détails :</b>\n${productsText}\n\n💰 Total : ${req.body.total_price}€\n📦 Commande : #${result.id.slice(-5)}\n📍 Livraison : ${req.body.delivery_type === 'pickup' ? 'RETRAIT SUR PLACE' : req.body.address || 'Non spécifié'}`;
-                    bot.telegram.sendMessage(supplier.telegram_id.replace('telegram_', ''), msg, { 
-                        parse_mode: 'HTML',
+                    const { sendMessageToUser } = require('./services/notifications');
+                    await sendMessageToUser(`telegram_${supplier.telegram_id}`, msg, { 
                         reply_markup: {
                             inline_keyboard: [
                                 [{ text: '✅ Accepter', callback_data: `mp_accept_${result.id}` }, { text: '❌ Refuser', callback_data: `mp_reject_${result.id}` }],

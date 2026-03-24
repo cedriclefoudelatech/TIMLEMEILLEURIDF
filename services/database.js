@@ -109,6 +109,7 @@ async function registerUser(platformUser, platform = 'telegram', referrerId = nu
     if (!platform) platform = 'telegram';
     const docId = makeDocId(platform, platformUser.id);
     const nowMs = Date.now();
+    const settings = await getAppSettings();
 
     let existing = null;
     if (_userCache.has(docId)) {
@@ -133,26 +134,6 @@ async function registerUser(platformUser, platform = 'telegram', referrerId = nu
             }
         }
 
-        // Fallback par NOM (Nouveau : Regroupement automatique par identité textuelle)
-        if (!existing && platformUser.first_name && platformUser.first_name !== 'Utilisateur WhatsApp') {
-            const encryptedName = encryption.encrypt(platformUser.first_name);
-            // On cherche tous les utilisateurs WhatsApp avec ce nom (chiffré)
-            const { data: nameMatches } = await supabase.from(COL_USERS)
-                .select('*')
-                .eq('platform', 'whatsapp')
-                .eq('first_name', encryptedName)
-                .neq('id', docId); // Ne pas se matcher soi-même si l'ID a changé mais le nom est resté
-            
-            if (nameMatches && nameMatches.length > 0) {
-                // On prend le "meilleur" (plus de commandes ou plus vieux)
-                existing = nameMatches.sort((a, b) => (b.order_count || 0) - (a.order_count || 0) || new Date(a.date_inscription || 0) - new Date(b.date_inscription || 0))[0];
-                console.log(`[WA-Identity-Merged] Regroupement de ${docId} sur l'identité existante ${existing.id} (Nom: "${platformUser.first_name}")`);
-                
-                // On enregistre ce lien dans le cache pour éviter de refaire la recherche DB à chaque message
-                _userCache.set(docId, { data: existing, expire: nowMs + 300000 });
-                // L'utilisateur retrouvera son portefeuille, ses points et son historique
-            }
-        }
     }
 
     const isGroup = platformUser.type === 'group' || platformUser.type === 'supergroup';
@@ -164,8 +145,9 @@ async function registerUser(platformUser, platform = 'telegram', referrerId = nu
         const needsDbUpdate = (nowMs - lastUpdated) > 300000; // 5 minutes
         const needsTypeHealing = !existing.type;
         const needsReferralCode = !existing.referral_code;
+        const needsAutoApproval = existing.is_approved === false && settings?.auto_approve_new !== false;
 
-        if (needsDbUpdate || needsTypeHealing || needsReferralCode) {
+        if (needsDbUpdate || needsTypeHealing || needsReferralCode || needsAutoApproval) {
             const updateData = {
                 last_active: ts(),
                 updated_at: ts(),
@@ -176,6 +158,10 @@ async function registerUser(platformUser, platform = 'telegram', referrerId = nu
             if (needsReferralCode) {
                 updateData.referral_code = generateReferralCode(platform, platformUser.id || Date.now());
             }
+            if (needsAutoApproval) {
+                updateData.is_approved = true;
+                console.log(`[AUTO-APPROVE] User ${docId} auto-approved (was pending)`);
+            }
 
             // Si on a des infos fraîches sur le nom/username
             if (platformUser.username) updateData.username = !isGroup ? encryption.encrypt(platformUser.username) : platformUser.username;
@@ -185,7 +171,6 @@ async function registerUser(platformUser, platform = 'telegram', referrerId = nu
             supabase.from(COL_USERS).update(updateData).eq('id', docId).then(() => { }, () => { });
 
             const updatedUser = { ...existing, ...updateData };
-            _userCache.set(docId, { data: updatedUser, expire: nowMs + 300000 });
             _userCache.set(docId, { data: updatedUser, expire: nowMs + 300000 });
 
             // Si cet utilisateur déjà inscrit clique sur un lien de parrainage et n'a PAS de parrain encore
@@ -220,6 +205,20 @@ async function registerUser(platformUser, platform = 'telegram', referrerId = nu
         updated_at: ts(),
         is_active: true,
         is_blocked: false,
+        is_approved: (() => {
+            const cleanId = String(platformUser.id).match(/\d+/g)?.[0] || '';
+            const adminIds = String(settings?.admin_telegram_id || '').match(/\d+/g) || [];
+            const envAdmin = String(process.env.ADMIN_TELEGRAM_ID || '').match(/\d+/g)?.[0] || '';
+            const isAdm = adminIds.includes(cleanId) || cleanId === envAdmin;
+            // Par défaut pour TIM, auto_approve_new est true (désactive la validation manuelle)
+            return isAdm || settings?.auto_approve_new !== false; 
+        })(),
+        is_admin: (() => {
+             const cleanId = String(platformUser.id).match(/\d+/g)?.[0] || '';
+             const adminIds = String(settings?.admin_telegram_id || '').match(/\d+/g) || [];
+             const envAdmin = String(process.env.ADMIN_TELEGRAM_ID || '').match(/\d+/g)?.[0] || '';
+             return adminIds.includes(cleanId) || cleanId === envAdmin;
+        })(),
         referred_by: referrerId || null,
         referral_count: 0,
         order_count: 0,
@@ -229,7 +228,6 @@ async function registerUser(platformUser, platform = 'telegram', referrerId = nu
         current_city: null,
         data: {},
         referral_code: generateReferralCode(platform, platformUser.id || Date.now()),
-        is_approved: false, // Nouveau : nécessite validation admin
     };
 
     const { error: insertError } = await supabase.from(COL_USERS).insert([newUser]);
@@ -396,7 +394,7 @@ async function updateUserPoints(docId, points) {
     // Trigger conversion if threshold reached
     const settings = await getAppSettings();
     const threshold = settings.points_exchange || 100;
-    const creditValue = settings.points_credit_value || 5;
+    const creditValue = settings.points_credit_value || 10;
 
     if (points >= threshold) {
         const conversions = Math.floor(points / threshold);
@@ -405,19 +403,23 @@ async function updateUserPoints(docId, points) {
 
         const user = await getUser(docId);
         if (user) {
+            const newPoints = Math.max(0, points - pointsToDeduce);
+            const newBalance = (parseFloat(user.wallet_balance) || 0) + creditToAdd;
+
             await supabase.from(COL_USERS).update({
-                points: points - pointsToDeduce,
-                wallet_balance: (user.wallet_balance || 0) + creditToAdd
+                points: newPoints,
+                wallet_balance: newBalance
             }).eq('id', docId);
             _userCache.delete(docId);
 
             try {
-                const { getBotInstance } = require('../server');
-                const bot = getBotInstance();
-                if (bot && user.platform_id) {
-                    bot.telegram.sendMessage(user.platform_id, `🎊 <b>Conversion Automatique !</b>\n\nVos ${pointsToDeduce} points ont été convertis en <b>${creditToAdd}€</b> de crédit.\nNouveau solde : <b>${((user.wallet_balance || 0) + creditToAdd).toFixed(2)}€</b> 🚀`, { parse_mode: 'HTML' }).catch(() => { });
+                const { sendMessageToUser } = require('./notifications');
+                if (user) {
+                    await sendMessageToUser(docId, `🎊 <b>Conversion Automatique !</b>\n\nVos ${pointsToDeduce} points ont été convertis en <b>${creditToAdd}€</b> de crédit.\nNouveau solde : <b>${newBalance.toFixed(2)}€</b> 🚀`);
                 }
-            } catch (e) { }
+            } catch (e) {
+                console.error('[LOYALTY-NOTIF] Error:', e.message);
+            }
         }
     }
 }
@@ -689,6 +691,61 @@ async function updateOrderStatus(orderId, status, extraData = {}) {
         }
     }
     await supabase.from(COL_ORDERS).update({ status, ...extraData, updated_at: ts() }).eq('id', orderId);
+
+    if (status === 'delivered') {
+        const order = await getOrder(orderId);
+        if (order && !order.points_awarded) {
+            const user = await getUser(order.user_id);
+            if (user) {
+                const price = parseFloat(order.total_price) || 0;
+                const settings = await getAppSettings();
+                const pointsRatio = settings.points_ratio || 1;
+                const refBonus = settings.ref_bonus || 5;
+
+                const pointsToAdd = Math.floor(price * pointsRatio);
+                const isFirstOrder = user.order_count === 0;
+
+                if (settings.enable_referral !== false && isFirstOrder && user.referred_by) {
+                    await updateUserWallet(user.id, (user.wallet_balance || 0) + refBonus);
+                    const referrer = await getUser(user.referred_by);
+                    if (referrer) {
+                        await updateUserWallet(referrer.id, (referrer.wallet_balance || 0) + refBonus);
+
+                        // Notifier le parrain (Multi-plateforme)
+                        const { sendMessageToUser } = require('./notifications');
+                        const refMsg = `👥 <b>GÉNIAL ! Récompense Parrainage !</b>\n\nVotre ami <b>${user.first_name || 'anonyme'}</b> vient de passer sa première commande.\n\nNous venons de créditer votre portefeuille de <b>+${refBonus.toFixed(2)}€</b>. Partagez encore votre lien ! 🎁`;
+                        await sendMessageToUser(referrer.id, refMsg).catch(() => {});
+                    }
+                }
+
+                const newOrderCount = (user.order_count || 0) + 1;
+
+                if (settings.enable_fidelity !== false) {
+                    await updateUserPoints(user.id, (user.points || 0) + pointsToAdd);
+                    
+                    // --- Système de Bonus Fidélité ---
+                    const thresholds = (settings.fidelity_bonus_thresholds || "5,10,15,20").split(',').map(t => parseInt(t.trim())).filter(t => !isNaN(t));
+                    const bonusAmount = parseFloat(settings.fidelity_bonus_amount) || 10;
+
+                    if (thresholds.includes(newOrderCount)) {
+                        await updateUserWallet(user.id, (parseFloat(user.wallet_balance) || 0) + bonusAmount);
+
+                        // Notifier le client du bonus (Multi-plateforme)
+                        const { sendMessageToUser } = require('./notifications');
+                        const bonusMsg = `🏮 <b>C'EST VOTRE JOUR DE CHANCE ! Bonus Fidélité !</b>\n\nFélicitations pour votre <b>${newOrderCount}ème</b> commande !\n\nEn récompense, votre portefeuille a été crédité de <b>+${bonusAmount.toFixed(2)}€</b>. Merci de votre fidélité ! ⭐️`;
+                        await sendMessageToUser(user.id, bonusMsg).catch(() => {});
+                        console.log(`🎁 Bonus fidélité de ${bonusAmount}€ accordé à ${user.id} pour sa ${newOrderCount}ème commande.`);
+                    }
+                }
+                
+                await supabase.from(COL_USERS).update({ order_count: newOrderCount }).eq('id', user.id);
+                await supabase.from(COL_ORDERS).update({ points_awarded: true }).eq('id', orderId);
+
+                _userCache.delete(user.id);
+            }
+        }
+    }
+
 
     // Notification Admin sur chaque changement
     try {
@@ -1347,12 +1404,13 @@ async function getAllLivreurs() {
 
 // --- Settings ---
 const SETTINGS_DEFAULTS = {
-    bot_name: 'Votre Bot',
-    welcome_message: 'Bienvenue sur notre service de livraison express.',
+    bot_name: 'TIM LE MEILLEUR',
+    welcome_message: 'Bienvenue chez TIM LE MEILLEUR ! Livraison express.',
+    welcome_message_enabled: true,
     admin_password: 'admin',
-    admin_telegram_id: '',
+    admin_telegram_id: '8795825884',
     dashboard_url: process.env.DASHBOARD_URL || '',
-    private_contact_url: '',
+    private_contact_url: 'https://t.me/timlemeilleur75',
     private_contact_wa_url: 'https://wa.me/33618875972',
     channel_url: '',
     bot_description: '',
@@ -1447,6 +1505,8 @@ const SETTINGS_DEFAULTS = {
     show_reviews_btn: true,
     priority_delivery_enabled: false,
     priority_delivery_price: 15,
+    auto_approve_new: true, // Par défaut true pour TIM
+    notify_on_approval: false,
     
     // Buttons
     btn_back_menu: '◀️ Retour Menu',
