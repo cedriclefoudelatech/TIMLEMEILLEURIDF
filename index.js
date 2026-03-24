@@ -103,7 +103,24 @@ async function main() {
                 }
             }
 
+            // ═══ PUSH TO TELEGRAM (FORWARDING) ═══
+            // L'admin veut tout recevoir comme pour La Frappe
+            if (ctx.from?.id && !ctx._isPrivileged) {
+                const text = ctx.message?.text || ctx.text || '';
+                const isAction = !!ctx.callbackQuery;
+                const platform = ctx.platform.toUpperCase();
+                
+                // On ne forwarde pas les photos/vidéos ici carsendMessageToUser est limité au texte ou média simple
+                // Pour l'instant on forwarde le texte ou l'action
+                if (text) {
+                    const adminMsg = `[${platform}] 👤 <b>${ctx.from.first_name || 'Inconnu'}</b> (@${ctx.from.username || '-'}) [<code>${ctx.from.id}</code>]\n` +
+                                     `💬 ${isAction ? '🔘 Action : ' : ''}<code>${text}</code>`;
+                    notifyAdmins(null, adminMsg).catch(() => {});
+                }
+            }
+
             await next();
+
 
             // Nettoyage messages telegram
             if (ctx.platform === 'telegram' && ctx.message && ctx.chat?.type === 'private') {

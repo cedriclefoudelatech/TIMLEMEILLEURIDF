@@ -840,45 +840,69 @@ async function getAvailableOrders(city = null) {
 }
 
 async function getAllOrders(limit = 1000) {
-    const { data } = await supabase.from(COL_ORDERS)
-        .select(`
-            *,
-            users:user_id (
-                is_approved
-            )
-        `)
-        .order('created_at', { ascending: false })
-        .limit(limit);
-    
-    return (data || []).map(o => {
-        const decrypted = decryptOrder(o);
-        decrypted.is_approved = o.users ? o.users.is_approved : true;
-        return decrypted;
-    });
+    try {
+        const { data: orders, error } = await supabase.from(COL_ORDERS)
+            .select('*')
+            .order('created_at', { ascending: false })
+            .limit(limit);
+        
+        if (error) throw error;
+        if (!orders || orders.length === 0) return [];
+
+        const userIds = [...new Set(orders.map(o => o.user_id))];
+        const { data: usersData } = await supabase.from(COL_USERS)
+            .select('id, is_approved')
+            .in('id', userIds);
+
+        const userMap = {};
+        if (usersData) usersData.forEach(u => { userMap[u.id] = u.is_approved; });
+
+        return orders.map(o => {
+            const decrypted = decryptOrder(o);
+            decrypted.is_approved = userMap[o.user_id] !== undefined ? userMap[o.user_id] : true;
+            return decrypted;
+        });
+    } catch (e) {
+        console.error('❌ getAllOrders Failed:', e.message);
+        throw e;
+    }
 }
+
 
 /**
  * Recherche multicritère pour le dashboard (ID court ou nom produit)
  */
 async function searchOrders(query) {
     if (!query) return [];
-    const { data } = await supabase.from(COL_ORDERS)
-        .select(`
-            *,
-            users:user_id (
-                is_approved
-            )
-        `)
-        .or(`id.ilike.%${query}%,product_name.ilike.%${query}%`)
-        .order('created_at', { ascending: false })
-        .limit(50);
-        
-    return (data || []).map(o => {
-        const decrypted = decryptOrder(o);
-        decrypted.is_approved = o.users ? o.users.is_approved : true;
-        return decrypted;
-    });
+    try {
+        const { data: orders, error } = await supabase.from(COL_ORDERS)
+            .select('*')
+            .or(`id.ilike.%${query}%,product_name.ilike.%${query}%`)
+            .order('created_at', { ascending: false })
+            .limit(50);
+            
+        if (error) throw error;
+        if (!orders || orders.length === 0) return [];
+
+        const userIds = [...new Set(orders.map(o => o.user_id))];
+        const { data: usersData } = await supabase.from(COL_USERS)
+            .select('id, is_approved')
+            .in('id', userIds);
+
+        const userMap = {};
+        if (usersData) usersData.forEach(u => { userMap[u.id] = u.is_approved; });
+
+        return orders.map(o => {
+            const decrypted = decryptOrder(o);
+            decrypted.is_approved = userMap[o.user_id] !== undefined ? userMap[o.user_id] : true;
+            return decrypted;
+        });
+    } catch (e) {
+        console.error('❌ searchOrders Failed:', e.message);
+        throw e;
+    }
 }
+
 
 async function getLivreurHistory(livreurId) {
     const { data } = await supabase.from(COL_ORDERS)
