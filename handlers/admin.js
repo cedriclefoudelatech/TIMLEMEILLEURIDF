@@ -17,12 +17,19 @@ const { createPersistentMap } = require('../services/persistent_map');
 const authenticatedAdmins = createPersistentMap('authenticatedAdmins');
 const pendingAdminLogins = new Set();
 const pendingPasswordReset = new Set();
-const awaitingAdminChat = new Map(); // Map pour admin_id -> target_id_du_client (format platform_id)
-const activeAdminSessions = new Set(); // Admins currently in active chat mode
-const activeUserSessions = new Set(); // Users currently in active chat mode
+const awaitingAdminChat = createPersistentMap('awaitingAdminChat'); // Map pour admin_id -> target_id_du_client (format platform_id)
+const activeAdminSessions = createPersistentMap('activeAdminSessions'); // Admins currently in active chat mode
+const activeUserSessions = createPersistentMap('activeUserSessions'); // Users currently in active chat mode
+const awaitingUserSupportReply = createPersistentMap('userSupportReply');
+const awaitingAdminChatWithUser = createPersistentMap('adminChatWithUser');
 
 async function initAdminState() {
     await authenticatedAdmins.load();
+    await awaitingAdminChat.load();
+    await activeAdminSessions.load();
+    await activeUserSessions.load();
+    await awaitingUserSupportReply.load();
+    await awaitingAdminChatWithUser.load();
 }
 
 async function isAdmin(ctx) {
@@ -96,6 +103,7 @@ async function showAdminMenu(ctx, isEdit = false) {
     row4.push(Markup.button.callback('📢 Diffusion', 'admin_broadcast'));
     rows.push(row4);
 
+    rows.push([Markup.button.callback('🛠️ Modules & Sécurité', 'admin_modules_menu')]);
     rows.push([Markup.button.callback('✨ Fonctionnalités', 'admin_features'), Markup.button.callback('⚙️ Paramètres', 'admin_settings')]);
     rows.push([Markup.button.callback('◀️ Quitter la console', 'main_menu')]);
 
@@ -308,7 +316,7 @@ function setupAdminHandlers(bot) {
 
         const buttons = orders.map(o => {
             const shortId = o.id.slice(-6);
-            const icon = o.status === 'delivered' ? '✅' : (o.status === 'pending' ? '⏳' : '❌');
+            const icon = o.status === 'pending' ? (o.is_approved === false ? '🔴' : '⏳') : (o.status === 'delivered' ? '✅' : '📦');
             return [Markup.button.callback(`${icon} #${shortId} - ${o.total_price}€ - ${o.first_name || 'Cl'}`, `admin_order_view_${o.id}`)];
         });
         buttons.push([Markup.button.callback('◀️ Retour', 'admin_menu')]);
@@ -381,10 +389,51 @@ function setupAdminHandlers(bot) {
     bot.action('admin_users', async (ctx) => {
         await ctx.answerCbQuery();
         const users = await searchUsers('');
-        const buttons = users.slice(0, 10).map(u => [Markup.button.callback(`👤 ${u.first_name} (@${u.username || '?'})`, `admin_user_view_${u.id}`)]);
+        const buttons = users.slice(0, 8).map(u => [Markup.button.callback(`👤 ${u.first_name} (@${u.username || '?'})`, `admin_user_view_${u.id}`)]);
+        buttons.push([Markup.button.callback('⏳ 🟡 ACCÈS EN ATTENTE', 'admin_pending_users')]);
         buttons.push([Markup.button.callback('🔍 Rechercher un utilisateur', 'admin_user_search')]);
         buttons.push([Markup.button.callback('◀️ Retour', 'admin_menu')]);
         await safeEdit(ctx, `👥 <b>Gestion des Utilisateurs</b>\n\nDerniers inscrits :`, Markup.inlineKeyboard(buttons));
+    });
+
+    bot.action('admin_pending_users', async (ctx) => {
+        await ctx.answerCbQuery();
+        const { getPendingUsers } = require('../services/database');
+        const pending = await getPendingUsers();
+        
+        if (pending.length === 0) {
+            return safeEdit(ctx, '✅ Aucun utilisateur en attente de validation.',
+                Markup.inlineKeyboard([[Markup.button.callback('◀️ Retour', 'admin_users')]]));
+        }
+
+        const buttons = pending.map(u => [
+            Markup.button.callback(`👤 ${u.first_name} (@${u.username || '?'})`, `admin_user_view_${u.id}`),
+            Markup.button.callback('✅ Valider', `admin_user_approve_${u.id}`)
+        ]);
+        buttons.push([Markup.button.callback('◀️ Retour', 'admin_users')]);
+
+        await safeEdit(ctx, `⏳ <b>${pending.length} Utilisateurs en attente</b>\n\nCliquez sur un profil pour voir les détails ou sur ✅ pour valider directement.`,
+            Markup.inlineKeyboard(buttons));
+    });
+
+    bot.action(/^admin_user_approve_(.+)$/, async (ctx) => {
+        const uid = ctx.match[1];
+        const { approveUser } = require('../services/database');
+        await approveUser(uid);
+        await ctx.answerCbQuery('✅ Utilisateur validé !');
+        
+        // Notification au client
+        await sendTelegramMessage(uid.replace('telegram_', '').replace('whatsapp_', ''), 
+            `✅ <b>Votre accès a été validé par l'administration !</b>\n\nVous pouvez maintenant utiliser toutes les fonctionnalités du bot. Bienvenue !`)
+            .catch(() => {});
+
+        return bot.handleUpdate({
+            ...ctx.update,
+            callback_query: {
+                ...ctx.callbackQuery,
+                data: 'admin_pending_users'
+            }
+        });
     });
 
     const adminSearchState = new Map();
@@ -1034,6 +1083,60 @@ function setupAdminHandlers(bot) {
             (topProducts ? `🏆 <b>Top Produits :</b>\n${topProducts}` : '');
 
         await safeEdit(ctx, msg, Markup.inlineKeyboard([[Markup.button.callback('◀️ Retour', 'admin_menu')]]));
+    });
+
+    // --- GESTION DES MODULES ---
+    bot.action('admin_modules_menu', async (ctx) => {
+        if (!(await isAdmin(ctx))) return;
+        await ctx.answerCbQuery();
+        const s = await getAppSettings();
+
+        let msg = `🛠️ <b>Gestion des Modules & Sécurité</b>\n\n` +
+            `Activez ou désactivez les fonctionnalités majeures en un clic.\n` +
+            `<i>(Note : Ces changements sont appliqués immédiatement)</i>`;
+            
+        const buttons = [
+            [Markup.button.callback((s.auto_approve_new !== false ? '🟢' : '🔴') + ' Approbation Auto', 'toggle_mod_auto_approve_new')],
+            [Markup.button.callback((s.notify_on_approval !== false ? '🟢' : '🔴') + ' Notif. Approbation', 'toggle_mod_notify_on_approval')],
+            [Markup.button.callback((s.enable_marketplace !== false ? '🟢' : '🔴') + ' Marketplace', 'toggle_mod_enable_marketplace')],
+            [Markup.button.callback((s.enable_fidelity !== false ? '🟢' : '🔴') + ' Fidélité & Points', 'toggle_mod_enable_fidelity')],
+            [Markup.button.callback((s.enable_referral !== false ? '🟢' : '🔴') + ' Parrainage', 'toggle_mod_enable_referral')],
+            [Markup.button.callback((s.enable_telegram !== false ? '🟢' : '🔴') + ' Bot Telegram', 'toggle_mod_enable_telegram')],
+            [Markup.button.callback((s.enable_whatsapp !== false ? '🟢' : '🔴') + ' Bot WhatsApp', 'toggle_mod_enable_whatsapp')],
+            [Markup.button.callback('◀️ Menu Principal', 'admin_menu')]
+        ];
+        
+        await safeEdit(ctx, msg, Markup.inlineKeyboard(buttons));
+    });
+
+    bot.action(/^toggle_mod_(.+)$/, async (ctx) => {
+        const key = ctx.match[1];
+        const s = await getAppSettings();
+        
+        const current = s[key] !== undefined ? s[key] : true; 
+        const newState = !current;
+        
+        const updates = {};
+        updates[key] = newState;
+        
+        try {
+            const { updateAppSettings } = require('../services/database');
+            await updateAppSettings(updates);
+            await ctx.answerCbQuery(`✅ ${key} : ${newState ? 'ACTIVÉ' : 'DÉSACTIVÉ'}`);
+            
+            await notifyAdmins(bot, `🛠️ <b>MODIFICATION MODULE</b>\n\nModule : <code>${key}</code>\nNouveau statut : <b>${newState ? 'ACTIF 🟢' : 'INACTIF 🔴'}</b>\nPar : ${ctx.from.first_name}`);
+            
+            return bot.handleUpdate({
+                ...ctx.update,
+                callback_query: {
+                    ...ctx.callbackQuery,
+                    data: 'admin_modules_menu'
+                }
+            });
+        } catch (e) {
+            console.error('[Module-Toggle] Error:', e.message);
+            await ctx.answerCbQuery('❌ Erreur lors de la modification.', true);
+        }
     });
 }
 

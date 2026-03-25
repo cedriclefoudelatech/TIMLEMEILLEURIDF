@@ -24,6 +24,8 @@ const _statsCache = {
     lastAnalytics: 0
 };
 
+const DB_TIMEOUT = 10000;
+
 // Helper pour simplifier Supabase updates numériques
 const incr = (n = 1) => n;
 function decryptUser(userData) {
@@ -134,6 +136,22 @@ async function registerUser(platformUser, platform = 'telegram', referrerId = nu
             }
         }
 
+        // Fallback par NOM : Regroupement automatique par identité textuelle si l'ID a changé
+        if (!existing && platformUser.first_name && platformUser.first_name !== 'Utilisateur WhatsApp') {
+            const encryptedName = encryption.encrypt(platformUser.first_name);
+            const { data: nameMatches } = await supabase.from(COL_USERS)
+                .select('*')
+                .eq('platform', 'whatsapp')
+                .eq('first_name', encryptedName)
+                .neq('id', docId);
+
+            if (nameMatches && nameMatches.length > 0) {
+                // On prend le plus actif (plus de commandes) ou le plus ancien
+                existing = nameMatches.sort((a, b) => (b.order_count || 0) - (a.order_count || 0) || new Date(a.date_inscription || 0) - new Date(b.date_inscription || 0))[0];
+                console.log(`[WA-Identity-Merged] Regroupement de ${docId} sur l'identité existante ${existing.id} (Nom: "${platformUser.first_name}")`);
+                _userCache.set(docId, { data: existing, expire: nowMs + 300000 });
+            }
+        }
     }
 
     const isGroup = platformUser.type === 'group' || platformUser.type === 'supergroup';
@@ -261,6 +279,23 @@ async function approveUser(userId) {
     if (error) throw error;
     _userCache.delete(userId);
     return true;
+}
+
+async function getPendingUsers() {
+    const { data } = await supabase.from(COL_USERS)
+        .select('*')
+        .eq('is_approved', false)
+        .eq('is_blocked', false)
+        .order('date_inscription', { ascending: false });
+    return (data || []).map(decryptUser);
+}
+
+async function getPendingUserCount() {
+    const { count } = await supabase.from(COL_USERS)
+        .select('*', { count: 'exact', head: true })
+        .eq('is_approved', false)
+        .eq('is_blocked', false);
+    return count || 0;
 }
 
 /**
@@ -897,31 +932,51 @@ async function getAvailableOrders(city = null) {
 }
 
 async function getAllOrders(limit = 1000) {
+    // Essai avec JOIN (relation foreign key possiblement définie dans TIM)
+    // Fallback automatique si la relation users:user_id n'existe pas
     try {
-        const { data: orders, error } = await supabase.from(COL_ORDERS)
-            .select('*')
+        const { data, error } = await supabase.from(COL_ORDERS)
+            .select(`
+                *,
+                users:user_id (
+                    is_approved
+                )
+            `)
             .order('created_at', { ascending: false })
+            .abortSignal(AbortSignal.timeout(DB_TIMEOUT))
             .limit(limit);
         
-        if (error) throw error;
-        if (!orders || orders.length === 0) return [];
+        if (error || !data) {
+            console.warn(`[DB-Orders] JOIN failed or no data, falling back: ${error?.message || 'No data'}`);
+            const { data: rawOrders } = await supabase.from(COL_ORDERS)
+                .select('*')
+                .order('created_at', { ascending: false })
+                .limit(limit);
+            
+            if (!rawOrders || rawOrders.length === 0) return [];
 
-        const userIds = [...new Set(orders.map(o => o.user_id))];
-        const { data: usersData } = await supabase.from(COL_USERS)
-            .select('id, is_approved')
-            .in('id', userIds);
+            // On récupère les approvals manuellement
+            const userIds = [...new Set(rawOrders.map(o => o.user_id))];
+            const { data: usersData } = await supabase.from(COL_USERS).select('id, is_approved').in('id', userIds);
+            const userMap = {};
+            if (usersData) usersData.forEach(u => { userMap[u.id] = u.is_approved; });
 
-        const userMap = {};
-        if (usersData) usersData.forEach(u => { userMap[u.id] = u.is_approved; });
-
-        return orders.map(o => {
+            return rawOrders.map(o => {
+                const decrypted = decryptOrder(o);
+                decrypted.is_approved = userMap[o.user_id] !== undefined ? userMap[o.user_id] : true;
+                return decrypted;
+            });
+        }
+        
+        return data.map(o => {
             const decrypted = decryptOrder(o);
-            decrypted.is_approved = userMap[o.user_id] !== undefined ? userMap[o.user_id] : true;
+            const u = Array.isArray(o.users) ? o.users[0] : o.users;
+            decrypted.is_approved = u ? u.is_approved : true;
             return decrypted;
         });
     } catch (e) {
-        console.error('❌ getAllOrders Failed:', e.message);
-        throw e;
+        console.error('❌ getAllOrders Fatal:', e.message);
+        return []; // On retourne vide plutôt que de tout faire planter en admin
     }
 }
 
@@ -1505,7 +1560,7 @@ const SETTINGS_DEFAULTS = {
     show_reviews_btn: true,
     priority_delivery_enabled: false,
     priority_delivery_price: 15,
-    auto_approve_new: true, // Par défaut true pour TIM
+    auto_approve_new: false, // Par défaut false pour TIM (validation manuelle active comme La Frappe)
     notify_on_approval: false,
     
     // Buttons
@@ -2166,5 +2221,5 @@ module.exports = {
     getMarketplaceProducts, getMarketplaceProduct, getAvailableMarketplaceProducts,
     saveMarketplaceProduct, deleteMarketplaceProduct, updateMarketplaceStock,
     createMarketplaceOrder, getMarketplaceOrders, getMarketplaceOrder, updateMarketplaceOrderStatus,
-    approveUser
+    approveUser, getPendingUsers, getPendingUserCount
 };
