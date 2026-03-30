@@ -326,7 +326,7 @@ async function getMainMenuKeyboard(ctx, settings, user, isFournisseur = false) {
     // Ligne 2 : Panier & Mes Commandes
     buttons.push([
         Markup.button.callback(`${settings.ui_icon_cart || '🛒'} Panier`, 'view_cart'),
-        Markup.button.callback(`${settings.ui_icon_orders || '📦'} Commandes`, 'my_orders')
+        Markup.button.callback(`${settings.ui_icon_orders || '🛍️'} Mes Achats`, 'my_orders')
     ]);
 
     // Ligne 3 : Aide & Contact

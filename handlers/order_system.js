@@ -2404,13 +2404,40 @@ function setupOrderSystem(bot) {
     // --- COMMANDES TG ---
     bot.command('menu', async (ctx) => displayCatalog(ctx));
     bot.command('orders', async (ctx) => {
-        if (ctx.callbackQuery) await ctx.answerCbQuery();
+        const userId = `${ctx.platform}_${ctx.from.id}`;
         const settings = ctx.state?.settings || await getAppSettings();
-        const activeOrders = await getClientActiveOrders(`${ctx.platform}_${ctx.from.id}`);
-        if (activeOrders.length === 0) return safeEdit(ctx, settings.msg_no_active_orders || '📭 Vous n\'avez aucune commande active.', Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_generic || '◀️ Retour', 'main_menu')]]));
-        const buttons = activeOrders.map(o => [Markup.button.callback(`📦 Commande #${o.id.slice(-5)} (${o.status})`, `view_order_${o.id}`)]);
-        buttons.push([Markup.button.callback(settings.btn_back_generic || '◀️ Retour', 'main_menu')]);
-        await safeEdit(ctx, '🔔 <b>Vos commandes actives :</b>', Markup.inlineKeyboard(buttons));
+        
+        // On récupère tout pour donner un choix intelligent
+        const [clientOrders, livreurOrders] = await Promise.all([
+            getClientActiveOrders(userId),
+            getLivreurOrders(userId)
+        ]);
+
+        if (clientOrders.length === 0 && livreurOrders.length === 0) {
+            return ctx.reply(settings.msg_no_active_orders || '📭 Vous n\'avez aucune commande active.', 
+                Markup.inlineKeyboard([[Markup.button.callback('◀️ Retour', 'main_menu')]]));
+        }
+
+        const buttons = [];
+        if (livreurOrders.length > 0) {
+            buttons.push([Markup.button.callback('🚚 MES LIVRAISONS EN COURS 🔥', 'active_deliveries')]);
+        }
+        if (clientOrders.length > 0) {
+            buttons.push([Markup.button.callback('🛒 MES ACHATS (Client)', 'my_orders')]);
+        }
+        
+        // Pour les admins, on propose aussi la vue admin
+        const { isAdmin } = require('./admin');
+        if (await isAdmin(ctx)) {
+            buttons.push([Markup.button.callback('🛠 GESTION ADMIN (Toutes)', 'admin_taken_orders')]);
+        }
+
+        buttons.push([Markup.button.callback('◀️ Retour', 'main_menu')]);
+        
+        return ctx.reply('🔍 <b>Suivi de Commandes</b>\n\nQue souhaitez-vous consulter ?', {
+            parse_mode: 'HTML',
+            ...Markup.inlineKeyboard(buttons)
+        });
     });
 
     bot.command('help', async (ctx) => showHelpMenu(ctx));
@@ -2464,7 +2491,9 @@ function setupOrderSystem(bot) {
         }
 
         const settings = await getAppSettings();
-        await notifyAdmins(bot, `❓ <b>DEMANDE "OÙ EST MA COMMANDE"</b>\n\n🆔 ID : <code>#${shortId}</code>\n👤 Client : ${ctx.from.first_name}`);
+        await notifyAdmins(bot, `❓ <b>DEMANDE "OÙ EST MA COMMANDE"</b>\n\n🆔 ID : <code>#${shortId}</code>\n👤 Client : ${ctx.from.first_name}`, Markup.inlineKeyboard([
+            [Markup.button.callback('💬 RÉPONDRE AU CLIENT', `chat_livreur_${latest.id}`)]
+        ]));
 
         await safeEdit(ctx, `✅ <b>Votre demande a été transmise !</b>\n\nLe livreur (ID #${shortId}) a été notifié de votre attente. Il reviendra vers vous très vite par message.`,
             Markup.inlineKeyboard([[Markup.button.callback('◀️ Retour', 'help_menu')]])
