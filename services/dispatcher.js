@@ -142,7 +142,8 @@ class Dispatcher {
     }
 
     async _createUnifiedContext(channel, msg, normalizedFrom) {
-        const userId = normalizedFrom || this._normalizeId(msg.from);
+        const fromStr = normalizedFrom || this._normalizeId(msg.from);
+        const userId = channel.type === 'whatsapp' ? fromStr : fromStr.split('@')[0];
         // Réutiliser les settings déjà chargées dans handleUpdate pour éviter un 2e appel
         const settings = msg._settings || await getAppSettings();
         
