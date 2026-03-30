@@ -932,51 +932,41 @@ async function getAvailableOrders(city = null) {
 }
 
 async function getAllOrders(limit = 1000) {
-    // Essai avec JOIN (relation foreign key possiblement définie dans TIM)
-    // Fallback automatique si la relation users:user_id n'existe pas
     try {
-        const { data, error } = await supabase.from(COL_ORDERS)
-            .select(`
-                *,
-                users:user_id (
-                    is_approved
-                )
-            `)
+        // Version optimisée sans Trial-and-Error (évite les warnings dans les logs)
+        const { data: rawOrders, error } = await supabase.from(COL_ORDERS)
+            .select('*')
             .order('created_at', { ascending: false })
             .abortSignal(AbortSignal.timeout(DB_TIMEOUT))
             .limit(limit);
         
-        if (error || !data) {
-            console.warn(`[DB-Orders] JOIN failed or no data, falling back: ${error?.message || 'No data'}`);
-            const { data: rawOrders } = await supabase.from(COL_ORDERS)
-                .select('*')
-                .order('created_at', { ascending: false })
-                .limit(limit);
-            
-            if (!rawOrders || rawOrders.length === 0) return [];
-
-            // On récupère les approvals manuellement
-            const userIds = [...new Set(rawOrders.map(o => o.user_id))];
-            const { data: usersData } = await supabase.from(COL_USERS).select('id, is_approved').in('id', userIds);
-            const userMap = {};
-            if (usersData) usersData.forEach(u => { userMap[u.id] = u.is_approved; });
-
-            return rawOrders.map(o => {
-                const decrypted = decryptOrder(o);
-                decrypted.is_approved = userMap[o.user_id] !== undefined ? userMap[o.user_id] : true;
-                return decrypted;
-            });
+        if (error || !rawOrders) {
+            console.error('[DB-Orders] Fetch failed:', error?.message);
+            return [];
         }
+
+        if (rawOrders.length === 0) return [];
+
+        // On récupère les approvals manuellement (un seul appel en IN)
+        const userIds = [...new Set(rawOrders.map(o => o.user_id).filter(id => !!id))];
+        const { data: usersData } = await supabase.from(COL_USERS)
+            .select('id, is_approved')
+            .in('id', userIds);
         
-        return data.map(o => {
+        const userMap = {};
+        if (usersData) {
+            usersData.forEach(u => { userMap[u.id] = u.is_approved; });
+        }
+
+        return rawOrders.map(o => {
             const decrypted = decryptOrder(o);
-            const u = Array.isArray(o.users) ? o.users[0] : o.users;
-            decrypted.is_approved = u ? u.is_approved : true;
+            // Si l'utilisateur est inconnu ou non trouvé, on assume approuvé par défaut
+            decrypted.is_approved = userMap[o.user_id] !== undefined ? userMap[o.user_id] : true;
             return decrypted;
         });
     } catch (e) {
         console.error('❌ getAllOrders Fatal:', e.message);
-        return []; // On retourne vide plutôt que de tout faire planter en admin
+        return [];
     }
 }
 
