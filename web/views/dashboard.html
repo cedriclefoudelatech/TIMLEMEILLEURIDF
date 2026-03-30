@@ -1624,6 +1624,26 @@
         input:checked + .slider:before {
             transform: translateX(20px);
         }
+
+        /* --- MOBILE ENHANCEMENTS --- */
+        @media (max-width: 600px) {
+            .section-header { flex-direction: column; align-items: stretch !important; gap: 15px; }
+            .btn-group { width: 100%; justify-content: space-between; }
+            .stat-card { padding: 15px !important; }
+            .stat-value { font-size: 24px !important; }
+            .action-btns { grid-template-columns: 1fr; }
+            .badge { padding: 4px 8px !important; font-size: 10px !important; }
+            .user-info { gap: 10px; }
+            .avatar { width: 32px; height: 32px; font-size: 14px; }
+            
+            /* Better table cards for small screens */
+            .responsive-table td { padding: 10px 0 !important; }
+            .responsive-table td::before { margin-right: 10px; font-size: 10px; }
+            
+            /* Sub-navigation buttons full width */
+            .sub-logistics-nav { flex-direction: column; }
+            .sub-logistics-nav .btn { width: 100%; border-radius: 10px; }
+        }
     </style>
 </head>
 
@@ -2098,15 +2118,15 @@
         <!-- LOGISTIQUE (FUSION ORDERS + LIVREURS) -->
         <section class="section" id="section-logistique">
             <div class="section-header flex flex-mobile-column justify-between items-center" style="margin-bottom:24px; gap:15px;">
-                <div
-                    style="display:flex; background:var(--hover); padding:4px; border-radius:12px; gap:4px; overflow-x: auto; max-width: 100%;">
-                    <button class="btn btn-sm btn-outline active" id="btn-tab-orders"
-                        onclick="switchLogisticsTab('orders')">📦 Commandes</button>
-                    <button class="btn btn-sm btn-outline" id="btn-tab-livreurs"
-                        onclick="switchLogisticsTab('livreurs')">🚴 Livreurs</button>
-                    <button class="btn btn-sm btn-outline" id="btn-tab-reviews"
-                        onclick="switchLogisticsTab('reviews')">⭐️ Avis</button>
-                </div>
+                    <div class="sub-logistics-nav"
+                        style="display:flex; background:var(--hover); padding:4px; border-radius:12px; gap:4px; overflow-x: auto; max-width: 100%;">
+                        <button class="btn btn-sm btn-outline active" id="btn-tab-orders"
+                            onclick="switchLogisticsTab('orders')">📦 Commandes</button>
+                        <button class="btn btn-sm btn-outline" id="btn-tab-livreurs"
+                            onclick="switchLogisticsTab('livreurs')">🚴 Livreurs</button>
+                        <button class="btn btn-sm btn-outline" id="btn-tab-reviews"
+                            onclick="switchLogisticsTab('reviews')">⭐️ Avis</button>
+                    </div>
             </div>
 
             <!-- Sub-section: Orders -->
@@ -5079,11 +5099,6 @@
             await api('/livreurs/availability', 'POST', { id: docId, isAvailable: isNewState });
             showToast(`Livreur ${isNewState ? 'disponible' : 'indisponible'} !`);
             loadData('livreurs');
-        }
-
-        async function toggleLivreur(userId, platform, isLivreur) {
-            await api('/livreurs/status', 'POST', { userId, platform, isLivreur });
-            loadData('users');
         }
 
         // Debounce pour éviter la latence réseau
