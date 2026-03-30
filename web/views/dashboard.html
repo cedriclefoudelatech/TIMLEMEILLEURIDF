@@ -799,83 +799,86 @@
             }
         }
 
-        @media (max-width: 600px) {
-            .stats-grid {
-                grid-template-columns: 1fr;
+        @media (max-width: 900px) {
+            .sidebar { display: none !important; }
+            .mobile-header { display: flex !important; }
+            .mobile-nav { display: flex !important; pointer-events: auto; }
+            
+            .main { 
+                padding: 10px !important; 
+                padding-top: 75px !important; 
+                padding-bottom: 150px !important; 
+                margin: 0 !important; 
+                width: 100% !important; 
+                height: 100vh !important;
+                overflow-y: auto !important;
+                -webkit-overflow-scrolling: touch;
             }
 
-            .stat-card {
-                padding: 25px;
-            }
+            .flex { flex-direction: column !important; gap: 10px !important; }
+            .col { min-width: 100% !important; }
 
-            .stat-value {
-                font-size: 36px;
-            }
+            .stats-grid { grid-template-columns: 1fr !important; gap: 15px !important; }
+            .stat-card { padding: 20px !important; }
+            .stat-value { font-size: 32px !important; }
 
-            /* Table to Cards */
-            .table-container {
-                background: transparent;
-                border: none;
+            /* Table to Cards Modern Implementation */
+            .responsive-table {
+                display: block !important;
+                min-width: 0 !important;
+                width: 100% !important;
+                border: none !important;
+                background: transparent !important;
             }
-
-            table,
-            thead,
-            tbody,
-            th,
-            td,
-            tr {
-                display: block;
+            .responsive-table thead { display: none !important; }
+            .responsive-table tbody, .responsive-table tr, .responsive-table td {
+                display: block !important;
+                width: 100% !important;
             }
-
-            thead {
-                display: none;
+            .responsive-table tr {
+                background: var(--card-bg) !important;
+                border: 1px solid var(--border) !important;
+                border-radius: 20px !important;
+                padding: 15px !important;
+                margin-bottom: 20px !important;
+                box-shadow: 0 4px 15px rgba(0,0,0,0.2) !important;
             }
-
-            tr {
-                display: block;
-                background: rgba(255, 255, 255, 0.03);
-                border: 1px solid var(--border);
-                border-radius: 24px;
-                padding: 20px;
-                margin-bottom: 20px;
+            .responsive-table td {
+                display: flex !important;
+                flex-direction: row !important;
+                justify-content: space-between !important;
+                flex-wrap: wrap !important;
+                align-items: center !important;
+                padding: 12px 0 !important;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+                text-align: right !important;
+                min-width: 0 !important;
+                min-height: 40px !important;
+                background: transparent !important;
             }
-
-            td {
-                display: flex;
-                justify-content: space-between;
-                padding: 12px 0;
-                border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-            }
-
-            td::before {
+            .responsive-table td:last-child { border: none !important; }
+            .responsive-table td::before {
                 content: attr(data-label);
                 font-weight: 800;
                 font-size: 11px;
                 color: var(--text-muted);
                 text-transform: uppercase;
+                margin-right: 15px;
+                flex-shrink: 0;
+                text-align: left !important;
             }
-
-            td:last-child {
-                border: none;
-                flex-direction: column;
-                align-items: stretch;
-                gap: 15px;
+            
+            /* Spécial pour les colonnes avec beaucoup de contenu */
+            .responsive-table td > div, .responsive-table td > select {
+                max-width: 100% !important;
+                flex-grow: 1 !important;
             }
-
+            
             .action-btns {
-                width: 100%;
-                justify-content: space-between;
-                gap: 6px;
+                flex-direction: column !important;
+                gap: 10px !important;
             }
-
-            .action-btns .btn {
-                flex: 1;
-                padding: 10px 5px;
-            }
-
-            .stat-value {
-                font-size: 28px;
-            }
+            .action-btns .btn { width: 100% !important; }
         }
 
         /* --- UTILS --- */
@@ -1622,42 +1625,6 @@
             transform: translateX(20px);
         }
     </style>
-    <style>
-        /* Modern Mobile Overrides & Fixes */
-        @media (max-width: 900px) {
-            .sidebar { display: none !important; }
-            .mobile-header { display: flex !important; }
-            .mobile-nav { display: flex !important; pointer-events: auto; }
-            
-            .main { 
-                padding: 15px !important; 
-                padding-top: 85px !important; 
-                padding-bottom: 120px !important; 
-                margin: 0 !important; 
-                width: 100% !important; 
-                height: 100vh !important; 
-                overflow-y: auto !important; 
-                display: block !important;
-            }
-
-            /* Restore Table-to-Cards Transformation */
-            .responsive-table, .responsive-table tbody, .responsive-table tr, .responsive-table td {
-                display: block !important;
-                width: 100% !important;
-                white-space: normal !important;
-            }
-            .responsive-table thead { display: none !important; }
-            .responsive-table tr { 
-                background: var(--card-bg) !important;
-                border: 1px solid var(--border) !important;
-                border-radius: 20px !important; 
-                padding: 15px !important; 
-                margin-bottom: 20px !important;
-                box-shadow: 0 4px 15px rgba(0,0,0,0.2) !important;
-            }
-            .responsive-table td { 
-                display: flex !important; 
-                justify-content: space-between !important; 
                 align-items: center !important;
                 padding: 10px 0 !important; 
                 border-bottom: 1px solid rgba(255,255,255,0.05) !important;
@@ -2190,7 +2157,7 @@
                     </div>
                 </div>
                 <div class="card" style="padding: 15px; overflow-x: auto;">
-                    <table id="orderTable" class="responsive-table" style="min-width: 1000px;">
+                    <table id="orderTable" class="responsive-table">
                         <thead>
                             <tr style="background: rgba(255,255,255,0.05);">
                                 <th style="padding:15px; border-bottom:1px solid #333;">SRC (V.2)</th>
@@ -3596,8 +3563,8 @@
                 <tr style="border-bottom: 2px solid #222;">
                     <td data-label="SRC (V.2)"><span class="badge" style="background:${o.platform === 'whatsapp' ? 'rgba(37,211,102,0.1)' : 'rgba(0,136,204,0.1)'}; color:${o.platform === 'whatsapp' ? '#25D366' : '#0088cc'}; border:1px solid currentColor; font-size:9px; font-weight:800; padding:1px 5px;">${o.platform?.toUpperCase() || 'TG'}</span></td>
                     <td data-label="CLIENT"><b>${o.first_name}</b></td>
-                    <td data-label="ACTION (🔥)" style="background: rgba(255,165,0,0.05); min-width: 160px;">
-                        <div style="display:flex; flex-direction:column; gap:4px;">
+                    <td data-label="ACTION (🔥)" style="min-width: 160px; background: rgba(255,165,0,0.05);">
+                        <div style="display:flex; flex-direction:column; gap:4px; max-width: 100%;">
                             ${o.is_approved === false ? `
                                 <button class="btn btn-accent btn-sm" style="width:100%; background:linear-gradient(135deg, #00b400, #008000); box-shadow:0 4px 10px rgba(0,180,0,0.3);" onclick="approveUserAccount('${o.user_id}', '${o.first_name}')">✅ ACCORDER L'ACCÈS</button>
                             ` : ''}
@@ -3612,7 +3579,7 @@
                                 <option value="delivered" ${o.status === 'delivered' ? 'selected' : ''}>${s.status_delivered_label || 'LIVRÉE'}</option>
                                 <option value="cancelled" ${o.status === 'cancelled' ? 'selected' : ''}>${s.status_cancelled_label || 'ANNULÉE'}</option>
                             </select>
-                            <div style="margin-top:4px;">
+                            <div style="margin-top:4px; width: 100%;">
                                 ${!o.livreur_name ? `
                                     <select onchange="assignDriver('${o.id}', this.value, this.options[this.selectedIndex].text)" style="margin:0; padding:4px; font-size:10px; background:rgba(255,165,0,0.1); border:1px solid orange; width:100%;">
                                         <option value="">👤 Assigner livreur...</option>
