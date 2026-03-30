@@ -1022,6 +1022,13 @@ async function getLivreurOrders(livreurId) {
         .eq('status', 'taken');
     return (data || []).map(decryptOrder);
 }
+async function getAllTakenOrders() {
+    const { data } = await supabase.from(COL_ORDERS)
+        .select('*')
+        .eq('status', 'taken')
+        .order('created_at', { ascending: false });
+    return (data || []).map(decryptOrder);
+}
 
 async function getUser(docId) {
     if (_userCache.has(docId)) {
@@ -2197,7 +2204,7 @@ module.exports = {
     saveBroadcast, updateBroadcast, deleteBroadcast, getBroadcastHistory, recordPollVote, recordPollFreeResponse, incrementStat, incrementDailyStat,
     getGlobalStats, getDailyStats, getStatsOverview, getAppSettings, updateAppSettings, getClientActiveOrders,
     getProducts, saveProduct, deleteProduct, setLivreurAvailability,
-    getAvailableLivreurs, getAllLivreurs, getOrderAnalytics, saveUserLocation, addMessageToTrack, getLastMenuId, getTrackedMessages, getLivreurOrders, getLivreurHistory, getOrdersByUser, getDetailedLivreurActivity, saveFeedback, setPendingFeedback, getAndClearPendingFeedback, nukeDatabase,
+    getAvailableLivreurs, getAllLivreurs, getOrderAnalytics, saveUserLocation, addMessageToTrack, getLastMenuId, getTrackedMessages, getLivreurOrders, getLivreurHistory, getAllTakenOrders, getOrdersByUser, getDetailedLivreurActivity, saveFeedback, setPendingFeedback, getAndClearPendingFeedback, nukeDatabase,
     saveReview, getReviews, getPublicReviews, deleteReview, uploadMediaFromUrl, uploadMediaBuffer,
     incrementChatCount, saveClientReply, logHelpRequest,
     getUpcomingPlannedOrders, markNotifSent, registerUser, addToStat,

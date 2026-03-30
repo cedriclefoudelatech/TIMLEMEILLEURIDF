@@ -4,7 +4,7 @@ const {
     getReferralLeaderboard, getGlobalStats, getAppSettings, updateAppSettings,
     getStatsOverview, getOrder, updateOrderStatus,
     getUserCount, getActiveUserCount, getRecentUsers,
-    getAllOrders, searchUsers, searchLivreurs,
+    getAllOrders, searchUsers, searchLivreurs, getAllTakenOrders,
     getUser, setLivreurStatus, setLivreurAvailability, markUserBlocked,
     getProducts, saveProduct, getAllLivreurs, getOrderAnalytics, registerUser
 } = require('../services/database');
@@ -102,6 +102,7 @@ async function showAdminMenu(ctx, isEdit = false) {
     }
     row4.push(Markup.button.callback('📢 Diffusion', 'admin_broadcast'));
     rows.push(row4);
+    rows.push([Markup.button.callback('🚚 Livraisons EN COURS 🔥', 'admin_taken_orders')]);
 
     rows.push([Markup.button.callback('🛠️ Modules & Sécurité', 'admin_modules_menu')]);
     rows.push([Markup.button.callback('✨ Fonctionnalités', 'admin_features'), Markup.button.callback('⚙️ Paramètres', 'admin_settings')]);
@@ -339,12 +340,34 @@ function setupAdminHandlers(bot) {
             (order.livreur_name ? `🚴 Livreur : ${order.livreur_name}\n` : '') +
             `🔘 Statut : <b>${order.status.toUpperCase()}</b>`;
 
+        const isTaken = order.status === 'taken';
         const buttons = [
             [Markup.button.callback('🤝 ASSIGNER LIVREUR', `admin_order_assign_list_${orderId}`)],
-            [Markup.button.callback('✅ LIVRÉE', `admin_order_set_${orderId}_delivered`), Markup.button.callback('❌ ANNULÉE', `admin_order_set_${orderId}_cancelled`)],
-            [Markup.button.callback('◀️ Retour', 'admin_orders')]
+            [Markup.button.callback('✅ LIVRÉE', `admin_order_set_${orderId}_delivered`), Markup.button.callback('❌ ANNULÉE', `admin_order_set_${orderId}_cancelled`)].filter(Boolean),
+            [Markup.button.callback('💬 Parler au Client', `admin_chat_with_${order.user_id}`)]
         ];
+        
+        if (isTaken) {
+            buttons.push([Markup.button.callback('🔄 REMETTRE EN ATTENTE', `admin_order_set_${orderId}_pending`)]);
+        }
+        
+        buttons.push([Markup.button.callback('◀️ Retour', 'admin_orders')]);
         await safeEdit(ctx, msg, Markup.inlineKeyboard(buttons));
+    });
+
+    bot.action(/^admin_chat_with_(.+)$/, async (ctx) => {
+        const targetId = ctx.match[1];
+        if (!(await isAdmin(ctx))) return;
+        await ctx.answerCbQuery();
+        
+        const adminId = String(ctx.from.id).match(/\d+/g)?.[0] || String(ctx.from.id);
+        
+        awaitingAdminChat.set(adminId, targetId);
+        activeAdminSessions.add(adminId);
+        
+        return ctx.reply(`💬 <b>CONVERSATION INITIALISÉE</b>\n\nVous discutez avec <code>${targetId}</code>.\n\nTous vos messages lui seront relayés.`,
+            Markup.inlineKeyboard([[Markup.button.callback('🛑 TERMINER', `admin_chat_end_${targetId}`)]])
+        );
     });
 
     bot.action(/^admin_order_assign_list_(.+)$/, async (ctx) => {
@@ -380,7 +403,12 @@ function setupAdminHandlers(bot) {
 
     bot.action(/^admin_order_set_(.+)_(.+)$/, async (ctx) => {
         const [, orderId, status] = ctx.match;
-        await updateOrderStatus(orderId, status);
+        const extra = {};
+        if (status === 'pending') {
+            extra.livreur_id = null;
+            extra.livreur_name = null;
+        }
+        await updateOrderStatus(orderId, status, extra);
         await ctx.answerCbQuery(`✅ Statut mis à jour : ${status}`);
         return bot.handleUpdate({ ...ctx.update, callback_query: { ...ctx.callbackQuery, data: `admin_order_view_${orderId}` } });
     });
@@ -577,6 +605,21 @@ function setupAdminHandlers(bot) {
         const buttons = livreurs.map(l => {
             const icon = l.is_available ? '🟢' : '🔴';
             return [Markup.button.callback(`${icon} ${l.first_name} — ${l.order_count || 0} livraisons`, `admin_livreur_view_${l.id}`)];
+        });
+        buttons.push([Markup.button.callback('◀️ Retour', 'admin_menu')]);
+        await safeEdit(ctx, text, Markup.inlineKeyboard(buttons));
+    });
+
+    bot.action('admin_taken_orders', async (ctx) => {
+        await ctx.answerCbQuery();
+        const orders = await getAllTakenOrders();
+        if (orders.length === 0) return safeEdit(ctx, '🚚 Aucune livraison en cours actuellement.', Markup.inlineKeyboard([[Markup.button.callback('◀️ Retour', 'admin_menu')]]));
+
+        let text = `🚚 <b>Livraisons en cours (${orders.length})</b>\n\n` +
+                   `Voici les commandes actuellement portées par les livreurs :`;
+        
+        const buttons = orders.map(o => {
+            return [Markup.button.callback(`🚚 #${o.id.substring(0, 8)} — ${o.total_price}€`, `admin_order_view_${o.id}`)];
         });
         buttons.push([Markup.button.callback('◀️ Retour', 'admin_menu')]);
         await safeEdit(ctx, text, Markup.inlineKeyboard(buttons));
