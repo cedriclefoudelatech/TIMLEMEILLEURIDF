@@ -1434,14 +1434,25 @@ function setupOrderSystem(bot) {
         const settings = ctx.state?.settings || await getAppSettings();
         const order = await getOrder(orderId);
 
-        if (!order || order.status !== 'pending') return safeEdit(ctx, settings.msg_order_not_available || '❌ Cette commande n\'est plus disponible.', Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_generic || '◀️ Retour', 'show_available_orders')]]));
+        const myId = `${ctx.platform}_${ctx.from.id}`;
+        const isMine = order && order.status === 'taken' && order.livreur_id === myId;
 
-        await updateOrderStatus(orderId, 'taken', {
-            livreur_id: `${ctx.platform}_${ctx.from.id}`,
-            livreur_name: ctx.from.first_name
-        });
+        if (!order || (order.status !== 'pending' && !isMine)) return safeEdit(ctx, settings.msg_order_not_available || '❌ Cette commande n\'est plus disponible.', Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_generic || '◀️ Retour', 'show_available_orders')]]));
+
+        const wasPending = order.status === 'pending';
+
+        if (wasPending) {
+            await updateOrderStatus(orderId, 'taken', {
+                livreur_id: myId,
+                livreur_name: ctx.from.first_name
+            });
+            order.status = 'taken';
+            order.livreur_id = myId;
+            order.livreur_name = ctx.from.first_name;
+        }
+
         await safeEdit(ctx,
-            `${settings.ui_icon_success} <b>Commande #${orderId.slice(-5)} acceptée !</b>\n\n` +
+            `${settings.ui_icon_success} <b>Commande #${orderId.slice(-5)} ${wasPending ? 'acceptée !' : 'en cours.'}</b>\n\n` +
             `📦 Produit : <b>${order.product_name}</b>\n` +
             `📍 Adresse : <code>${order.address}</code>\n` +
             (order.scheduled_at ? `🕒 <b>PRÉVU POUR : ${order.scheduled_at}</b>\n\n` : `🕒 Dès que possible\n\n`) +
@@ -1461,25 +1472,27 @@ function setupOrderSystem(bot) {
             }
         ).catch(() => { });
 
-        // Notifier le client avec option d'annulation et aide
-        if (order.user_id) {
-            await sendTelegramMessage(order.user_id,
-                `🚚 <b>Bonne nouvelle !</b>\n\n` +
-                `Votre commande #${orderId.slice(-5)} est prise en charge par <b>${settings.bot_name || 'notre équipe'}</b>.\n` +
-                `⏳ Une estimation du temps d'arrivé vous sera donnée dans quelques minutes.\n\n` +
-                `<i>Besoin de parler au livreur ou à l'admin ? Utilisez les boutons ci-dessous.</i>`,
-                {
-                    ...Markup.inlineKeyboard([
-                        [Markup.button.callback('💬 Parler au livreur', `chat_livreur_${orderId}`)],
-                        [Markup.button.callback(settings.btn_help_support || '❓ Aide & Support', 'help_menu')],
-                        [Markup.button.callback(settings.btn_cancel_my_order || '❌ Annuler ma commande', `cancel_order_client_${orderId}`)]
-                    ])
-                }
-            );
-        }
+        if (wasPending) {
+            // Notifier le client avec option d'annulation et aide
+            if (order.user_id) {
+                await sendTelegramMessage(order.user_id,
+                    `🚚 <b>Bonne nouvelle !</b>\n\n` +
+                    `Votre commande #${orderId.slice(-5)} est prise en charge par <b>${settings.bot_name || 'notre équipe'}</b>.\n` +
+                    `⏳ Une estimation du temps d'arrivé vous sera donnée dans quelques minutes.\n\n` +
+                    `<i>Besoin de parler au livreur ou à l'admin ? Utilisez les boutons ci-dessous.</i>`,
+                    {
+                        ...Markup.inlineKeyboard([
+                            [Markup.button.callback('💬 Parler au livreur', `chat_livreur_${orderId}`)],
+                            [Markup.button.callback(settings.btn_help_support || '❓ Aide & Support', 'help_menu')],
+                            [Markup.button.callback(settings.btn_cancel_my_order || '❌ Annuler ma commande', `cancel_order_client_${orderId}`)]
+                        ])
+                    }
+                );
+            }
 
-        // Relayer à l'admin
-        await notifyAdmins(bot, `🚗 <b>COMMANDE ACCEPTÉE</b>\n\n🆔 Commande : <code>#${orderId.slice(-5)}</code>\n👤 Livreur : ${ctx.from.first_name}\n📦 Produit : ${order.product_name}\n📍 Adresse : ${order.address}\n💰 Total : ${order.total_price}€`);
+            // Relayer à l'admin
+            await notifyAdmins(bot, `🚗 <b>COMMANDE ACCEPTÉE</b>\n\n🆔 Commande : <code>#${orderId.slice(-5)}</code>\n👤 Livreur : ${ctx.from.first_name}\n📦 Produit : ${order.product_name}\n📍 Adresse : ${order.address}\n💰 Total : ${order.total_price}€`);
+        }
     });
 
     bot.action(/^notify_(.+)_(.+)$/, async (ctx) => {

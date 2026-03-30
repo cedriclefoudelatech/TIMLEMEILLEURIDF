@@ -3594,9 +3594,9 @@
 
                 return `
                 <tr style="border-bottom: 2px solid #222;">
-                    <td><span class="badge" style="background:${o.platform === 'whatsapp' ? 'rgba(37,211,102,0.1)' : 'rgba(0,136,204,0.1)'}; color:${o.platform === 'whatsapp' ? '#25D366' : '#0088cc'}; border:1px solid currentColor; font-size:9px; font-weight:800; padding:1px 5px;">${o.platform?.toUpperCase() || 'TG'}</span></td>
-                    <td><b>${o.first_name}</b></td>
-                    <td style="background: rgba(255,165,0,0.05); min-width: 160px;">
+                    <td data-label="SRC (V.2)"><span class="badge" style="background:${o.platform === 'whatsapp' ? 'rgba(37,211,102,0.1)' : 'rgba(0,136,204,0.1)'}; color:${o.platform === 'whatsapp' ? '#25D366' : '#0088cc'}; border:1px solid currentColor; font-size:9px; font-weight:800; padding:1px 5px;">${o.platform?.toUpperCase() || 'TG'}</span></td>
+                    <td data-label="CLIENT"><b>${o.first_name}</b></td>
+                    <td data-label="ACTION (🔥)" style="background: rgba(255,165,0,0.05); min-width: 160px;">
                         <div style="display:flex; flex-direction:column; gap:4px;">
                             ${o.is_approved === false ? `
                                 <button class="btn btn-accent btn-sm" style="width:100%; background:linear-gradient(135deg, #00b400, #008000); box-shadow:0 4px 10px rgba(0,180,0,0.3);" onclick="approveUserAccount('${o.user_id}', '${o.first_name}')">✅ ACCORDER L'ACCÈS</button>
@@ -3628,7 +3628,7 @@
                             <button class="btn btn-outline btn-sm" style="color:var(--danger); margin-top:5px; border-color:rgba(255,0,0,0.2); width:100%;" onclick="delOrder('${o.id}')">🗑️ Supprimer</button>
                         </div>
                     </td>
-                    <td style="text-align:center;">
+                    <td data-label="STATUT" style="text-align:center;">
                         <span class="badge badge-${o.status}">${label}</span>
                         ${(() => {
                             if (!o.created_at) return '';
@@ -3637,19 +3637,19 @@
                             return '';
                         })()}
                     </td>
-                    <td>${o.product_name} (x${o.quantity})</td>
-                    <td><b>${o.total_price}€</b></td>
-                    <td><small style="font-size:11px; white-space: normal; display: block; max-width: 150px;">${o.address || '—'}</small></td>
-                    <td><small>${o.city || '—'}</small></td>
-                    <td>
+                    <td data-label="DÉTAILS">${o.product_name} (x${o.quantity})</td>
+                    <td data-label="TOTAL"><b>${o.total_price}€</b></td>
+                    <td data-label="ADRESSE"><small style="font-size:11px; white-space: normal; display: block; max-width: 150px;">${o.address || '—'}</small></td>
+                    <td data-label="VILLE"><small>${o.city || '—'}</small></td>
+                    <td data-label="DATE">
                         <small>🕐 ${createdTime}</small>
                         ${o.scheduled_at ? `<br><span style="padding:2px 6px; background:rgba(255,165,0,0.2); border:1px solid orange; color:orange; font-size:10px; border-radius:4px; font-weight:bold; margin-top:4px; display:inline-block;">📅 ${o.scheduled_at}</span>` : ''}
                     </td>
-                    <td>
+                    <td data-label="LIVRÉ À">
                         <small>${o.status === 'delivered' ? '✅ ' + deliveredTime : (o.livreur_name ? '⏳ En cours' : '—')}</small>
                         ${o.livreur_name ? `<br><small style="color:var(--accent); font-weight:700;">🚴 ${o.livreur_name}</small>` : ''}
                     </td>
-                    <td>
+                    <td data-label="AVIS">
                         ${o.feedback_rating ? `
                             <div style="color:orange; font-size:12px; font-weight:bold;">${'⭐'.repeat(o.feedback_rating)}</div>
                             <div style="font-size:11px; font-style:italic; color:var(--text-muted); line-height:1.2; max-width:150px;">"${o.feedback_text || ''}"</div>
