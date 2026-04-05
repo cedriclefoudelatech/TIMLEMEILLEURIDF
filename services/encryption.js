@@ -98,4 +98,12 @@ function decrypt(encryptedData) {
     }
 }
 
-module.exports = { encrypt, decrypt };
+/**
+ * Génère un hash déterministe SHA256 (non chiffré) pour recherche ou déduplication
+ */
+function hash(text) {
+    if (!text) return null;
+    return crypto.createHash('sha256').update(String(text).trim().toLowerCase()).digest('hex');
+}
+
+module.exports = { encrypt, decrypt, hash };

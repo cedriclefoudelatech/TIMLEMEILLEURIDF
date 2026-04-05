@@ -2508,20 +2508,6 @@ function setupOrderSystem(bot) {
 
     // Note: help_chat_admin est géré par handlers/admin.js pour éviter les duplications
 
-    bot.action('user_chat_reply_admin', async (ctx) => {
-        await ctx.answerCbQuery();
-        awaitingUserSupportReply.set(`${ctx.platform}_${ctx.from.id}`, true);
-        return ctx.reply(`💬 <b>Réponse à l'administration</b>\n\nEnvoyez votre message maintenant (texte, photo ou vidéo) :`, {
-            parse_mode: 'HTML',
-            ...Markup.inlineKeyboard([[Markup.button.callback('❌ Annuler', 'cancel_user_support')]])
-        });
-    });
-
-    bot.action('cancel_user_support', async (ctx) => {
-        awaitingUserSupportReply.delete(`${ctx.platform}_${ctx.from.id}`);
-        await ctx.answerCbQuery('Annulé');
-        return showHelpMenu(ctx);
-    });
 
 
     // Mode client pour les livreurs

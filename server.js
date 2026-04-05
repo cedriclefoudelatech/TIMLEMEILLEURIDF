@@ -710,6 +710,31 @@ function createServer() {
             }
 
             await updateAppSettings({ [field]: currentIds.join(', ') });
+            
+            // SYNCHRONISATION : Mettre à jour l'utilisateur si présent en base et vider le cache
+            const { supabase, COL_USERS } = require('./services/database');
+            const { authenticatedAdmins } = require('./handlers/admin');
+            const isAdmin = role === 'admin' ? (action === 'add') : undefined;
+            const isLivreur = role === 'livreur' ? (action === 'add') : undefined;
+            
+            const updateObj = {};
+            if (isAdmin !== undefined) updateObj.is_admin = isAdmin;
+            if (isLivreur !== undefined) updateObj.is_livreur = isLivreur;
+            
+            // On tente la mise à jour massive sur les correspondances de platform_id
+            const { data: matched } = await supabase.from(COL_USERS).update(updateObj).eq('platform_id', String(platformId)).select('id');
+            if (matched) {
+                const { _userCache } = require('./services/database');
+                for (const u of matched) {
+                    _userCache.delete(u.id);
+                    // Si on retire le rôle admin, on le retire aussi du PersistentMap de session
+                    if (role === 'admin' && action === 'remove') {
+                        authenticatedAdmins.delete(String(platformId).match(/\d+/g)?.[0]);
+                    }
+                }
+                await authenticatedAdmins.save();
+            }
+            
             res.json({ success: true, ids: currentIds });
         } catch (e) {
             console.error('Promotion error:', e);

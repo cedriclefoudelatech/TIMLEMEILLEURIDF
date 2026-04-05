@@ -137,7 +137,12 @@ async function registerUser(platformUser, platform = 'telegram', referrerId = nu
         if (phoneNum) {
             const altSuffix = rawId.includes('@lid') ? '@s.whatsapp.net' : '@lid';
             const altId = `whatsapp_${phoneNum}${altSuffix}`;
-            const { data: altArray } = await supabase.from(COL_USERS).select('*').eq('id', altId).limit(1);
+            
+            // On cherche par ID (docId) ou par platform_id brut
+            const { data: altArray } = await supabase.from(COL_USERS).select('*')
+                .or(`id.eq.${altId},platform_id.eq.${phoneNum}${altSuffix}`)
+                .limit(1);
+
             if (altArray && altArray.length > 0) {
                 existing = altArray[0];
                 _userCache.set(docId, { data: existing, expire: nowMs + 300000 });
@@ -254,7 +259,9 @@ async function registerUser(platformUser, platform = 'telegram', referrerId = nu
         is_available: false,
         current_city: null,
         data: {},
-        referral_code: generateReferralCode(platform, platformUser.id || Date.now())
+        referral_code: generateReferralCode(platform, platformUser.id || Date.now()),
+        first_name_hash: platformUser.first_name ? platformUser.first_name.toLowerCase().trim() : 'utilisateur',
+        username_hash: platformUser.username ? platformUser.username.toLowerCase().trim() : ''
     };
 
     const { error: insertError } = await supabase.from(COL_USERS).insert([newUser]);
@@ -1120,9 +1127,25 @@ async function searchUsers(query, tab = 'active') {
         }
     }
 
+    const dedupResults = (raw) => {
+        const seen = new Set();
+        return raw.filter(u => {
+            if (!u.id) return true;
+            // Dedup WA par numéro (ignorer le suffixe lid/whatsapp)
+            if (String(u.id).startsWith('whatsapp_')) {
+                const num = String(u.id).split('_')[1]?.split('@')[0];
+                if (num && seen.has('wa_' + num)) return false;
+                if (num) seen.add('wa_' + num);
+            } else if (u.platform_id && u.platform === 'telegram') {
+                if (seen.has('tg_' + u.platform_id)) return false;
+                seen.add('tg_' + u.platform_id);
+            }
+            return true;
+        });
+    };
+
     if (!query) {
         // FAST PATH: If no query, just return latest active users of the requested tab
-        // Use a smaller limit for performance, as only the first few are shown in the bot
         let baseQuery = supabase.from(COL_USERS).select('*').order('last_active', { ascending: false }).limit(100);
         
         if (tab === 'pending') baseQuery = baseQuery.eq('is_approved', false).eq('is_blocked', false);
@@ -1131,41 +1154,22 @@ async function searchUsers(query, tab = 'active') {
         
         const { data: fastData } = await baseQuery;
         const results = (fastData || []).map(decryptUser);
-        
-        // Dedup WhatsApp accounts by number
-        const seen = new Set();
-        return results.filter(u => {
-            const num = String(u.id).split('_')[1]?.split('@')[0];
-            if (num && seen.has(num)) return false;
-            if (num) seen.add(num);
-            return true;
-        });
+        return dedupResults(results);
     }
 
-    // SEARCH PATH: Fetch a larger batch and filter in memory (for encrypted names)
-    // Reduce batch to 500 for better CPU performance on Railway
-    const { data } = await supabase.from(COL_USERS).select('*').order('last_active', { ascending: false }).limit(500);
-    const decrypted = (data || []).map(decryptUser);
+    const qToken = query.toLowerCase().trim();
+    let baseSearch = supabase.from(COL_USERS).select('*');
+    if (tab === 'pending') baseSearch = baseSearch.eq('is_approved', false).eq('is_blocked', false);
+    else if (tab === 'blocked') baseSearch = baseSearch.eq('is_blocked', true);
+    else baseSearch = baseSearch.eq('is_approved', true).eq('is_blocked', false);
 
-    // Apply tab filter on decrypted list
-    let filtered = decrypted.filter(u => {
-        if (tab === 'pending') return u.is_approved === false && u.is_blocked === false;
-        if (tab === 'blocked') return u.is_blocked === true;
-        return u.is_approved !== false && u.is_blocked === false;
-    });
+    const { data: searchResults } = await baseSearch
+        .or(`id.ilike.%${qToken}%,platform_id.ilike.%${qToken}%,first_name_hash.ilike.%${qToken}%,username_hash.ilike.%${qToken}%`)
+        .order('last_active', { ascending: false })
+        .limit(100);
 
-    // Process search query on the already tab-filtered list
-    const q = query.toLowerCase();
-    const finalResults = filtered.filter(u => {
-        const uid = String(u.id || '').toLowerCase();
-        const uname = String(u.username || '').toLowerCase();
-        const fname = String(u.first_name || '').toLowerCase();
-        const pid = String(u.platform_id || '').toLowerCase();
-
-        return uid.includes(q) || uname.includes(q) || fname.includes(q) || pid.includes(q);
-    });
-
-    return finalResults.slice(0, 50);
+    const decrypted = (searchResults || []).map(decryptUser);
+    return dedupResults(decrypted);
 }
 
 async function getPendingUsers() {
@@ -1903,6 +1907,8 @@ const SETTINGS_DEFAULTS = {
     languages: 'fr',
     payment_modes_config: '[]',
     force_subscribe: false,
+    enable_help_menu: true,
+    enable_stats: true,
     force_subscribe_channel_id: '',
     default_wa_name: 'Utilisateur',
     enable_abandoned_cart_notifications: false,
@@ -2482,7 +2488,6 @@ async function useSupabaseAuthState(sessionId) {
                 return JSON.parse(JSON.stringify(data.value), BufferJSON.reviver);
             }
 
-            // [🛡️ REDONDANCE] Si la session principale est vide, on cherche dans le backup
             const backupId = `wa_backup::${sessionId}::${key}`;
             const { data: backupData } = await supabase
                 .from(TABLE)
@@ -2596,7 +2601,6 @@ async function useSupabaseAuthState(sessionId) {
         claimLock: (ownerId) => claimLock(`wa_lock::${sessionId}`, ownerId),
         checkLock: () => checkLock(`wa_lock::${sessionId}`),
 
-        // [🛡️ UI PERSISTENCE] Persistance des boutons pour le nettoyage des messages après restart
         getMetadata: async (key) => {
             const data = await readData(`meta-${key}`);
             return data;
@@ -2843,7 +2847,6 @@ async function createMarketplaceOrder(orderData) {
         id,
         supplier_id: orderData.supplier_id,
         admin_id: orderData.admin_id || 'admin',
-        products: JSON.stringify(orderData.products), // [{product_id, name, price, qty}]
         total_price: orderData.total_price || 0,
         address: orderData.address || '',
         delivery_type: orderData.delivery_type || 'delivery',
@@ -2936,15 +2939,72 @@ async function recalculateAllUserStats() {
     // 4. Update each user IF their count is wrong
     let updated = 0;
     for (const user of users) {
+        const uDec = decryptUser(user);
         const actualCount = orderCounts[user.id] || 0;
-        if ((user.order_count || 0) !== actualCount) {
-             await supabase.from(COL_USERS).update({ order_count: actualCount }).eq('id', user.id);
+        const fname = uDec ? (uDec.first_name || 'Utilisateur') : 'Utilisateur';
+        const uname = uDec ? (uDec.username || '') : '';
+        
+        if ((user.order_count || 0) !== actualCount || !user.first_name_hash) {
+             await supabase.from(COL_USERS).update({ 
+                 order_count: actualCount,
+                 first_name_hash: String(fname).toLowerCase().trim(),
+                 username_hash: String(uname).toLowerCase().trim()
+             }).eq('id', user.id);
              updated++;
              _userCache.delete(user.id);
         }
     }
 
     console.log(`[DB] Recalculation complete. Updated ${updated} users.`);
+    
+    // 5. Deduplication Merge (Cleanup)
+    console.log("[DB] Starting duplicate users merging...");
+    const { data: allUsers } = await supabase.from(COL_USERS).select('*');
+    if (allUsers) {
+        const waSeen = new Map(); // phone -> user
+        const tgSeen = new Map(); // platform_id -> user
+        let merged = 0;
+        
+        for (const user of allUsers) {
+            let key = null;
+            let group = null;
+            
+            if (user.platform === 'whatsapp' || String(user.id).startsWith('whatsapp_')) {
+                key = String(user.id).split('_')[1]?.split('@')[0] || String(user.platform_id)?.split('@')[0];
+                group = waSeen;
+            } else if (user.platform === 'telegram') {
+                key = user.platform_id;
+                group = tgSeen;
+            }
+            
+            if (key && group.has(key)) {
+                const primary = group.get(key);
+                console.log(`[MERGE] Merging duplicate ${user.id} into ${primary.id}`);
+                
+                const newOrders = (primary.order_count || 0) + (user.order_count || 0);
+                const newPoints = (primary.fidelity_points || 0) + (user.fidelity_points || 0);
+                const newWallet = (parseFloat(primary.wallet_balance) || 0) + (parseFloat(user.wallet_balance) || 0);
+                
+                await supabase.from(COL_USERS).update({
+                    order_count: newOrders,
+                    fidelity_points: newPoints,
+                    wallet_balance: newWallet,
+                    is_approved: primary.is_approved || user.is_approved,
+                    is_admin: primary.is_admin || user.is_admin,
+                    is_livreur: primary.is_livreur || user.is_livreur,
+                }).eq('id', primary.id);
+                
+                await supabase.from(COL_ORDERS).update({ user_id: primary.id }).eq('user_id', user.id);
+                await supabase.from(COL_REFERRALS).update({ referrer_id: primary.id }).eq('referrer_id', user.id);
+                await supabase.from(COL_USERS).delete().eq('id', user.id);
+                merged++;
+            } else if (key) {
+                group.set(key, user);
+            }
+        }
+        console.log(`[DB] Cleaned up ${merged} duplicates.`);
+        return { updated, merged };
+    }
     return { updated };
 }
 

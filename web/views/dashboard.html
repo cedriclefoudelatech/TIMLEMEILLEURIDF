@@ -2525,7 +2525,7 @@
                     </div>
                     <div class="search-box" style="flex:1; min-width:200px;">
                         <input type="text" id="q_filter_sys_users" placeholder="Rechercher par nom, username ou ID..."
-                            onkeyup="searchUsersUI()" autocomplete="new-password" readonly onfocus="this.removeAttribute('readonly')">
+                            oninput="searchUsersUI()" autocomplete="new-password" readonly onfocus="this.removeAttribute('readonly')">
                         <div class="search-icon">🔍</div>
                     </div>
                     <button class="btn btn-outline btn-sm" onclick="syncAllUsersStatus()"
@@ -4162,6 +4162,13 @@
             if (activeSection && !document.body.classList.contains('loading')) {
                 const id = activeSection.id.replace('section-', '');
                 if (id === 'overview' || id === 'logistique' || id === 'livreurs' || id === 'orders' || id === 'users') {
+                    // Empêcher l'auto-refresh si une recherche est en cours (pour ne pas écraser les résultats)
+                    const searchInput = document.getElementById('q_filter_sys_' + id) || document.getElementById('livreur-search');
+                    if (searchInput && searchInput.value && searchInput.value.length >= 2) {
+                        console.log(`[REFRESH] Ignoré pour ${id} car recherche active.`);
+                        return;
+                    }
+                    
                     isRefreshing = true;
                     loadData(id, true).finally(() => { isRefreshing = false; });
                 }
@@ -6191,6 +6198,7 @@
         }
 
         window._userTab = 'active';
+        window._lastSearchQuery = '';
 
         function switchUserTab(tab) {
             window._userTab = tab;
@@ -6205,8 +6213,8 @@
             } else {
                 // Sinon, recharger la liste standard de l'onglet
                 if (searchInput) {
-                    searchInput.value = ''; // clean up just in case
-                    searchInput.setAttribute('readonly', 'true'); // reset hack
+                    searchInput.value = ''; // clean up
+                    window._lastSearchQuery = '';
                 }
                 
                 // Show loading indicator in table
@@ -6218,15 +6226,30 @@
         }
 
         const searchUsersUI = debounce(async () => {
-            const q = document.getElementById('q_filter_sys_users').value;
+            const input = document.getElementById('q_filter_sys_users');
+            if (!input) return;
+            const q = input.value.trim();
+            
+            // Si on efface la recherche, on recharge tout proprement
             if (q.length < 2) {
-                loadData('users');
+                if (window._lastSearchQuery !== '') {
+                    window._lastSearchQuery = '';
+                    loadData('users');
+                }
                 return;
             }
+            
+            window._lastSearchQuery = q;
+            input.parentElement.parentElement.classList.add('loading'); // Utiliser la classe existante sur le conteneur section ou zone
+            
             try {
                 const results = await api('/users/search?q=' + encodeURIComponent(q) + '&tab=' + (window._userTab || 'active'));
                 renderUsersTable(results);
-            } catch (e) { }
+            } catch (e) {
+                console.error("[SEARCH-UI-ERROR]", e);
+            } finally {
+                input.parentElement.parentElement.classList.remove('loading');
+            }
         }, 300);
 
         const searchOrdersUI = debounce(async () => {
@@ -6277,13 +6300,15 @@
         }
 
         async function syncUserStats() {
-            const ok = await showModal('Sync Données', "Voulez-vous recalculer le nombre de commandes de tous les utilisateurs pour garantir l'exactitude des données ?");
+            const ok = await showModal('Sync & Nettoyage', "Voulez-vous recalculer les stats et fusionner les doublons détectés (même numéro WhatsApp/Telegram) ?");
             if (!ok) return;
 
-            showToast('Synchronisation des données en cours...', 'info');
+            showToast('Synchronisation et nettoyage en cours...', 'info');
             try {
-                const res = await api('/api/users/sync-stats', 'POST', {});
-                showToast(`✅ Terminé ! ${res.updated} profils ont été rafraîchis.`);
+                const res = await api('/users/sync-stats', 'POST', {});
+                let msg = `✅ Synchro terminée ! ${res.updated || 0} profils mis à jour.`;
+                if (res.merged) msg += ` ${res.merged} doublons fusionnés.`;
+                showToast(msg, 'success');
                 loadData('users');
             } catch (e) {
                 showToast(`❌ Erreur: ${e.message}`, 'error');
