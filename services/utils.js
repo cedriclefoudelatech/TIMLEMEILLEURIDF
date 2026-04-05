@@ -20,6 +20,9 @@ const fs = require('fs');
 // Cache mémoire local des messages trackés (évite un aller-retour DB à chaque navigation)
 const _trackedCache = new Map(); // userId → [messageId, ...]
 
+// Verrou d'édition par utilisateur pour éviter les doublons en cas de spam
+const _editLocks = new Map();
+
 // Media group actif : protège ces messages du cleanup tant qu'on reste dans le produit
 const _activeMediaGroup = new Map(); // userId → [messageId, ...]
 
@@ -49,6 +52,14 @@ async function safeEdit(ctx, text, opts = {}) {
         console.error('[SAFE-EDIT] No chat ID available');
         return;
     }
+
+    // --- ANTI-SPAM MUTEX ---
+    // Si une édition est déjà en cours pour cet utilisateur (depuis moins de 500ms),
+    // on l'ignore silencieusement pour éviter les doublons dans le chat.
+    const now = Date.now();
+    const lastEdit = _editLocks.get(userId);
+    if (lastEdit && (now - lastEdit < 500)) return;
+    _editLocks.set(userId, now);
 
     // 1. Médias & Clavier
     let photo = opts.photo || null;
@@ -299,9 +310,51 @@ async function trackIntermediateMessage(userId, messageId) {
     const existing = _trackedCache.get(userId) || [];
     if (!existing.includes(messageId)) {
         existing.push(messageId);
-        // Max 50 messages (suffisant pour plusieurs broadcasts et navigation)
+        // Max 50 messages
         if (existing.length > 50) existing.shift();
         _trackedCache.set(userId, existing);
+    }
+}
+
+/**
+ * Nettoyer TOUTE la discussion sauf le message de menu actuel (si passé)
+ */
+async function cleanupUserChat(ctx, keepId = null) {
+    const isGroup = ctx.chat?.type && ctx.chat.type !== 'private';
+    const chatId = ctx.chat?.id || (ctx.callbackQuery?.message?.chat?.id);
+    const userId = isGroup ? `${ctx.platform}_${chatId}` : `${ctx.platform}_${ctx.from?.id || ctx.callbackQuery?.from?.id}`;
+    
+    if (!chatId || !userId) return;
+
+    try {
+        let tracked = _trackedCache.get(userId) || [];
+        if (tracked.length === 0) {
+            tracked = await getTrackedMessages(userId).catch(() => []);
+        }
+
+        const toDelete = tracked.filter(id => String(id) !== String(keepId));
+        if (toDelete.length > 0) {
+            // Delete batches of 10 to avoid hitting limits or rate limit
+            for (let i = 0; i < toDelete.length; i += 10) {
+                const batch = toDelete.slice(i, i + 10);
+                await Promise.allSettled(batch.map(id => {
+                    if (ctx.platform === 'telegram') return ctx.telegram.deleteMessage(chatId, id).catch(() => {});
+                    if (ctx.platform === 'whatsapp' && ctx.channel) return ctx.channel.deleteMessage(chatId, id).catch(() => {});
+                }));
+            }
+        }
+        // Update cache to only keep the protected one
+        _trackedCache.set(userId, keepId ? [keepId] : []);
+        
+        // Clear from DB too
+        const { supabase, COL_USERS } = require('./database');
+        try {
+            await supabase.from(COL_USERS).update({ tracked_messages: keepId ? [keepId] : [] }).eq('id', userId);
+        } catch (e) {
+            console.error('[CLEANUP-DB] Failed to update tracked_messages:', e.message);
+        }
+    } catch (e) {
+        console.error('[CLEANUP-CHAT] Failed:', e.message);
     }
 }
 
@@ -311,9 +364,18 @@ function debugLog(msg) {
     const timestamp = new Date().toISOString();
     const line = `[${timestamp}] ${msg}\n`;
     try {
-        fs.appendFileSync(path.join(process.cwd(), 'debug_session.log'), line);
+        fs.appendFileSync(path.join(process.cwd(), 'debug_TIMLEMEILLEUR.log'), line);
     } catch (e) { }
     console.log(msg);
 }
 
-module.exports = { safeEdit, debugLog, esc, trackIntermediateMessage, setActiveMediaGroup, clearActiveMediaGroup, getActiveMediaGroup };
+module.exports = { 
+    safeEdit, 
+    debugLog, 
+    esc, 
+    trackIntermediateMessage, 
+    cleanupUserChat, 
+    setActiveMediaGroup, 
+    clearActiveMediaGroup, 
+    getActiveMediaGroup 
+};

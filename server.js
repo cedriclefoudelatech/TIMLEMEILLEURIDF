@@ -11,14 +11,15 @@ const {
     getAllOrders, updateOrderStatus, setLivreurStatus, getOrder, assignOrderLivreur,
     setLivreurAvailability, getAppSettings, updateAppSettings,
     deleteUser, incrementOrderCount, makeDocId, getOrderAnalytics, searchLivreurs,
-    getBroadcastHistory, deleteBroadcast, getDetailedLivreurActivity,
+    getBroadcastHistory, saveBroadcast, deleteBroadcast, getDetailedLivreurActivity,
     nukeDatabase, decryptUser, supabase, COL_USERS,
     registerUser, getLivreurHistory, getReviews, deleteReview, deleteOrder,
     getSuppliers, getSupplier, saveSupplier, deleteSupplier, getSupplierProducts, getSupplierOrders,
     // Marketplace
     getMarketplaceProducts, getMarketplaceProduct, getAvailableMarketplaceProducts,
     saveMarketplaceProduct, deleteMarketplaceProduct, updateMarketplaceStock,
-    createMarketplaceOrder, getMarketplaceOrders, getMarketplaceOrder, updateMarketplaceOrderStatus
+    createMarketplaceOrder, getMarketplaceOrders, getMarketplaceOrder, updateMarketplaceOrderStatus,
+    getUserAnalytics
 } = require('./services/database');
 const { broadcastMessage } = require('./services/broadcast');
 const fs = require('fs');
@@ -67,6 +68,11 @@ const loginLimiter = rateLimit({
 
 function createServer() {
     const app = express();
+    
+    // Simple memory cache for analytics (2 min)
+    let _analyticsCache = null;
+    let _lastAnalyticsUpdate = 0;
+    const ANALYTICS_CACHE_TTL = 120000; // 2 minutes
 
     // Log all requests for debugging
     app.use((req, res, next) => {
@@ -132,54 +138,12 @@ function createServer() {
 
     // Health check pour Railway/Debug
     app.get('/_health', (req, res) => {
-        const tgChannel = registry.query('telegram');
-        const waChannel = registry.query('whatsapp');
         res.json({
             status: 'ok',
             time: new Date().toISOString(),
             port: process.env.PORT || 'not-set',
-            env: process.env.RAILWAY_ENVIRONMENT || 'local',
-            telegram: {
-                registered: !!tgChannel,
-                active: tgChannel?.isActive || false
-            },
-            whatsapp: {
-                registered: !!waChannel,
-                active: waChannel?.isActive || false
-            }
+            env: process.env.RAILWAY_ENVIRONMENT || 'local'
         });
-    });
-
-    // Endpoint de diagnostic détaillé du bot (protégé par auth)
-    app.get('/api/bot-status', authMiddleware, async (req, res) => {
-        try {
-            const tgChannel = registry.query('telegram');
-            const waChannel = registry.query('whatsapp');
-
-            let tgInfo = null;
-            if (tgChannel && tgChannel.getBotInstance) {
-                const bot = tgChannel.getBotInstance();
-                if (bot) {
-                    try {
-                        const me = await bot.telegram.getMe();
-                        tgInfo = { connected: true, username: me.username, id: me.id, name: me.first_name };
-                    } catch (e) {
-                        tgInfo = { connected: false, error: e.message };
-                    }
-                } else {
-                    tgInfo = { connected: false, error: 'Bot instance null' };
-                }
-            }
-
-            res.json({
-                telegram: tgInfo || { connected: false, error: 'Canal non enregistré' },
-                whatsapp: { registered: !!waChannel, active: waChannel?.isActive || false },
-                uptime: process.uptime(),
-                memory: process.memoryUsage()
-            });
-        } catch (e) {
-            res.status(500).json({ error: e.message });
-        }
     });
 
     // QR Code WhatsApp - accessible via navigateur pour scanner
@@ -220,10 +184,9 @@ function createServer() {
 
     // ========== Static Pages ==========
 
-    app.get('/', (req, res) => {
-        console.log('[DEBUG] Root route Hit!');
-        res.sendFile(path.join(__dirname, 'web', 'views', 'login.html'));
-    });
+    app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'web', 'views', 'login.html')));
+    app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'web', 'views', 'login.html')));
+    app.get('/favicon.ico', (req, res) => res.status(204).end());
     app.get('/dashboard', (req, res) => res.sendFile(path.join(__dirname, 'web', 'views', 'dashboard.html')));
     app.get('/address-picker', (req, res) => res.sendFile(path.join(__dirname, 'web', 'views', 'address_picker.html')));
 
@@ -271,9 +234,8 @@ function createServer() {
                 inline_keyboard: [[{ text: '🔄 Modifier le mot de passe', callback_data: 'admin_trigger_password_reset' }]]
             };
 
-            const { sendMessageToUser } = require('./services/notifications');
             for (const adminId of adminIds) {
-                if (adminId) await sendMessageToUser(`telegram_${adminId}`, alertMsg, { reply_markup: keyboard });
+                if (adminId) bot.telegram.sendMessage(adminId, alertMsg, { parse_mode: 'HTML', reply_markup: keyboard }).catch(() => { });
             }
 
             res.json({ success: true, message: 'Notification envoyée aux administrateurs.' });
@@ -283,9 +245,27 @@ function createServer() {
         }
     });
 
+    // Cache for stats overview (1 min)
+    let _statsOverviewCache = null;
+    let _lastStatsUpdate = 0;
+    const STATS_CACHE_TTL = 60000; // 1 minute
+
     app.get('/api/stats', authMiddleware, async (req, res) => {
-        try { res.json(await getStatsOverview()); }
-        catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
+        try { 
+            const now = Date.now();
+            if (_statsOverviewCache && (now - _lastStatsUpdate < STATS_CACHE_TTL) && !req.query.force) {
+                return res.json(_statsOverviewCache);
+            }
+            const { getStatsOverview } = require('./services/database');
+            const data = await getStatsOverview(req.query.force === 'true');
+            _statsOverviewCache = data;
+            _lastStatsUpdate = now;
+            res.json(data); 
+        }
+        catch (e) { 
+            console.error("[API-STATS-ERROR]", e);
+            res.status(500).json({ error: 'Erreur serveur' }); 
+        }
     });
 
     app.get('/api/stats/daily', authMiddleware, async (req, res) => {
@@ -294,7 +274,7 @@ function createServer() {
     });
 
     app.get('/api/users', authMiddleware, async (req, res) => {
-        try { res.json(await getRecentUsers(parseInt(req.query.limit) || 1000)); }
+        try { res.json(await getRecentUsers(parseInt(req.query.limit) || 200)); }
         catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
     });
 
@@ -305,8 +285,27 @@ function createServer() {
         } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
     });
 
+    app.get('/api/users/:id/analytics', authMiddleware, async (req, res) => {
+        try {
+            const { getUserAnalytics } = require('./services/database');
+            const data = await getUserAnalytics(req.params.id);
+            if (!data) return res.status(404).json({ error: 'Client introuvable' });
+            res.json(data);
+        } catch (e) {
+            console.error('User Analytics API error:', e.message);
+            res.status(500).json({ error: 'Erreur serveur' });
+        }
+    });
+
+    app.get('/api/users/pending', authMiddleware, async (req, res) => {
+        try {
+            const { getPendingUsers } = require('./services/database');
+            res.json(await getPendingUsers());
+        } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
+    });
+
     app.get('/api/users/search', authMiddleware, async (req, res) => {
-        try { res.json(await searchUsers(req.query.q)); }
+        try { res.json(await searchUsers(req.query.q, req.query.tab || 'active')); }
         catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
     });
 
@@ -400,6 +399,17 @@ function createServer() {
         } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
     });
 
+    app.post('/api/users/sync-stats', authMiddleware, async (req, res) => {
+        try {
+            const { recalculateAllUserStats } = require('./services/database');
+            const result = await recalculateAllUserStats();
+            res.json({ success: true, ...result });
+        } catch (e) {
+            console.error('API Sync Stats Error:', e);
+            res.status(500).json({ error: e.message });
+        }
+    });
+
     app.post('/api/users/order', authMiddleware, async (req, res) => {
         try {
             await incrementOrderCount(req.body.id);
@@ -416,11 +426,20 @@ function createServer() {
 
     let lastCatalogNotificationTime = 0;
     const CATALOG_NOTIFICATION_COOLDOWN = 10 * 60 * 1000; // 10 minutes
-
     app.post('/api/products', authMiddleware, async (req, res) => {
         try {
+            const isMp = req.body.is_mp === true;
+            delete req.body.is_mp; // IMPORTANT: Ne pas envoyer en DB native/MP
+
             const isNew = !req.body.id;
-            const id = await saveProduct(req.body);
+            let id;
+
+            if (isMp) {
+                const { saveMarketplaceProduct } = require('./services/database');
+                id = await saveMarketplaceProduct(req.body);
+            } else {
+                id = await saveProduct(req.body);
+            }
 
             // Notification automatique si nouveau produit
             if (isNew) {
@@ -458,9 +477,20 @@ function createServer() {
     // ========== Order Routes ==========
 
     app.get('/api/orders', authMiddleware, async (req, res) => {
-        try { res.json(await getAllOrders(parseInt(req.query.limit) || 1000)); }
+        try { res.json(await getAllOrders(parseInt(req.query.limit) || 100)); }
         catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
     });
+
+    app.get('/api/customers/:id/stats', authMiddleware, async (req, res) => {
+        try {
+            const stats = await getUserAnalytics(req.params.id);
+            if (!stats) return res.status(404).json({ error: 'Client non trouvé ou sans historique' });
+            res.json(stats);
+        } catch (e) {
+            res.status(500).json({ error: e.message });
+        }
+    });
+
 
     app.get('/api/orders/search', authMiddleware, async (req, res) => {
         try { 
@@ -478,8 +508,30 @@ function createServer() {
     });
 
     app.get('/api/analytics', authMiddleware, async (req, res) => {
-        try { res.json(await getOrderAnalytics()); }
-        catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
+        try {
+            const now = Date.now();
+            if (_analyticsCache && (now - _lastAnalyticsUpdate < ANALYTICS_CACHE_TTL) && !req.query.force) {
+                return res.json(_analyticsCache);
+            }
+            const data = await getOrderAnalytics();
+            _analyticsCache = data;
+            _lastAnalyticsUpdate = now;
+            res.json(data);
+        }
+        catch (e) {
+            console.error("[API-ANALYTICS-ERROR]", e);
+            res.status(500).json({ error: 'Erreur serveur' });
+        }
+    });
+
+    app.post('/api/analytics/backfill-cities', authMiddleware, async (req, res) => {
+        try {
+            const { backfillOrderCities } = require('./services/database');
+            const result = await backfillOrderCities();
+            res.json({ success: true, ...result });
+        } catch (e) {
+            res.status(500).json({ error: e.message });
+        }
     });
 
     // ========== Upload Routes ==========
@@ -639,6 +691,47 @@ function createServer() {
         }
     });
 
+    app.post('/api/admin/promote', authMiddleware, async (req, res) => {
+        const { platformId, role, action } = req.body;
+        if (!platformId || !role) return res.status(400).json({ error: 'Données manquantes' });
+
+        try {
+            const { getAppSettings, updateAppSettings } = require('./services/database');
+            const settings = await getAppSettings();
+            const field = role === 'admin' ? 'admin_telegram_id' : 'moderator_telegram_id';
+            let currentIds = String(settings[field] || '').split(/[\s,]+/).map(id => id.trim()).filter(id => id.length > 0);
+
+            if (action === 'add') {
+                if (!currentIds.includes(String(platformId))) {
+                    currentIds.push(String(platformId));
+                }
+            } else {
+                currentIds = currentIds.filter(id => id !== String(platformId));
+            }
+
+            await updateAppSettings({ [field]: currentIds.join(', ') });
+            res.json({ success: true, ids: currentIds });
+        } catch (e) {
+            console.error('Promotion error:', e);
+            res.status(500).json({ error: e.message });
+        }
+    });
+
+    app.post('/api/users/profile', authMiddleware, async (req, res) => {
+        const { userId, first_name, phone } = req.body;
+        try {
+            let updates = { updated_at: ts() };
+            if (first_name !== undefined) updates.first_name = encryption.encrypt(first_name);
+            if (phone !== undefined) updates.phone = phone;
+            
+            const { error } = await supabase.from(COL_USERS).update(updates).eq('id', userId);
+            if (error) throw error;
+            
+            _userCache.delete(userId);
+            res.json({ success: true });
+        } catch (e) { res.status(500).json({ error: e.message }); }
+    });
+
     app.get('/api/livreurs', authMiddleware, async (req, res) => {
         try {
             const { data } = await supabase.from(COL_USERS).select('*').eq('is_livreur', true);
@@ -776,15 +869,20 @@ function createServer() {
     app.post('/api/orders/assign', authMiddleware, async (req, res) => {
         try {
             const { orderId, livreurId, livreurName } = req.body;
-            const { assignOrderLivreur } = require('./services/database');
+            const { assignOrderLivreur, getOrder } = require('./services/database');
+            const order = await getOrder(orderId);
             await assignOrderLivreur(orderId, livreurId, livreurName);
 
-            // Notification
-            const order = await getOrder(orderId);
-            if (order && order.user_id) {
+            // On notifie UNIQUEMENT le livreur
+            if (livreurId) {
                 const { sendMessageToUser } = require('./services/notifications');
-                const text = `🚚 <b>Votre commande #${orderId.slice(-5)} est prise en charge !</b>\n\nLe livreur <b>${livreurName}</b> arrive vers vous. 💨`;
-                await sendMessageToUser(order.user_id, text).catch(() => { });
+                const textLivreur = `📦 <b>MISSION ASSIGNÉE</b>\n\nUne commande vient de vous être assignée par l'administration.\n\n🆔 #<code>${orderId.slice(-5)}</code>\n👤 Client : ${order?.first_name || 'Utilisateur'}\n📍 Adresse : ${order?.address || 'Non spécifiée'}`;
+                await sendMessageToUser(livreurId, textLivreur, {
+                    parse_mode: 'HTML',
+                    reply_markup: {
+                        inline_keyboard: [[{ text: '📂 Détails de la mission', callback_data: `order_view_single_${orderId}` }]]
+                    }
+                }).catch(() => { });
             }
             res.json({ success: true });
         } catch (e) {
@@ -835,29 +933,39 @@ function createServer() {
             let mediaUrls = [];
             try { mediaUrls = req.body.media_urls ? JSON.parse(req.body.media_urls) : []; } catch (e) { mediaUrls = []; }
 
-            if (!message && mediaFiles.length === 0 && mediaUrls.length === 0) {
-                return res.status(400).json({ error: 'Message ou média requis' });
+            // 1. Upload des fichiers physiques reçus en Storage avant mise en file d'attente
+            const uploadedUrls = [];
+            const { uploadMediaBuffer } = require('./services/database');
+            for (let i = 0; i < mediaFiles.length; i++) {
+                const f = mediaFiles[i];
+                const cleanName = `bc_${Date.now()}_${i}_${f.name.replace(/[^\w.-]/g, '_')}`;
+                const url = await uploadMediaBuffer(f.data, cleanName, f.mimetype);
+                if (url) uploadedUrls.push(url);
+                debugLog(`[API-BC] Média uploadé: ${url}`);
             }
 
-            debugLog(`[API-BC-OK] Lancement: "${message.substring(0, 20)}..." Platform: ${platform}, Médias: ${mediaFiles.length}, URLs: ${mediaUrls.length}`);
-            res.json({ status: 'started', media_count: mediaFiles.length + mediaUrls.length });
+            // 2. Union avec les URLs déjà existantes envoyées par le dashboard (si sélection multiples)
+            const allMedia = [...uploadedUrls, ...mediaUrls];
 
-            const start_at = req.body.start_at || new Date().toISOString();
-            const end_at = req.body.end_at || null;
-            const badge = req.body.badge || null;
+            // 3. Sérialisation du message si médias présents (format supporté par broadcastMessage)
+            let finalMsg = message;
+            if (allMedia.length > 0) {
+                finalMsg += `|||MEDIA_URLS|||${JSON.stringify(allMedia)}`;
+            }
 
-            // Lancer la diffusion
-            broadcastMessage(platform, message, {
-                mediaFiles,
-                mediaUrls,
-                start_at,
-                end_at,
-                badge,
-                poll_options: req.body.poll_options || null,
-                poll_allow_free: req.body.poll_allow_free === 'true' || req.body.poll_allow_free === true
-            }).catch(err => {
-                debugLog(`[API-BC-FATAL] ${err.message}`);
+            // Sauvegarder en DB (sera récupéré par le worker sur Replica 0)
+            const broadcastId = await saveBroadcast({
+                message: finalMsg,
+                target_platform: platform,
+                status: 'pending',
+                start_at: req.body.start_at || new Date().toISOString(),
+                media_count: allMedia.length,
+                total_target: 0, // Sera calculé par le worker
+                badge: req.body.badge || null
             });
+
+            debugLog(`[API-BC-QUEUED] Diffusion #${broadcastId} ajoutée (${allMedia.length} médias)`);
+            res.json({ status: 'queued', id: broadcastId });
         } catch (e) {
             debugLog(`[API-BC-CRITICAL] ${e.message}`);
             res.status(500).json({ error: 'Erreur broadcast' });
@@ -927,8 +1035,15 @@ function createServer() {
 
     // Tous les produits marketplace (optionnel: ?supplier_id=xxx)
     app.get('/api/marketplace/products', authMiddleware, async (req, res) => {
-        try { res.json(await getMarketplaceProducts(req.query.supplier_id || null)); }
-        catch (e) { res.status(500).json({ error: e.message }); }
+        try { 
+            const products = await getMarketplaceProducts(req.query.supplier_id || null);
+            console.log(`[API] Marketplace products requested (${req.query.supplier_id || 'all'}): found ${products.length}`);
+            res.json(products); 
+        }
+        catch (e) { 
+            console.error('[API] Marketplace error:', e.message);
+            res.status(500).json({ error: e.message }); 
+        }
     });
 
     // Produits disponibles seulement
@@ -962,8 +1077,40 @@ function createServer() {
     // Mettre à jour le stock
     app.post('/api/marketplace/products/:id/stock', authMiddleware, async (req, res) => {
         try {
-            await updateMarketplaceStock(req.params.id, req.body.stock);
+            const { updateMarketplaceStock } = require('./services/database');
+            await updateMarketplaceStock(req.params.id, parseInt(req.body.stock));
             res.json({ success: true });
+        } catch (e) { res.status(500).json({ error: e.message }); }
+    });
+
+    app.post('/api/marketplace/products/:id/validate', authMiddleware, async (req, res) => {
+        try {
+            const { validateMarketplaceProduct, saveProduct, getMarketplaceProduct } = require('./services/database');
+            await validateMarketplaceProduct(req.params.id, req.body.is_validated);
+            
+            // Si c'est pour le catalogue principal (Retail) et validé
+            if (req.body.is_validated && req.body.promote_to_retail) {
+                await require('./services/database').promoteMarketplaceProduct(req.params.id);
+            }
+            
+            res.json({ success: true });
+        } catch (e) { res.status(500).json({ error: e.message }); }
+    });
+
+    app.post('/api/marketplace/products/:id/promote', authMiddleware, async (req, res) => {
+        try {
+            const { promoteMarketplaceProduct } = require('./services/database');
+            const newId = await promoteMarketplaceProduct(req.params.id);
+            res.json({ success: true, newId });
+        } catch (e) { res.status(500).json({ error: e.message }); }
+    });
+
+    app.post('/api/marketplace/products/:id/transfer', authMiddleware, async (req, res) => {
+        try {
+            const { promoteMarketplaceProduct, deleteMarketplaceProduct } = require('./services/database');
+            const newId = await promoteMarketplaceProduct(req.params.id);
+            await deleteMarketplaceProduct(req.params.id);
+            res.json({ success: true, newId });
         } catch (e) { res.status(500).json({ error: e.message }); }
     });
 
@@ -986,8 +1133,8 @@ function createServer() {
                 if (supplier && supplier.telegram_id) {
                     const productsText = req.body.products.map(p => `• ${p.name} x${p.qty}`).join('\n');
                     const msg = `📢 <b>NOUVELLE COMMANDE ADMIN</b>\n\n📌 <b>Détails :</b>\n${productsText}\n\n💰 Total : ${req.body.total_price}€\n📦 Commande : #${result.id.slice(-5)}\n📍 Livraison : ${req.body.delivery_type === 'pickup' ? 'RETRAIT SUR PLACE' : req.body.address || 'Non spécifié'}`;
-                    const { sendMessageToUser } = require('./services/notifications');
-                    await sendMessageToUser(`telegram_${supplier.telegram_id}`, msg, { 
+                    bot.telegram.sendMessage(supplier.telegram_id.replace('telegram_', ''), msg, { 
+                        parse_mode: 'HTML',
                         reply_markup: {
                             inline_keyboard: [
                                 [{ text: '✅ Accepter', callback_data: `mp_accept_${result.id}` }, { text: '❌ Refuser', callback_data: `mp_reject_${result.id}` }],

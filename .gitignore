@@ -3,8 +3,10 @@ node_modules
 *.log
 .DS_Store
 .env
-.env.railway
-sessions/
+.env.*
+*.sql
 *.zip
 .vscode/
-.claude/
+whatsapp_qr.png
+tmp_products.json
+tmp/

@@ -1,5 +1,5 @@
 -- Migration: Ajout des colonnes pour tous les textes/boutons éditables
--- Exécuter dans Supabase SQL Editor pour CHAQUE projet (TIM + La Frappe)
+-- Exécuter dans Supabase SQL Editor pour CHAQUE projet (TIM + TIM LE MEILLEUR)
 
 -- === BOUTONS DE NAVIGATION ===
 ALTER TABLE bot_settings ADD COLUMN IF NOT EXISTS btn_back_generic TEXT DEFAULT '◀️ Retour';

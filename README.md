@@ -1,49 +1,80 @@
-# TIM LE MEILLEUR IDF - Bot Telegram
+# 🤖 Bot Telegram Template (V5)
 
-Bot Telegram de livraison pour **TIM LE MEILLEUR IDF**, basé sur Node.js (Telegraf) + Supabase + interface web admin.
+Un bot Telegram robuste conçu avec **Node.js (Telegraf)** et **Supabase**, incluant une **interface web d'administration premium**.
 
-## Installation
+## ✨ Fonctionnalités
 
-```bash
-npm install
-```
+### 👤 Utilisateur (Bot)
+- **Inscription automatique** : Sauvegarde de l'ID, username, prénom et date d'inscription.
+- **Système de parrainage** : Lien unique par utilisateur, compteur de filleuls et classement.
+- **Menu interactif** : Accès rapide au contact privé, au canal Telegram et au message d'accueil.
+- **Fidélité & Portefeuille** : Système de points de fidélité et solde de portefeuille pour les commandes.
+- **Suivi de commande** : Notifications en temps réel lors du changement d'état d'une commande.
 
-## Configuration
+### 🛠 Administration (Bot & Web)
+- **Dashboard Premium** : Statistiques en temps réel, graphiques d'inscription (Chart.js), gestion des utilisateurs et des commandes.
+- **Système de Broadcast** : 
+  - Envoi à TOUS les utilisateurs (y compris ceux ayant supprimé le bot, avec détection automatique).
+  - Statistiques précises : Succès, Échecs, Nouveaux Bloqués, Déjà Bloqués.
+  - Gestion des **Rate Limits** de Telegram.
+- **Gestion des Produits** : Ajout, modification et suppression de produits via le dashboard.
+- **Commandes Admin (Telegram)** : Accès rapide aux fonctions de gestion via le bot.
 
-Copier `.env.example` vers `.env` et remplir les valeurs :
+---
 
+## 🚀 Installation & Configuration
+
+### 1. Prérequis
+- [Node.js v18+](https://nodejs.org/)
+- Un compte [Supabase](https://supabase.com/) (Gratuit)
+- Un token de bot via [@BotFather](https://t.me/BotFather)
+
+### 2. Configuration Supabase
+1. Créez un projet sur Supabase.
+2. Configurez les tables nécessaires (`users`, `orders`, `products`, `settings`, etc.).
+3. Récupérez votre **URL de projet** et votre **Clé API anon**.
+
+### 3. Variables d'environnement
+Créez un fichier `.env` à la racine :
 ```env
-BOT_TOKEN=votre_token_telegram
-ADMIN_TELEGRAM_ID=votre_id_telegram
-SUPABASE_URL=https://votre-projet.supabase.co
-SUPABASE_KEY=votre_cle_service_role
-ENCRYPTION_KEY=votre_cle_chiffrement
+BOT_TOKEN=123456789:ABCDEF...
+ADMIN_PASSWORD=votre_mot_de_passe_dashboard
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_KEY=your-anon-key
 PORT=3000
-ADMIN_PASSWORD=votre_mot_de_passe
-LICENSE_KEY=votre_cle_licence
 ```
 
-### Générer la clé de licence
-
+### 4. Lancement
 ```bash
-node generate-license.js https://votre-projet.supabase.co
-```
+# Installer les dépendances
+npm install
 
-## Base de données Supabase
-
-Exécutez le fichier `supabase_schema.sql` dans l'éditeur SQL de votre projet Supabase pour créer toutes les tables.
-
-## Lancement
-
-```bash
-# Développement
+# Lancer en mode développement
 npm run dev
 
-# Production
+# Lancer en production
 npm start
 ```
 
-## Bot Telegram
+---
 
-- Username : @TIMLEMEILLEURIDFBOT
-- Contact admin : @Lejardinidf
+## 🌐 Déploiement
+
+### Railway / Render
+Ce projet est prêt pour le déploiement sur Railway ou Render :
+1. Connectez votre dépôt GitHub.
+2. Ajoutez les variables d'environnement dans les paramètres du service.
+
+---
+
+## 🛠 Maintenance & Sécurité
+- **Doublons** : Gérés par l'utilisation de l'ID Telegram comme identifiant unique.
+- **Rate Limits** : Le service de broadcast utilise un système de batching intelligent pour respecter les limites de l'API Telegram.
+- **Sécurité** : Accès au dashboard protégé par mot de passe admin.
+
+---
+
+## 📈 Onboarding Admin
+1. **Démarrer le bot** : Envoyez `/start` à votre bot.
+2. **Accéder au Web** : Ouvrez votre URL de déploiement (ou localhost).
+3. **Paramétrage** : Rendez-vous dans l'onglet "Settings" pour configurer les messages d'accueil et les seuils de fidélité.

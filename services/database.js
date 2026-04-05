@@ -12,6 +12,7 @@ const COL_DAILY_STATS = 'bot_daily_stats';
 const COL_REVIEWS = 'bot_reviews';
 const COL_SUPPLIER_PRODUCTS = 'supplier_marketplace';
 const COL_SUPPLIER_ORDERS = 'supplier_market_orders';
+const DB_TIMEOUT = 20000;
 
 function ts() { return new Date().toISOString(); }
 
@@ -19,12 +20,10 @@ function ts() { return new Date().toISOString(); }
 const _statsCache = {
     overview: null,
     analytics: null,
-    ttl: 30000, // 30 seconds
+    ttl: 120000, // 2 minutes (avoid heavy scans on every reload)
     lastOverview: 0,
     lastAnalytics: 0
 };
-
-const DB_TIMEOUT = 10000;
 
 // Helper pour simplifier Supabase updates numériques
 const incr = (n = 1) => n;
@@ -106,19 +105,29 @@ async function activeUsersQuery(platform, type = null, limit = null) {
 }
 
 const _userCache = new Map();
+function clearUserCache(docId) {
+    if (docId) _userCache.delete(docId);
+}
 
 async function registerUser(platformUser, platform = 'telegram', referrerId = null) {
     if (!platform) platform = 'telegram';
+    const settings = await getAppSettings();
     const docId = makeDocId(platform, platformUser.id);
     const nowMs = Date.now();
-    const settings = await getAppSettings();
 
     let existing = null;
     if (_userCache.has(docId)) {
         existing = _userCache.get(docId).data;
     } else {
-        const { data: existingArray } = await supabase.from(COL_USERS).select('*').eq('id', docId).limit(1);
-        existing = existingArray && existingArray.length > 0 ? existingArray[0] : null;
+        // Recherche multi-index pour éviter les doublons (certains anciens utilisateurs n'ont peut-être pas le docId préfixé)
+        const { data: existingArray, error: fetchError } = await supabase.from(COL_USERS).select('*').eq('id', docId).limit(1);
+        
+        // Fallback: recherche par platform_id + platform si le docId ne match pas
+        existing = existingArray?.[0];
+        if (!existing && platformUser.id) {
+            const { data: altArray } = await supabase.from(COL_USERS).select('*').eq('platform_id', String(platformUser.id)).eq('platform', platform).limit(1);
+            existing = altArray?.[0];
+        }
     }
 
     // Déduplication WhatsApp : chercher le même numéro sous l'autre suffixe (@lid vs @s.whatsapp.net)
@@ -136,20 +145,24 @@ async function registerUser(platformUser, platform = 'telegram', referrerId = nu
             }
         }
 
-        // Fallback par NOM : Regroupement automatique par identité textuelle si l'ID a changé
+        // Fallback par NOM (Nouveau : Regroupement automatique par identité textuelle)
         if (!existing && platformUser.first_name && platformUser.first_name !== 'Utilisateur WhatsApp') {
             const encryptedName = encryption.encrypt(platformUser.first_name);
+            // On cherche tous les utilisateurs WhatsApp avec ce nom (chiffré)
             const { data: nameMatches } = await supabase.from(COL_USERS)
                 .select('*')
                 .eq('platform', 'whatsapp')
                 .eq('first_name', encryptedName)
-                .neq('id', docId);
-
+                .neq('id', docId); // Ne pas se matcher soi-même si l'ID a changé mais le nom est resté
+            
             if (nameMatches && nameMatches.length > 0) {
-                // On prend le plus actif (plus de commandes) ou le plus ancien
+                // On prend le "meilleur" (plus de commandes ou plus vieux)
                 existing = nameMatches.sort((a, b) => (b.order_count || 0) - (a.order_count || 0) || new Date(a.date_inscription || 0) - new Date(b.date_inscription || 0))[0];
                 console.log(`[WA-Identity-Merged] Regroupement de ${docId} sur l'identité existante ${existing.id} (Nom: "${platformUser.first_name}")`);
+                
+                // On enregistre ce lien dans le cache pour éviter de refaire la recherche DB à chaque message
                 _userCache.set(docId, { data: existing, expire: nowMs + 300000 });
+                // L'utilisateur retrouvera son portefeuille, ses points et son historique
             }
         }
     }
@@ -163,9 +176,8 @@ async function registerUser(platformUser, platform = 'telegram', referrerId = nu
         const needsDbUpdate = (nowMs - lastUpdated) > 300000; // 5 minutes
         const needsTypeHealing = !existing.type;
         const needsReferralCode = !existing.referral_code;
-        const needsAutoApproval = existing.is_approved === false && settings?.auto_approve_new !== false;
 
-        if (needsDbUpdate || needsTypeHealing || needsReferralCode || needsAutoApproval) {
+        if (needsDbUpdate || needsTypeHealing || needsReferralCode) {
             const updateData = {
                 last_active: ts(),
                 updated_at: ts(),
@@ -176,10 +188,6 @@ async function registerUser(platformUser, platform = 'telegram', referrerId = nu
             if (needsReferralCode) {
                 updateData.referral_code = generateReferralCode(platform, platformUser.id || Date.now());
             }
-            if (needsAutoApproval) {
-                updateData.is_approved = true;
-                console.log(`[AUTO-APPROVE] User ${docId} auto-approved (was pending)`);
-            }
 
             // Si on a des infos fraîches sur le nom/username
             if (platformUser.username) updateData.username = !isGroup ? encryption.encrypt(platformUser.username) : platformUser.username;
@@ -189,6 +197,7 @@ async function registerUser(platformUser, platform = 'telegram', referrerId = nu
             supabase.from(COL_USERS).update(updateData).eq('id', docId).then(() => { }, () => { });
 
             const updatedUser = { ...existing, ...updateData };
+            _userCache.set(docId, { data: updatedUser, expire: nowMs + 300000 });
             _userCache.set(docId, { data: updatedUser, expire: nowMs + 300000 });
 
             // Si cet utilisateur déjà inscrit clique sur un lien de parrainage et n'a PAS de parrain encore
@@ -218,6 +227,7 @@ async function registerUser(platformUser, platform = 'telegram', referrerId = nu
         first_name: !isGroup ? encryption.encrypt(platformUser.first_name || 'Utilisateur') : (platformUser.first_name || 'Utilisateur'),
         last_name: !isGroup ? encryption.encrypt(platformUser.last_name || '') : '',
         language_code: platformUser.language_code || 'fr',
+        phone: null,
         date_inscription: ts(),
         last_active: ts(),
         updated_at: ts(),
@@ -228,8 +238,7 @@ async function registerUser(platformUser, platform = 'telegram', referrerId = nu
             const adminIds = String(settings?.admin_telegram_id || '').match(/\d+/g) || [];
             const envAdmin = String(process.env.ADMIN_TELEGRAM_ID || '').match(/\d+/g)?.[0] || '';
             const isAdm = adminIds.includes(cleanId) || cleanId === envAdmin;
-            // Par défaut pour TIM, auto_approve_new est true (désactive la validation manuelle)
-            return isAdm || settings?.auto_approve_new !== false; 
+            return isAdm || !!(settings?.auto_approve_new);
         })(),
         is_admin: (() => {
              const cleanId = String(platformUser.id).match(/\d+/g)?.[0] || '';
@@ -245,7 +254,7 @@ async function registerUser(platformUser, platform = 'telegram', referrerId = nu
         is_available: false,
         current_city: null,
         data: {},
-        referral_code: generateReferralCode(platform, platformUser.id || Date.now()),
+        referral_code: generateReferralCode(platform, platformUser.id || Date.now())
     };
 
     const { error: insertError } = await supabase.from(COL_USERS).insert([newUser]);
@@ -279,23 +288,6 @@ async function approveUser(userId) {
     if (error) throw error;
     _userCache.delete(userId);
     return true;
-}
-
-async function getPendingUsers() {
-    const { data } = await supabase.from(COL_USERS)
-        .select('*')
-        .eq('is_approved', false)
-        .eq('is_blocked', false)
-        .order('date_inscription', { ascending: false });
-    return (data || []).map(decryptUser);
-}
-
-async function getPendingUserCount() {
-    const { count } = await supabase.from(COL_USERS)
-        .select('*', { count: 'exact', head: true })
-        .eq('is_approved', false)
-        .eq('is_blocked', false);
-    return count || 0;
 }
 
 /**
@@ -429,7 +421,7 @@ async function updateUserPoints(docId, points) {
     // Trigger conversion if threshold reached
     const settings = await getAppSettings();
     const threshold = settings.points_exchange || 100;
-    const creditValue = settings.points_credit_value || 10;
+    const creditValue = settings.points_credit_value || 5;
 
     if (points >= threshold) {
         const conversions = Math.floor(points / threshold);
@@ -438,23 +430,19 @@ async function updateUserPoints(docId, points) {
 
         const user = await getUser(docId);
         if (user) {
-            const newPoints = Math.max(0, points - pointsToDeduce);
-            const newBalance = (parseFloat(user.wallet_balance) || 0) + creditToAdd;
-
             await supabase.from(COL_USERS).update({
-                points: newPoints,
-                wallet_balance: newBalance
+                points: points - pointsToDeduce,
+                wallet_balance: (user.wallet_balance || 0) + creditToAdd
             }).eq('id', docId);
             _userCache.delete(docId);
 
             try {
-                const { sendMessageToUser } = require('./notifications');
-                if (user) {
-                    await sendMessageToUser(docId, `🎊 <b>Conversion Automatique !</b>\n\nVos ${pointsToDeduce} points ont été convertis en <b>${creditToAdd}€</b> de crédit.\nNouveau solde : <b>${newBalance.toFixed(2)}€</b> 🚀`);
+                const { getBotInstance } = require('../server');
+                const bot = getBotInstance();
+                if (bot && user.platform_id) {
+                    bot.telegram.sendMessage(user.platform_id, `🎊 <b>Conversion Automatique !</b>\n\nVos ${pointsToDeduce} points ont été convertis en <b>${creditToAdd}€</b> de crédit.\nNouveau solde : <b>${((user.wallet_balance || 0) + creditToAdd).toFixed(2)}€</b> 🚀`, { parse_mode: 'HTML' }).catch(() => { });
                 }
-            } catch (e) {
-                console.error('[LOYALTY-NOTIF] Error:', e.message);
-            }
+            } catch (e) { }
         }
     }
 }
@@ -464,6 +452,7 @@ async function setLivreurStatus(userId, platform, isLivreur) {
     const docId = makeDocId(platform, userId);
     const { error } = await supabase.from(COL_USERS).update({
         is_livreur: isLivreur,
+        is_approved: true, // Auto-approve if promoted to livreur
         updated_at: ts()
     }).eq('id', docId);
 
@@ -594,7 +583,22 @@ async function createOrder(orderData) {
         }
     }
 
+    // --- GEO EXTRACTION (extraction avant chiffrement) ---
+    try {
+        if (!orderData.city || orderData.city === 'INCONNUE' || !orderData.postal_code) {
+            const { city, postalCode, district } = extractCityFromAddress(orderData.address);
+            if (city && city !== 'INCONNUE') {
+                if (!orderData.city || orderData.city === 'INCONNUE') orderData.city = city.toUpperCase();
+                if (!orderData.postal_code) orderData.postal_code = postalCode;
+                if (!orderData.district) orderData.district = district;
+            }
+        }
+    } catch (e) {
+        console.warn("⚠️ Geo extraction failed during createOrder:", e.message);
+    }
+
     const id = `${Date.now()}-${Math.round(Math.random() * 1E9)}`;
+
 
     // Chiffrement des champs sensibles avant stockage en base
     const secureOrderData = { ...orderData };
@@ -727,61 +731,6 @@ async function updateOrderStatus(orderId, status, extraData = {}) {
     }
     await supabase.from(COL_ORDERS).update({ status, ...extraData, updated_at: ts() }).eq('id', orderId);
 
-    if (status === 'delivered') {
-        const order = await getOrder(orderId);
-        if (order && !order.points_awarded) {
-            const user = await getUser(order.user_id);
-            if (user) {
-                const price = parseFloat(order.total_price) || 0;
-                const settings = await getAppSettings();
-                const pointsRatio = settings.points_ratio || 1;
-                const refBonus = settings.ref_bonus || 5;
-
-                const pointsToAdd = Math.floor(price * pointsRatio);
-                const isFirstOrder = user.order_count === 0;
-
-                if (settings.enable_referral !== false && isFirstOrder && user.referred_by) {
-                    await updateUserWallet(user.id, (user.wallet_balance || 0) + refBonus);
-                    const referrer = await getUser(user.referred_by);
-                    if (referrer) {
-                        await updateUserWallet(referrer.id, (referrer.wallet_balance || 0) + refBonus);
-
-                        // Notifier le parrain (Multi-plateforme)
-                        const { sendMessageToUser } = require('./notifications');
-                        const refMsg = `👥 <b>GÉNIAL ! Récompense Parrainage !</b>\n\nVotre ami <b>${user.first_name || 'anonyme'}</b> vient de passer sa première commande.\n\nNous venons de créditer votre portefeuille de <b>+${refBonus.toFixed(2)}€</b>. Partagez encore votre lien ! 🎁`;
-                        await sendMessageToUser(referrer.id, refMsg).catch(() => {});
-                    }
-                }
-
-                const newOrderCount = (user.order_count || 0) + 1;
-
-                if (settings.enable_fidelity !== false) {
-                    await updateUserPoints(user.id, (user.points || 0) + pointsToAdd);
-                    
-                    // --- Système de Bonus Fidélité ---
-                    const thresholds = (settings.fidelity_bonus_thresholds || "5,10,15,20").split(',').map(t => parseInt(t.trim())).filter(t => !isNaN(t));
-                    const bonusAmount = parseFloat(settings.fidelity_bonus_amount) || 10;
-
-                    if (thresholds.includes(newOrderCount)) {
-                        await updateUserWallet(user.id, (parseFloat(user.wallet_balance) || 0) + bonusAmount);
-
-                        // Notifier le client du bonus (Multi-plateforme)
-                        const { sendMessageToUser } = require('./notifications');
-                        const bonusMsg = `🏮 <b>C'EST VOTRE JOUR DE CHANCE ! Bonus Fidélité !</b>\n\nFélicitations pour votre <b>${newOrderCount}ème</b> commande !\n\nEn récompense, votre portefeuille a été crédité de <b>+${bonusAmount.toFixed(2)}€</b>. Merci de votre fidélité ! ⭐️`;
-                        await sendMessageToUser(user.id, bonusMsg).catch(() => {});
-                        console.log(`🎁 Bonus fidélité de ${bonusAmount}€ accordé à ${user.id} pour sa ${newOrderCount}ème commande.`);
-                    }
-                }
-                
-                await supabase.from(COL_USERS).update({ order_count: newOrderCount }).eq('id', user.id);
-                await supabase.from(COL_ORDERS).update({ points_awarded: true }).eq('id', orderId);
-
-                _userCache.delete(user.id);
-            }
-        }
-    }
-
-
     // Notification Admin sur chaque changement
     try {
         const settings = await getAppSettings();
@@ -811,25 +760,85 @@ async function getOrdersByUser(userId) {
     return (data || []).map(decryptOrder);
 }
 
-async function assignOrderLivreur(orderId, livreurId, livreurName) {
-    const update = {
-        livreur_id: livreurId || null,
-        livreur_name: livreurName || null,
-        status: livreurId ? 'taken' : 'pending',
-        updated_at: ts()
-    };
-    await supabase.from(COL_ORDERS).update(update).eq('id', orderId);
+async function getCustomerInsight(userId) {
+    const orders = await getOrdersByUser(userId);
+    if (!orders || orders.length === 0) return null;
 
-    // Notifier Admin
+    const totalOrders = orders.length;
+    const deliveredOrders = orders.filter(o => o.status === 'delivered');
+    const totalSpent = deliveredOrders.reduce((sum, o) => sum + (parseFloat(o.total_price) || 0), 0);
+    const avgBasket = totalSpent / (deliveredOrders.length || 1);
+
+    // Adresses préférées (top 3)
+    const adrMap = {};
+    orders.forEach(o => {
+        if (o.address) adrMap[o.address] = (adrMap[o.address] || 0) + 1;
+    });
+    const topAddresses = Object.entries(adrMap)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([addr]) => addr);
+
+    // Heures habituelles d'achat (fréquence par heure)
+    const hoursMap = {};
+    orders.forEach(o => {
+        const date = safeDate(o.created_at);
+        if (!isNaN(date.getTime())) {
+            const h = date.getHours();
+            hoursMap[h] = (hoursMap[h] || 0) + 1;
+        }
+    });
+
+    return {
+        totalOrders,
+        deliveredCount: deliveredOrders.length,
+        totalSpent: totalSpent.toFixed(2),
+        avgBasket: avgBasket.toFixed(2),
+        topAddresses,
+        hoursFrequency: hoursMap,
+        recentOrders: orders.slice(0, 5)
+    };
+}
+
+
+async function assignOrderLivreur(orderId, livreurId, livreurName) {
     try {
-        const { notifyAdmins } = require('./notifications');
-        const alertMsg = `🚚 <b>AFFECTATION</b>\n\n🆔 #<code>${orderId.slice(-5)}</code>\n👤 Livreur : <b>${livreurName}</b>`;
-        // On n'attend pas forcément pour ne pas bloquer le livreur
-        notifyAdmins(null, alertMsg).catch(e => console.error("❌ notifyAdmins (assign) failed:", e.message));
+        let finalLivreurName = livreurName;
+        
+        // Si le nom n'est pas fourni, on le cherche
+        if (!finalLivreurName && livreurId) {
+            const { data: user } = await supabase.from(COL_USERS).select('first_name, last_name, username').eq('id', livreurId).single();
+            if (user) {
+                finalLivreurName = user.first_name || user.username || 'Inconnu';
+            }
+        }
+
+        const update = {
+            livreur_id: livreurId || null,
+            livreur_name: finalLivreurName || null,
+            status: livreurId ? 'taken' : 'pending',
+            updated_at: ts()
+        };
+        
+        const { error } = await supabase.from(COL_ORDERS).update(update).eq('id', orderId);
+        if (error) throw error;
+
+        // Notifier Admin
+        try {
+            const { notifyAdmins } = require('./notifications');
+            const alertMsg = `🚚 <b>AFFECTATION</b>\n\n🆔 #<code>${orderId.slice(-6).toUpperCase()}</code>\n👤 Livreur : <b>${finalLivreurName}</b>`;
+            notifyAdmins(null, alertMsg).catch(e => console.error("❌ notifyAdmins (assign) failed:", e.message));
+        } catch (e) {
+            console.error("❌ Notification Admin (assign) error:", e.message);
+        }
+
+        return { success: true };
     } catch (e) {
-        console.error("❌ Notification Admin (assign) error:", e.message);
+        console.error("❌ assignOrderLivreur error:", e.message);
+        return { success: false, error: e.message };
     }
 }
+
 
 async function getClientActiveOrders(userId) {
     const { data } = await supabase.from(COL_ORDERS)
@@ -932,79 +941,66 @@ async function getAvailableOrders(city = null) {
 }
 
 async function getAllOrders(limit = 1000) {
-    try {
-        // Version optimisée sans Trial-and-Error (évite les warnings dans les logs)
-        const { data: rawOrders, error } = await supabase.from(COL_ORDERS)
-            .select('*')
-            .order('created_at', { ascending: false })
-            .abortSignal(AbortSignal.timeout(DB_TIMEOUT))
-            .limit(limit);
-        
-        if (error || !rawOrders) {
-            console.error('[DB-Orders] Fetch failed:', error?.message);
-            return [];
-        }
+    // We use a simple select + manual join to avoid "Missing relationship" warnings in Supabase
+    // when the Foreign Key isn't explicitly set in the schema cache.
+    const { data: rawOrders, error } = await supabase.from(COL_ORDERS)
+        .select('*')
+        .order('created_at', { ascending: false })
+        .abortSignal(AbortSignal.timeout(DB_TIMEOUT))
+        .limit(limit);
+    
+    if (error || !rawOrders) {
+        console.warn(`[DB-Orders] Fetch failed: ${error?.message || 'No data'}`);
+        return [];
+    }
 
-        if (rawOrders.length === 0) return [];
-
-        // On récupère les approvals manuellement (un seul appel en IN)
-        const userIds = [...new Set(rawOrders.map(o => o.user_id).filter(id => !!id))];
-        const { data: usersData } = await supabase.from(COL_USERS)
+    const orders = rawOrders.map(decryptOrder);
+    
+    // Fetch associated users status to get is_approved
+    const userIds = [...new Set(orders.map(o => o.user_id).filter(id => id))];
+    if (userIds.length > 0) {
+        const { data: userData } = await supabase.from(COL_USERS)
             .select('id, is_approved')
             .in('id', userIds);
         
-        const userMap = {};
-        if (usersData) {
-            usersData.forEach(u => { userMap[u.id] = u.is_approved; });
+        if (userData) {
+            const userMap = new Map(userData.map(u => [u.id, u.is_approved]));
+            orders.forEach(o => {
+                o.is_approved = userMap.has(o.user_id) ? userMap.get(o.user_id) : true;
+            });
         }
-
-        return rawOrders.map(o => {
-            const decrypted = decryptOrder(o);
-            // Si l'utilisateur est inconnu ou non trouvé, on assume approuvé par défaut
-            decrypted.is_approved = userMap[o.user_id] !== undefined ? userMap[o.user_id] : true;
-            return decrypted;
-        });
-    } catch (e) {
-        console.error('❌ getAllOrders Fatal:', e.message);
-        return [];
     }
+    
+    return orders;
 }
-
 
 /**
  * Recherche multicritère pour le dashboard (ID court ou nom produit)
  */
 async function searchOrders(query) {
     if (!query) return [];
-    try {
-        const { data: orders, error } = await supabase.from(COL_ORDERS)
-            .select('*')
-            .or(`id.ilike.%${query}%,product_name.ilike.%${query}%`)
-            .order('created_at', { ascending: false })
-            .limit(50);
-            
-        if (error) throw error;
-        if (!orders || orders.length === 0) return [];
+    
+    // Manual search + manual join
+    const { data: rawOrders } = await supabase.from(COL_ORDERS)
+        .select('*')
+        .or(`id.ilike.%${query}%,username.ilike.%${query}%,first_name.ilike.%${query}%,items.ilike.%${query}%`)
+        .order('created_at', { ascending: false })
+        .limit(50);
+    if (!rawOrders) return [];
+    const orders = rawOrders.map(decryptOrder);
 
-        const userIds = [...new Set(orders.map(o => o.user_id))];
-        const { data: usersData } = await supabase.from(COL_USERS)
-            .select('id, is_approved')
-            .in('id', userIds);
-
-        const userMap = {};
-        if (usersData) usersData.forEach(u => { userMap[u.id] = u.is_approved; });
-
-        return orders.map(o => {
-            const decrypted = decryptOrder(o);
-            decrypted.is_approved = userMap[o.user_id] !== undefined ? userMap[o.user_id] : true;
-            return decrypted;
-        });
-    } catch (e) {
-        console.error('❌ searchOrders Failed:', e.message);
-        throw e;
+    const userIds = [...new Set(orders.map(o => o.user_id).filter(id => id))];
+    if (userIds.length > 0) {
+        const { data: userData } = await supabase.from(COL_USERS).select('id, is_approved').in('id', userIds);
+        if (userData) {
+            const userMap = new Map(userData.map(u => [u.id, u.is_approved]));
+            orders.forEach(o => {
+                o.is_approved = userMap.has(o.user_id) ? userMap.get(o.user_id) : true;
+            });
+        }
     }
+    return orders;
 }
-
 
 async function getLivreurHistory(livreurId) {
     const { data } = await supabase.from(COL_ORDERS)
@@ -1022,13 +1018,6 @@ async function getLivreurOrders(livreurId) {
         .eq('status', 'taken');
     return (data || []).map(decryptOrder);
 }
-async function getAllTakenOrders() {
-    const { data } = await supabase.from(COL_ORDERS)
-        .select('*')
-        .eq('status', 'taken')
-        .order('created_at', { ascending: false });
-    return (data || []).map(decryptOrder);
-}
 
 async function getUser(docId) {
     if (_userCache.has(docId)) {
@@ -1038,7 +1027,7 @@ async function getUser(docId) {
         }
     }
 
-    const { data } = await supabase.from(COL_USERS).select('*').eq('id', docId).limit(1);
+    const { data } = await supabase.from(COL_USERS).select('*').eq('id', docId).abortSignal(AbortSignal.timeout(DB_TIMEOUT)).limit(1);
     const rawData = data && data.length > 0 ? data[0] : null;
 
     if (rawData) {
@@ -1051,17 +1040,21 @@ async function getUser(docId) {
 async function getUserCount(platform = null) {
     let q = supabase.from(COL_USERS).select('*', { count: 'exact', head: true });
     if (platform) q = q.eq('platform', platform);
-    const { count } = await q;
+    const { count } = await q.abortSignal(AbortSignal.timeout(DB_TIMEOUT));
     return count || 0;
 }
 async function getActiveUserCount(platform = null) {
     let q = supabase.from(COL_USERS).select('*', { count: 'exact', head: true }).eq('is_blocked', false).eq('is_active', true);
     if (platform) q = q.eq('platform', platform);
-    const { count } = await q;
+    const { count } = await q.abortSignal(AbortSignal.timeout(DB_TIMEOUT));
     return count || 0;
 }
 async function getRecentUsers(limit = 100) {
-    const { data } = await supabase.from(COL_USERS).select('*').eq('is_blocked', false).order('last_active', { ascending: false }).limit(limit);
+    const { data } = await supabase.from(COL_USERS).select('*')
+        .eq('is_blocked', false)
+        .not('is_approved', 'eq', false) // includes true AND null (backward compatibility)
+        .order('last_active', { ascending: false })
+        .limit(limit);
     const users = (data || []).map(decryptUser);
     
     const seenId = new Set();
@@ -1095,7 +1088,7 @@ async function getBlockedUsers(limit = 1000) {
         .limit(limit);
     return (data || []).map(decryptUser);
 }
-async function searchUsers(query) {
+async function searchUsers(query, tab = 'active') {
     // Exact match by ID first (snappy)
     if (query && (query.startsWith('telegram_') || query.startsWith('whatsapp_') || !isNaN(query.replace('@', '')))) {
         let idToSearch = query;
@@ -1104,49 +1097,89 @@ async function searchUsers(query) {
             const { data: exact } = await supabase.from(COL_USERS).select('*')
                 .or(`id.eq.telegram_${query},id.eq.whatsapp_${query},platform_id.eq.${query}`)
                 .limit(5);
-            if (exact && exact.length > 0) return exact.map(decryptUser);
+            if (exact && exact.length > 0) {
+                const results = exact.map(decryptUser).filter(u => {
+                    if (tab === 'pending') return u.is_approved === false && u.is_blocked === false;
+                    if (tab === 'blocked') return u.is_blocked === true;
+                    return u.is_approved === true && u.is_blocked === false; // active
+                });
+                return results;
+            }
         } else {
             const { data: exact } = await supabase.from(COL_USERS).select('*')
                 .or(`id.eq.${query},platform_id.eq.${query}`)
                 .limit(5);
-            if (exact && exact.length > 0) return exact.map(decryptUser);
+            if (exact && exact.length > 0) {
+                const results = exact.map(decryptUser).filter(u => {
+                    if (tab === 'pending') return u.is_approved === false && u.is_blocked === false;
+                    if (tab === 'blocked') return u.is_blocked === true;
+                    return u.is_approved === true && u.is_blocked === false;
+                });
+                return results;
+            }
         }
     }
 
-    // Otherwise fetch a larger batch and filter in memory (for encrypted names)
+    if (!query) {
+        // FAST PATH: If no query, just return latest active users of the requested tab
+        // Use a smaller limit for performance, as only the first few are shown in the bot
+        let baseQuery = supabase.from(COL_USERS).select('*').order('last_active', { ascending: false }).limit(100);
+        
+        if (tab === 'pending') baseQuery = baseQuery.eq('is_approved', false).eq('is_blocked', false);
+        else if (tab === 'blocked') baseQuery = baseQuery.eq('is_blocked', true);
+        else baseQuery = baseQuery.eq('is_approved', true).eq('is_blocked', false);
+        
+        const { data: fastData } = await baseQuery;
+        const results = (fastData || []).map(decryptUser);
+        
+        // Dedup WhatsApp accounts by number
+        const seen = new Set();
+        return results.filter(u => {
+            const num = String(u.id).split('_')[1]?.split('@')[0];
+            if (num && seen.has(num)) return false;
+            if (num) seen.add(num);
+            return true;
+        });
+    }
+
+    // SEARCH PATH: Fetch a larger batch and filter in memory (for encrypted names)
     // Reduce batch to 500 for better CPU performance on Railway
     const { data } = await supabase.from(COL_USERS).select('*').order('last_active', { ascending: false }).limit(500);
     const decrypted = (data || []).map(decryptUser);
 
-    if (!query) {
-        // Dédup même pour le retour sans query
-        const seen = new Set();
-        return decrypted.filter(u => {
-            if (u.platform === 'whatsapp' && u.first_name && u.first_name !== 'Utilisateur WhatsApp') {
-                if (seen.has(u.first_name)) return false;
-                seen.add(u.first_name);
-            }
-            return true;
-        }).slice(0, 50);
-    }
+    // Apply tab filter on decrypted list
+    let filtered = decrypted.filter(u => {
+        if (tab === 'pending') return u.is_approved === false && u.is_blocked === false;
+        if (tab === 'blocked') return u.is_blocked === true;
+        return u.is_approved !== false && u.is_blocked === false;
+    });
 
-    const q = query.toLowerCase().replace('@', '');
-    const seen = new Set();
-    return decrypted.filter(u => {
+    // Process search query on the already tab-filtered list
+    const q = query.toLowerCase();
+    const finalResults = filtered.filter(u => {
         const uid = String(u.id || '').toLowerCase();
         const uname = String(u.username || '').toLowerCase();
         const fname = String(u.first_name || '').toLowerCase();
         const pid = String(u.platform_id || '').toLowerCase();
 
-        const match = uid.includes(q) || uname.includes(q) || fname.includes(q) || pid.includes(q);
-        if (!match) return false;
+        return uid.includes(q) || uname.includes(q) || fname.includes(q) || pid.includes(q);
+    });
 
-        if (u.platform === 'whatsapp' && u.first_name && u.first_name !== 'Utilisateur WhatsApp') {
-            if (seen.has(u.first_name)) return false;
-            seen.add(u.first_name);
-        }
-        return true;
-    }).slice(0, 50);
+    return finalResults.slice(0, 50);
+}
+
+async function getPendingUsers() {
+    const { data } = await supabase.from(COL_USERS)
+        .select('*')
+        .eq('is_approved', false)
+        .eq('is_blocked', false)
+        .order('date_inscription', { ascending: false });
+    return (data || []).map(decryptUser);
+}
+
+async function getPendingUserCount() {
+    const { count } = await supabase.from(COL_USERS).select('*', { count: 'exact', head: true }).eq('is_approved', false).eq('is_blocked', false);
+    return count || 0;
 }
 
 async function searchLivreurs(query) {
@@ -1188,6 +1221,61 @@ function generateReferralCode(platform, platformId) {
     let code = '';
     for (let i = 0; i < 6; i++) code += chars.charAt(Math.floor(Math.random() * chars.length));
     return `ref_${platform}_${platformId}_${code}`;
+}
+
+async function getUserAnalytics(userId) {
+    if (!userId) return null;
+    
+    const { data: orders } = await supabase.from(COL_ORDERS)
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+
+    if (!orders || orders.length === 0) return {
+        total_spent: 0,
+        order_count: 0,
+        average_basket: 0,
+        addresses: [],
+        ordering_hours: [],
+        history: []
+    };
+
+    const decrypted = (orders || []).map(o => {
+        try { return decryptOrder(o); } 
+        catch (e) { return o; }
+    });
+    
+    // Addresses
+    const addressesArray = decrypted.map(o => o.address).filter(Boolean);
+    const addresses = [...new Set(addressesArray)];
+    
+    // Total & Average
+    const totalSpent = decrypted.reduce((sum, o) => sum + (parseFloat(o.total_price) || 0), 0);
+    const avgBasket = totalSpent / decrypted.length;
+
+    // Temporal Analysis (by hour)
+    const hourCounts = {};
+    decrypted.forEach(o => {
+        if (!o.created_at) return;
+        try {
+            const hour = new Date(o.created_at).getHours();
+            hourCounts[hour] = (hourCounts[hour] || 0) + 1;
+        } catch(e) {}
+    });
+    
+    const orderingHours = Object.entries(hourCounts).map(([hour, count]) => ({
+        hour: parseInt(hour),
+        count
+    })).sort((a,b) => b.count - a.count);
+
+    return {
+        total_spent: totalSpent,
+        order_count: decrypted.length,
+        average_basket: avgBasket,
+        addresses,
+        ordering_hours: orderingHours,
+        history: decrypted.slice(0, 100) 
+    };
 }
 
 async function getReferralLeaderboard(limit = 10) {
@@ -1233,29 +1321,69 @@ async function getDailyStats(days = 30) {
     return data || [];
 }
 
-async function getStatsOverview() {
+async function getStatsOverview(force = false) {
     const now = Date.now();
-    if (_statsCache.overview && (now - _statsCache.lastOverview < _statsCache.ttl)) {
+    if (!force && _statsCache.overview && (now - _statsCache.lastOverview < _statsCache.ttl)) {
         return _statsCache.overview;
     }
 
-    const total = await getUserCount();
-    const totalBlocked = await supabase.from(COL_USERS).select('*', { count: 'exact', head: true }).eq('is_blocked', true).then(r => r.count || 0);
-    const totalTelegram = await getUserCount('telegram');
-    const totalWhatsapp = await getUserCount('whatsapp');
-    const active = await getActiveUserCount();
-    const stats = await getGlobalStats();
-    const { data: bcSnap } = await supabase.from(COL_BROADCASTS).select('id, created_at, success, failed, message').order('created_at', { ascending: false }).limit(5);
+    const [
+        total,
+        totalPending,
+        totalBlockedRes,
+        totalTelegram,
+        totalWhatsapp,
+        active,
+        stats,
+        bcSnapRes,
+        activeLivreursRes,
+        totalLivreursRes,
+        ordersCountRes
+    ] = await Promise.all([
+        getUserCount().catch(() => 0),
+        getPendingUserCount().catch(() => 0),
+        (async () => {
+            try {
+                const { count } = await supabase.from(COL_USERS).select('id', { count: 'exact', head: true }).eq('is_blocked', true).abortSignal(AbortSignal.timeout(DB_TIMEOUT));
+                return { count: count || 0 };
+            } catch(e) { return { count: 0 }; }
+        })(),
+        getUserCount('telegram').catch(() => 0),
+        getUserCount('whatsapp').catch(() => 0),
+        getActiveUserCount().catch(() => 0),
+        getGlobalStats().catch(() => ({})),
+        (async () => {
+            try {
+                const { data } = await supabase.from(COL_BROADCASTS).select('id, created_at, success, failed, message').order('created_at', { ascending: false }).limit(5).abortSignal(AbortSignal.timeout(DB_TIMEOUT));
+                return { data: data || [] };
+            } catch(e) { return { data: [] }; }
+        })(),
+        (async () => {
+            try {
+                const { count } = await supabase.from(COL_USERS).select('id', { count: 'exact', head: true }).eq('is_livreur', true).eq('is_available', true).abortSignal(AbortSignal.timeout(DB_TIMEOUT));
+                return { count: count || 0 };
+            } catch(e) { return { count: 0 }; }
+        })(),
+        (async () => {
+            try {
+                const { count } = await supabase.from(COL_USERS).select('id', { count: 'exact', head: true }).eq('is_livreur', true).abortSignal(AbortSignal.timeout(DB_TIMEOUT));
+                return { count: count || 0 };
+            } catch(e) { return { count: 0 }; }
+        })(),
+        (async () => {
+            try {
+                const { count } = await supabase.from(COL_ORDERS).select('id', { count: 'exact', head: true }).abortSignal(AbortSignal.timeout(DB_TIMEOUT));
+                return { count: count || 0 };
+            } catch(e) { return { count: 0 }; }
+        })()
+    ]);
 
-    // Optimized count for active drivers (direct query, no memory decryption needed)
-    const { count: activeLivreurs } = await supabase.from(COL_USERS)
-        .select('*', { count: 'exact', head: true })
-        .eq('is_livreur', true)
-        .eq('is_available', true);
-
-    const { count: totalLivreurs } = await supabase.from(COL_USERS)
-        .select('*', { count: 'exact', head: true })
-        .eq('is_livreur', true);
+    const totalBlocked = totalBlockedRes.count || 0;
+    const totalApproved = total - totalPending - totalBlocked;
+    const bcSnap = bcSnapRes.data || [];
+    const activeLivreurs = activeLivreursRes.count || 0;
+    const totalLivreurs = totalLivreursRes.count || 0;
+    const totalOrdersCount = ordersCountRes.count || 0;
 
     // Get CA from Sum of delivered orders (fallback to global stats if too many/error)
     let calculatedCA = 0;
@@ -1264,7 +1392,8 @@ async function getStatsOverview() {
             .select('total_price')
             .eq('status', 'delivered')
             .order('created_at', { ascending: false })
-            .limit(4000); // 4000 should be enough for a quick snappy sum
+            .abortSignal(AbortSignal.timeout(DB_TIMEOUT))
+            .limit(2000); 
 
         if (!caError && caData) {
             calculatedCA = caData.reduce((acc, curr) => acc + (parseFloat(curr.total_price) || 0), 0);
@@ -1275,11 +1404,10 @@ async function getStatsOverview() {
 
     const totalCA = calculatedCA || parseFloat(stats.total_ca || stats.global?.total_ca || 0);
 
-    // Get total count of all orders separately if needed, or just delivered
-    const { count: totalOrdersCount } = await supabase.from(COL_ORDERS).select('*', { count: 'exact', head: true });
-
     const result = {
-        totalUsers: total - totalBlocked,
+        totalUsers: total,
+        totalApproved: totalApproved,
+        totalPending: totalPending,
         totalBlocked: totalBlocked,
         totalUsersTelegram: totalTelegram,
         totalUsersWhatsapp: totalWhatsapp,
@@ -1297,17 +1425,175 @@ async function getStatsOverview() {
     return result;
 }
 
+/**
+ * Find city/postal from Gouv API (French alternative to Google Maps API)
+ */
+async function searchAddressGouv(address, postalCode = null) {
+    if (!address && !postalCode) return null;
+    try {
+        const axios = require('axios');
+        let query = address;
+        if (postalCode && (!address || address.length < 5)) query = postalCode;
+        
+        const url = `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(query)}&limit=1${postalCode ? '&postcode=' + postalCode : ''}`;
+        const response = await axios.get(url, { timeout: 3000 });
+        if (response.data && response.data.features && response.data.features.length > 0) {
+            const props = response.data.features[0].properties;
+            return {
+                city: props.city?.toUpperCase() || 'INCONNUE',
+                postalCode: props.postcode || '',
+                district: props.district ? props.district : (props.city || '')
+            };
+        }
+    } catch (e) {
+        // Silently fail or log for debug
+    }
+    return null;
+}
+
+/**
+ * Extract city, postal code AND district from a free-text address string.
+ */
+function extractCityFromAddress(address) {
+    if (!address) return { city: 'INCONNUE', postalCode: '', district: '' };
+    // Cleanup address string
+    const cleanAddr = address.replace(/[\r\n]/g, ' ').replace(/\s+/g, ' ').trim();
+    
+    const cpMatch = cleanAddr.match(/\b(\d{5})\b/);
+    const postalCode = cpMatch ? cpMatch[1] : '';
+    let city = '';
+    let district = '';
+
+    const blacklist = ['RUE', 'BOULEVARD', 'AVENUE', 'AVE', 'ALLEE', 'SQUARE', 'PARIS', 'INFOS', 'NO', 'NUMERO', 'ETAGE', 'CODE', 'BATIMENT', 'BAT', 'RESIDENCE', 'RES'];
+
+    if (postalCode) {
+        const cp = parseInt(postalCode);
+        const dep = postalCode.substring(0, 2);
+        const depNames = {
+            '75': 'PARIS', '92': 'HAUTS-DE-SEINE', '93': 'SEINE-SAINT-DENIS', '94': 'VAL-DE-MARNE', 
+            '95': 'VAL-D\'OISE', '77': 'SEINE-ET-MARNE', '78': 'YVELINES', '91': 'ESSONNE'
+        };
+        const region = depNames[dep] || 'HORS-IDF';
+
+        // Extract city from string around CP
+        const parts = cleanAddr.split(postalCode);
+        let candidate = '';
+        
+        // Priority: After CP
+        if (parts[1]) {
+            const afterWords = parts[1].trim().split(/[\s,.;]+/).filter(w => w.length > 1 && !blacklist.includes(w.toUpperCase()));
+            if (afterWords.length > 0) {
+                const potentialCity = [];
+                for (const w of afterWords) {
+                    if (w.match(/^\d+$/)) break;
+                    potentialCity.push(w);
+                    if (potentialCity.length >= 3) break;
+                }
+                candidate = potentialCity.join(' ');
+            }
+        }
+        // Fallback: Before CP
+        if (!candidate && parts[0]) {
+            const beforeWords = parts[0].trim().split(/[\s,.;]+/).filter(w => w.length > 1 && !blacklist.includes(w.toUpperCase()));
+            if (beforeWords.length > 0) {
+                const potentialCity = [];
+                for (let i = beforeWords.length - 1; i >= 0; i--) {
+                    const w = beforeWords[i];
+                    if (w.match(/^\d+$/) || blacklist.includes(w.toUpperCase())) break;
+                    potentialCity.unshift(w);
+                    if (potentialCity.length >= 3) break;
+                }
+                candidate = potentialCity.join(' ');
+            }
+        }
+
+        city = (candidate || region).toUpperCase().replace(/[^A-ZÁÀÂÄÃÅÇÉÈÊËÍÌÎÏÑÓÒÔÖÕÚÙÛÜÝŸ\s-]/g, '').trim();
+        
+        // Specific grouping for Paris
+        if (dep === '75') {
+            const arr = (cp >= 75001 && cp <= 75020) ? (cp - 75000) : 0;
+            city = 'PARIS'; 
+            district = arr > 0 ? `Paris ${arr}e` : `Paris ${postalCode}`;
+        } else {
+            district = city ? `${postalCode} - ${city}` : postalCode;
+        }
+    } else {
+        city = 'INCONNUE';
+    }
+    
+    return { city: city || 'INCONNUE', postalCode, district: district || postalCode || 'INCONNU' };
+}
+
+/**
+ * Scrape all orders with missing geo info and fix them.
+ */
+async function backfillOrderCities(limit = 500) {
+    const { data: orders } = await supabase.from(COL_ORDERS)
+        .select('id, address, city, postal_code, district')
+        .or('city.is.null,city.ilike.INCONNUE,city.eq.,city.ilike.LE,city.ilike.LA,city.ilike.DE,city.ilike.SAINT,city.ilike.INFOS,city.ilike.SAINTS,city.ilike.FRANCE,postal_code.is.null')
+        .limit(limit);
+
+    console.log(`[BACKFILL] Found ${orders ? orders.length : 0} orders to fix.`);
+    if (!orders || orders.length === 0) return { updated: 0, failed: 0 };
+    let updated = 0, failed = 0;
+    for (const order of orders) {
+        const fullAddress = encryption.decrypt(order.address);
+        if (!fullAddress) { failed++; continue; }
+        
+        // 1. Regex logic (fast, IDF focused)
+        let { city, postalCode, district } = extractCityFromAddress(fullAddress);
+
+        // 2. Data Gouv API logic (Logic requested by user, for unknown/LE/etc)
+        const isBadCity = !city || ['INCONNUE', 'LE', 'LA', 'DE', 'SAINT', 'FRANCE', 'INFOS', 'SAINTS'].includes(city.toUpperCase());
+        if (isBadCity || !postalCode) {
+            const gouvMatch = await searchAddressGouv(fullAddress, postalCode || order.postal_code);
+            if (gouvMatch && gouvMatch.city !== 'INCONNUE') {
+                city = gouvMatch.city;
+                postalCode = gouvMatch.postalCode;
+                district = gouvMatch.district;
+            }
+        }
+
+        if ((!city || city === 'INCONNUE') && !postalCode) { failed++; continue; }
+        const updateData = {};
+        if (city) updateData.city = city.toUpperCase();
+        if (postalCode) updateData.postal_code = postalCode;
+        if (district) updateData.district = district;
+        const { error } = await supabase.from(COL_ORDERS).update(updateData).eq('id', order.id);
+        if (error) failed++; else updated++;
+    }
+    // Invalidate analytics cache
+    _statsCache.analytics = null;
+    _statsCache.lastAnalytics = 0;
+    return { updated, failed };
+}
+
 async function getOrderAnalytics() {
     const now = Date.now();
     if (_statsCache.analytics && (now - _statsCache.lastAnalytics < _statsCache.ttl)) {
         return _statsCache.analytics;
     }
 
-    // Limit to last 2000 orders to keep it snappy.
-    const { data: ordersSnap } = await supabase.from(COL_ORDERS)
-        .select('*')
+    // Auto-backfill silently (max 100 unknown orders per analytics call)
+    try {
+        const { data: unknownCount } = await supabase.from(COL_ORDERS)
+            .select('id', { count: 'exact', head: true })
+            .or('city.is.null,city.eq.INCONNUE,city.eq.,city.eq.LE,city.eq.LA,city.eq.DE,city.eq.SAINT,city.eq.INFOS,city.eq.SAINTS,city.eq.FRANCE');
+        if (unknownCount && unknownCount > 0) {
+            backfillOrderCities(100).catch(() => {}); // fire & forget
+        }
+    } catch(_) {}
+
+    // Fetch last 2000 orders for historical analysis (optimized fields selection for performance)
+    const { data: ordersSnap, error } = await supabase.from(COL_ORDERS)
+        .select('id, created_at, delivered_at, total_price, status, product_name, is_priority, city, postal_code, address, livreur_name, user_id, platform, first_name, username, quantity')
         .order('created_at', { ascending: false })
         .limit(2000);
+
+    if (error) {
+        console.error('[DB-ANALYTICS-CRITICAL] Query failed:', error);
+        throw error;
+    }
 
     const analytics = {
         totalCA: 0,
@@ -1318,21 +1604,74 @@ async function getOrderAnalytics() {
             telegram: { ca: 0, count: 0, avgBasket: 0, products: {} },
             whatsapp: { ca: 0, count: 0, avgBasket: 0, products: {} }
         },
-        byHour: {}, byDay: {}, byWeek: {}, byMonth: {}, byYear: {}, byCity: {}, byDriver: {}, byUser: {}, byProduct: {},
-        rawDelivered: []
+        byHour: {}, byDay: {}, byWeek: {}, byMonth: {}, byYear: {},
+        byCity: {},         // city -> { ca, count, priority }
+        byDistrict: {},     // district/postal -> { ca, count, city, topProducts }
+        byCityProducts: {}, // city -> { productName -> qty }
+        byCityDetail: {},   // city -> { products: {name->qty}, hours: {h->count}, platforms: {p->count}, priority: N }
+        byDriver: {}, byUser: {}, byProduct: {},
+        priority: {
+            total: 0,
+            byHour: {},   // hour -> count
+            byCity: {},   // city -> count
+            byProduct: {},// product -> count
+            avgHour: 0    // most common hour
+        },
+        // Funnel: all client actions
+        funnel: {
+            catalogViews: 0,      // orders started (any status)
+            cartAdds: 0,          // orders that reached cart
+            checkouts: 0,         // orders that reached checkout
+            completed: 0,         // delivered
+            cancelled: 0,         // cancelled
+            abandonRate: 0,       // (cartAdds - completed) / cartAdds
+        },
+        rawDelivered: [],
+        cityTable: []
     };
 
     let totalDeliveryMinutes = 0;
     let deliveryCount = 0;
 
     (ordersSnap || []).forEach(order => {
-        if (order.status !== 'delivered') return;
-
         const price = parseFloat(order.total_price) || 0;
+        const status = (order.status || '').toLowerCase();
+        const isDelivered = status === 'delivered';
+        const isCancelled = status === 'cancelled' || status === 'annulée' || status === 'annulee';
+
+        // --- FUNNEL (all orders) ---
+        analytics.funnel.catalogViews++;
+        if (price > 0 || order.product_name) analytics.funnel.cartAdds++;
+        if (price > 0) analytics.funnel.checkouts++;
+        if (isDelivered) analytics.funnel.completed++;
+        if (isCancelled) analytics.funnel.cancelled++;
+
+        // --- PRIORITY: detect via is_priority column ---
+        const isPriorityOrder = order.is_priority === true;
+
+        if (isPriorityOrder) {
+            analytics.priority.total++;
+            if (order.created_at) {
+                const h = new Date(order.created_at).getHours().toString().padStart(2, '0') + 'h';
+                analytics.priority.byHour[h] = (analytics.priority.byHour[h] || 0) + 1;
+            }
+            let pCity = (order.city || '').toUpperCase();
+            if (!pCity || pCity === 'INCONNUE') {
+                const extracted = extractCityFromAddress(encryption.decrypt(order.address));
+                pCity = extracted.city || 'INCONNUE';
+            }
+            if (pCity) analytics.priority.byCity[pCity] = (analytics.priority.byCity[pCity] || 0) + 1;
+
+            const prodP = (order.product_name || 'Inconnu').split('\n')[0].trim();
+            analytics.priority.byProduct[prodP] = (analytics.priority.byProduct[prodP] || 0) + 1;
+        }
+
+        if (!isDelivered) return; // Only count CA from delivered orders
+
         analytics.totalCA += price;
         analytics.totalOrders++;
 
-        // Platform metrics
+        // Platform
         const platform = order.platform || (String(order.user_id).startsWith('whatsapp') ? 'whatsapp' : 'telegram');
         if (!analytics.byPlatform[platform]) {
             analytics.byPlatform[platform] = { ca: 0, count: 0, avgBasket: 0, products: {} };
@@ -1340,6 +1679,7 @@ async function getOrderAnalytics() {
         analytics.byPlatform[platform].ca += price;
         analytics.byPlatform[platform].count++;
 
+        // Delivery time
         let deliveryMinutes = null;
         if (order.created_at && order.delivered_at) {
             const createdMs = new Date(order.created_at).getTime();
@@ -1351,46 +1691,30 @@ async function getOrderAnalytics() {
             }
         }
 
-        const clientId = order.user_id || 'unknown';
+        // Client
         const clientName = encryption.decrypt(order.first_name) || encryption.decrypt(order.username) || 'Client Inconnu';
-        if (!analytics.byUser[clientName]) {
-            analytics.byUser[clientName] = { count: 0, ca: 0 };
-        }
+        if (!analytics.byUser[clientName]) analytics.byUser[clientName] = { count: 0, ca: 0 };
         analytics.byUser[clientName].count++;
         analytics.byUser[clientName].ca += price;
 
+        // Driver
         const driverName = order.livreur_name || 'Inconnu';
-        if (!analytics.byDriver[driverName]) {
-            analytics.byDriver[driverName] = { count: 0, ca: 0 };
-        }
+        if (!analytics.byDriver[driverName]) analytics.byDriver[driverName] = { count: 0, ca: 0 };
         analytics.byDriver[driverName].count++;
         analytics.byDriver[driverName].ca += price;
 
-        // Finalize averages
-        analytics.avgBasket = analytics.totalOrders > 0 ? (analytics.totalCA / analytics.totalOrders) : 0;
-        Object.keys(analytics.byPlatform).forEach(p => {
-            const plat = analytics.byPlatform[p];
-            plat.avgBasket = plat.count > 0 ? (plat.ca / plat.count) : 0;
-        });
-        analytics.avgDeliveryTime = deliveryCount > 0 ? (totalDeliveryMinutes / deliveryCount) : 0;
-
-        const productName = order.product_name || 'Inconnu';
-        if (!analytics.byProduct[productName]) {
-            analytics.byProduct[productName] = { qty: 0, ca: 0 };
-        }
+        // Product
+        const productName = (order.product_name || 'Inconnu').split('\n')[0].split('(x')[0].trim();
+        if (!analytics.byProduct[productName]) analytics.byProduct[productName] = { qty: 0, ca: 0 };
         analytics.byProduct[productName].qty += (parseInt(order.quantity) || 1);
         analytics.byProduct[productName].ca += price;
-
-        // Best seller per platform
-        if (!analytics.byPlatform[platform].products[productName]) {
-            analytics.byPlatform[platform].products[productName] = 0;
-        }
+        if (!analytics.byPlatform[platform].products[productName]) analytics.byPlatform[platform].products[productName] = 0;
         analytics.byPlatform[platform].products[productName] += (parseInt(order.quantity) || 1);
-        // analytics.byProduct[productName].ca += price; // Already added above — do not duplicate
 
+        // Time buckets
         if (order.created_at) {
             const date = new Date(order.created_at);
-            const hour = date.getHours() + 'h';
+            const hour = date.getHours().toString().padStart(2, '0') + 'h';
             analytics.byHour[hour] = (analytics.byHour[hour] || 0) + price;
             if (!analytics.byPlatform[platform].byHour) analytics.byPlatform[platform].byHour = {};
             analytics.byPlatform[platform].byHour[hour] = (analytics.byPlatform[platform].byHour[hour] || 0) + price;
@@ -1419,8 +1743,57 @@ async function getOrderAnalytics() {
             analytics.byPlatform[platform].byYear[yr] = (analytics.byPlatform[platform].byYear[yr] || 0) + price;
         }
 
-        const city = (order.city || 'Inconnue').split(',')[0].trim().toUpperCase();
-        analytics.byCity[city] = (analytics.byCity[city] || 0) + price;
+        // --- GEO: City + District + Detail ---
+        let city = (order.city || '').split(',')[0].trim().toUpperCase();
+        let postalCode = order.postal_code || '';
+        let district = order.district || '';
+
+        // If any piece of geo info is missing or invalid, decrypt once and extract
+        const isBadCity = !city || city === 'INCONNUE' || city.length < 2 || ['RUE', 'AVENUE', 'BOULEVARD'].some(k => city.startsWith(k));
+        if (isBadCity || !district || !postalCode) {
+            const fullAddr = encryption.decrypt(order.address);
+            if (fullAddr) {
+                const extracted = extractCityFromAddress(fullAddr);
+                if (isBadCity) city = (extracted.city || 'INCONNUE').toUpperCase();
+                if (!postalCode) postalCode = extracted.postalCode;
+                if (!district) district = extracted.district;
+            }
+        }
+        
+        // Fallback for district if still missing
+        if (!district) district = postalCode || 'INCONNUE';
+
+        // byCity
+        if (!analytics.byCity[city]) analytics.byCity[city] = { ca: 0, count: 0, priority: 0 };
+        analytics.byCity[city].ca += price;
+        analytics.byCity[city].count++;
+        if (isPriorityOrder) analytics.byCity[city].priority++;
+
+        // byDistrict (postal-code level)
+        if (district || postalCode) {
+            const distKey = district || postalCode;
+            if (!analytics.byDistrict[distKey]) analytics.byDistrict[distKey] = { ca: 0, count: 0, city, products: {}, priority: 0 };
+            analytics.byDistrict[distKey].ca += price;
+            analytics.byDistrict[distKey].count++;
+            analytics.byDistrict[distKey].city = city;
+            if (isPriorityOrder) analytics.byDistrict[distKey].priority++;
+            analytics.byDistrict[distKey].products[productName] = (analytics.byDistrict[distKey].products[productName] || 0) + (parseInt(order.quantity) || 1);
+        }
+
+        // Top products per city
+        if (!analytics.byCityProducts[city]) analytics.byCityProducts[city] = {};
+        analytics.byCityProducts[city][productName] = (analytics.byCityProducts[city][productName] || 0) + (parseInt(order.quantity) || 1);
+
+        // City Detail (for drill-down)
+        if (!analytics.byCityDetail[city]) analytics.byCityDetail[city] = { products: {}, hours: {}, platforms: {}, priority: 0, districts: {} };
+        analytics.byCityDetail[city].products[productName] = (analytics.byCityDetail[city].products[productName] || 0) + (parseInt(order.quantity) || 1);
+        if (order.created_at) {
+            const h = new Date(order.created_at).getHours() + 'h';
+            analytics.byCityDetail[city].hours[h] = (analytics.byCityDetail[city].hours[h] || 0) + 1;
+        }
+        analytics.byCityDetail[city].platforms[platform] = (analytics.byCityDetail[city].platforms[platform] || 0) + 1;
+        if (isPriorityOrder) analytics.byCityDetail[city].priority++;
+        if (district) analytics.byCityDetail[city].districts[district] = (analytics.byCityDetail[city].districts[district] || 0) + 1;
 
         analytics.rawDelivered.push({
             id: order.id,
@@ -1432,12 +1805,66 @@ async function getOrderAnalytics() {
             qty: order.quantity,
             price: price,
             city: city,
+            district: district || postalCode,
             livreur: order.livreur_name || 'N/A',
-            platform: platform
+            platform: platform,
+            is_priority: isPriorityOrder
         });
     });
 
+    // Build city table (with top-3 products per city)
+    analytics.cityTable = Object.entries(analytics.byCity)
+        .map(([city, data]) => {
+            const products = analytics.byCityProducts[city] || {};
+            const topProducts = Object.entries(products).sort((a,b) => b[1]-a[1]).slice(0, 3).map(([n, q]) => ({ name: n, qty: q }));
+            const topProduct = topProducts[0] ? topProducts[0].name : '—';
+            // District breakdown for this city
+            const districts = Object.entries(analytics.byDistrict)
+                .filter(([, d]) => d.city === city)
+                .sort((a,b) => b[1].ca - a[1].ca)
+                .slice(0, 10)
+                .map(([dist, d]) => ({
+                    district: dist,
+                    ca: parseFloat(d.ca.toFixed(2)),
+                    count: d.count,
+                    priority: d.priority,
+                    topProduct: Object.entries(d.products).sort((a,b) => b[1]-a[1])[0]?.[0] || '—'
+                }));
+            return {
+                city,
+                ca: parseFloat(data.ca.toFixed(2)),
+                count: data.count,
+                avgBasket: data.count > 0 ? parseFloat((data.ca / data.count).toFixed(2)) : 0,
+                topProduct,
+                topProducts,
+                priorityCount: analytics.priority.byCity[city] || data.priority || 0,
+                districts
+            };
+        })
+        .sort((a, b) => b.ca - a.ca);
+
+    // Funnel rates
+    analytics.funnel.abandonRate = analytics.funnel.cartAdds > 0
+        ? Math.round(((analytics.funnel.cartAdds - analytics.funnel.completed) / analytics.funnel.cartAdds) * 100)
+        : 0;
+
+    // Most requested priority hour
+    const priorityHours = Object.entries(analytics.priority.byHour).sort((a,b) => b[1]-a[1]);
+    analytics.priority.avgHour = priorityHours[0] ? priorityHours[0][0] : 'N/A';
+
+    // Finalize averages
+    analytics.avgBasket = analytics.totalOrders > 0 ? parseFloat((analytics.totalCA / analytics.totalOrders).toFixed(2)) : 0;
+    Object.keys(analytics.byPlatform).forEach(p => {
+        const plat = analytics.byPlatform[p];
+        plat.avgBasket = plat.count > 0 ? parseFloat((plat.ca / plat.count).toFixed(2)) : 0;
+    });
     analytics.avgDeliveryTime = deliveryCount > 0 ? Math.round(totalDeliveryMinutes / deliveryCount) : 0;
+
+    // Save last 20 raw delivered for searching
+    analytics.rawDelivered = (ordersSnap || [])
+        .filter(o => (o.status || '').toLowerCase() === 'delivered')
+        .slice(0, 20)
+        .map(o => decryptOrder(o));
 
     _statsCache.analytics = analytics;
     _statsCache.lastAnalytics = now;
@@ -1456,21 +1883,22 @@ async function getAllLivreurs() {
 
 // --- Settings ---
 const SETTINGS_DEFAULTS = {
-    bot_name: 'TIM LE MEILLEUR',
-    welcome_message: 'Bienvenue chez TIM LE MEILLEUR ! Livraison express.',
+    bot_name: 'TIM LE MEILLEUR IDF',
+    welcome_message: 'Bienvenue sur TIM LE MEILLEUR Bot ! 🚀 Votre service de livraison express.',
     welcome_message_enabled: true,
     admin_password: 'admin',
-    admin_telegram_id: '8795825884',
+    admin_telegram_id: '1183134641',
+    moderator_telegram_id: '',
     dashboard_url: process.env.DASHBOARD_URL || '',
-    private_contact_url: 'https://t.me/timlemeilleur75',
-    private_contact_wa_url: 'https://wa.me/33618875972',
-    channel_url: '',
-    bot_description: '',
-    bot_short_description: '',
+    private_contact_url: 'https://t.me/TIMLEMEILLEURx',
+    private_contact_wa_url: 'https://wa.me/33752981714',
+    channel_url: 'https://t.me/+aZMQZI-hATsyMThk', 
+    bot_description: 'Service de livraison express TIM LE MEILLEUR IDF',
+    bot_short_description: 'TIM LE MEILLEUR IDF - Livraison express Île-de-France',
     payment_modes: '💵 Espèces',
     maintenance_mode: false,
-    maintenance_message: '🔧 <b>Le bot est actuellement en maintenance.</b>\n\nNous revenons bientôt !',
-    maintenance_contact: '',
+    maintenance_message: '🔧 <b>Le bot est actuellement en maintenance.</b>\n\nNous revenons bientôt !\n\nContactez l\'admin : @TIMLEMEILLEUR_contact',
+    maintenance_contact: 'https://t.me/TIMLEMEILLEUR_contact',
     accent_color: '#4CAF50',
     languages: 'fr',
     payment_modes_config: '[]',
@@ -1489,6 +1917,12 @@ const SETTINGS_DEFAULTS = {
     enable_fidelity: true,
     enable_referral: true,
     enable_help_menu: true,
+    dashboard_title: 'TIM LE MEILLEUR IDF Admin',
+    label_catalog_title: '',
+    priority_delivery_enabled: false,
+    priority_delivery_price: 15,
+    auto_approve_new: false,
+    notify_on_approval: false,
     
     // UI Labels & Icons
     label_catalog: 'Catalogue',
@@ -1557,8 +1991,8 @@ const SETTINGS_DEFAULTS = {
     show_reviews_btn: true,
     priority_delivery_enabled: false,
     priority_delivery_price: 15,
-    auto_approve_new: false, // Par défaut false pour TIM (validation manuelle active comme La Frappe)
-    notify_on_approval: false,
+    auto_approve_new: false, // Default to false, to be toggled by admin
+    notify_on_approval: false, // Whether to send the confirmation message
     
     // Buttons
     btn_back_menu: '◀️ Retour Menu',
@@ -1597,64 +2031,80 @@ const SETTINGS_DEFAULTS = {
 
 let _settingsCache = null;
 let _settingsExpire = 0;
+let _settingsPromise = null;
 
 async function getAppSettings() {
     if (_settingsCache && Date.now() < _settingsExpire) {
         return _settingsCache;
     }
+    if (_settingsPromise) return _settingsPromise;
 
-    const { data } = await supabase.from(COL_SETTINGS).select('*').eq('id', 'default').limit(1);
-    let settings = { ...SETTINGS_DEFAULTS };
-
-    if (!data || data.length === 0) {
-        await supabase.from(COL_SETTINGS).insert([{ id: 'default', ...SETTINGS_DEFAULTS }]);
-    } else {
-        // Robust merging: Only use DB values if they are NOT null or undefined
-        const dbSettings = data[0];
-        for (const key in dbSettings) {
-            if (dbSettings[key] !== null && dbSettings[key] !== undefined) {
-                settings[key] = dbSettings[key];
+    _settingsPromise = (async () => {
+        try {
+            const { data, error } = await supabase.from(COL_SETTINGS).select('*').eq('id', 'default').abortSignal(AbortSignal.timeout(5000)).limit(1);
+            
+            if (error) {
+                console.error('⚠️ [DB] getAppSettings error:', error.message);
+                return _settingsCache || { ...SETTINGS_DEFAULTS };
             }
+
+            let settings = { ...SETTINGS_DEFAULTS };
+
+            if (!data || data.length === 0) {
+                // Only insert if it's a CLEAN 0 rows (no error)
+                try {
+                    await supabase.from(COL_SETTINGS).insert([{ id: 'default', ...SETTINGS_DEFAULTS }]).abortSignal(AbortSignal.timeout(3000));
+                } catch (e) {}
+            } else {
+                // Robust merging: Only use DB values if they are NOT null or undefined
+                const dbSettings = data[0];
+                for (const key in dbSettings) {
+                    if (dbSettings[key] !== null && dbSettings[key] !== undefined) {
+                        settings[key] = dbSettings[key];
+                    }
+                }
+            }
+
+            // Force string for key fields that might be stored as arrays in JSONB
+            if (Array.isArray(settings.admin_telegram_id)) {
+                settings.admin_telegram_id = settings.admin_telegram_id.join(', ');
+            } else if (settings.admin_telegram_id !== null && settings.admin_telegram_id !== undefined) {
+                settings.admin_telegram_id = String(settings.admin_telegram_id);
+            }
+
+            // Auto-réparation légère (évite les valeurs "test" collatérales)
+            const repairs = {};
+            for (const key of Object.keys(SETTINGS_DEFAULTS)) {
+                const val = settings[key];
+                if (typeof val === 'string' && val.toLowerCase() === 'test') {
+                    settings[key] = SETTINGS_DEFAULTS[key];
+                    repairs[key] = SETTINGS_DEFAULTS[key];
+                }
+                if (key.startsWith('ui_icon_') && (!val || val.length > 5 || /^[a-zA-Z0-9]+$/.test(val))) {
+                    settings[key] = SETTINGS_DEFAULTS[key];
+                    repairs[key] = SETTINGS_DEFAULTS[key];
+                }
+            }
+
+            // Synchronisation label_livreur
+            if (!settings.label_livreur || settings.label_livreur === '') {
+                settings.label_livreur = settings.label_livreur_space || SETTINGS_DEFAULTS.label_livreur;
+            }
+
+            if (Object.keys(repairs).length > 0) {
+                console.log(`🔧 [DB] Auto-réparation de ${Object.keys(repairs).length} champs :`, Object.keys(repairs).join(', '));
+                supabase.from(COL_SETTINGS).update(repairs).eq('id', 'default').then(() => { }, () => { });
+            }
+
+            _settingsCache = settings;
+            _settingsExpire = Date.now() + 300000; // Cache valid for 5 minutes instead of 30s
+            return settings;
+        } finally {
+            _settingsPromise = null;
         }
-    }
+    })();
 
-    // Force string for key fields that might be stored as arrays in JSONB
-    if (Array.isArray(settings.admin_telegram_id)) {
-        settings.admin_telegram_id = settings.admin_telegram_id.join(', ');
-    } else if (settings.admin_telegram_id !== null && settings.admin_telegram_id !== undefined) {
-        settings.admin_telegram_id = String(settings.admin_telegram_id);
-    }
-
-    // Auto-réparation légère (évite les valeurs "test" collatérales)
-    const repairs = {};
-    for (const key of Object.keys(SETTINGS_DEFAULTS)) {
-        const val = settings[key];
-        // On ne répare que SI c'est exactement "test" (pas si ça contient "test" comme "testateur")
-        if (typeof val === 'string' && val.toLowerCase() === 'test') {
-            settings[key] = SETTINGS_DEFAULTS[key];
-            repairs[key] = SETTINGS_DEFAULTS[key];
-        }
-        // Pour les icônes vide ou non-emoji (fallback securisé)
-        if (key.startsWith('ui_icon_') && (!val || val.length > 5 || /^[a-zA-Z0-9]+$/.test(val))) {
-            settings[key] = SETTINGS_DEFAULTS[key];
-            repairs[key] = SETTINGS_DEFAULTS[key];
-        }
-    }
-
-    // Synchronisation label_livreur
-    if (!settings.label_livreur || settings.label_livreur === '') {
-        settings.label_livreur = settings.label_livreur_space || SETTINGS_DEFAULTS.label_livreur;
-    }
-
-    if (Object.keys(repairs).length > 0) {
-        console.log(`🔧 [DB] Auto-réparation de ${Object.keys(repairs).length} champs :`, Object.keys(repairs).join(', '));
-        supabase.from(COL_SETTINGS).update(repairs).eq('id', 'default').then(() => { }, () => { });
-    }
-
-
-    _settingsCache = settings;
-    _settingsExpire = Date.now() + 30000; // Cache valid for 30 seconds
-    return settings;
+    return _settingsPromise;
 }
 
 async function updateAppSettings(settings) {
@@ -1667,6 +2117,12 @@ async function updateAppSettings(settings) {
     }
 
     const { error } = await supabase.from(COL_SETTINGS).update(filtered).eq('id', 'default');
+    if (!error) {
+        // Clear cache and promise to force refresh
+        _settingsCache = null;
+        _settingsExpire = 0;
+        _settingsPromise = null;
+    }
     if (error) {
         console.error('❌ Error updating settings:', error.message, '— Trying partial save...');
         // Fallback: save only core fields that always exist
@@ -1678,7 +2134,8 @@ async function updateAppSettings(settings) {
             'dashboard_title', 'label_support', 'ui_icon_support', 'msg_help_intro',
             'label_catalog', 'ui_icon_catalog', 'label_my_orders', 'ui_icon_orders',
             'payment_modes_config', 'msg_order_received_admin', 'msg_order_confirmed_client',
-            'force_subscribe', 'force_subscribe_channel_id', 'priority_delivery_enabled', 'priority_delivery_price'
+            'force_subscribe', 'force_subscribe_channel_id', 'priority_delivery_enabled', 'priority_delivery_price',
+            'auto_approve_new', 'notify_on_approval'
         ];
         const coreFiltered = {};
         for (const key of coreFields) {
@@ -1697,30 +2154,46 @@ async function updateAppSettings(settings) {
 let _productsCache = null;
 let _productsExpire = 0;
 
-async function getProducts() {
-    if (_productsCache && Date.now() < _productsExpire) {
+async function getProducts(includeInactive = false) {
+    if (_productsCache && Date.now() < _productsExpire && !includeInactive) {
         return _productsCache;
     }
-    const { data } = await supabase.from(COL_PRODUCTS).select('*').order('created_at', { ascending: true });
-    _productsCache = data || [];
+    let query = supabase.from(COL_PRODUCTS).select('*').order('priority', { ascending: true }).order('created_at', { ascending: true });
+    if (!includeInactive) {
+        query = query.eq('is_active', true);
+    }
+    const { data: nativeProds } = await query;
+    
+    // FETCH VALIDATED MARKETPLACE PRODUCTS TOO
+    let mpQuery = supabase.from(COL_SUPPLIER_PRODUCTS).select('*').eq('is_validated', true).order('created_at', { ascending: true });
+    if (!includeInactive) {
+        mpQuery = mpQuery.eq('is_active', true);
+    }
+    const { data: mpProds } = await mpQuery;
+    
+    // Normalisation des MP prods pour matcher le format standard
+    const normalizedMp = (mpProds || []).map(p => ({
+        ...p,
+        is_mp: true // Flag pour savoir que c'est du marketplace
+    }));
+
+    _productsCache = [...(nativeProds || []), ...normalizedMp];
     _productsExpire = Date.now() + 60000; // Cache valid for 60 seconds
     return _productsCache;
 }
 
 async function saveProduct(data) {
     const id = data.id || `${Date.now()}`;
-    // Convertir created_at en ISO si c'est un timestamp unix (nombre ou string numérique)
+    const row = { id, ...data };
+    
+    // Si c'est un nouveau produit (pas de data.created_at), on met le timestamp actuel
     let createdAt = data.created_at || ts();
     if (typeof createdAt === 'number' || (typeof createdAt === 'string' && /^\d{10,13}$/.test(createdAt))) {
         createdAt = new Date(Number(createdAt)).toISOString();
     }
-    delete data.id;
-    delete data.created_at;
-    // Nettoyer aussi updated_at si présent avec un timestamp unix
-    if (data.updated_at && (typeof data.updated_at === 'number' || (typeof data.updated_at === 'string' && /^\d{10,13}$/.test(data.updated_at)))) {
-        data.updated_at = new Date(Number(data.updated_at)).toISOString();
-    }
-    const { error } = await supabase.from(COL_PRODUCTS).upsert({ id, ...data, created_at: createdAt });
+    row.created_at = createdAt;
+
+    const { error } = await supabase.from(COL_PRODUCTS).upsert(row);
     if (error) {
         console.error("Error saveProduct", error);
         throw new Error(`Erreur Supabase: ${error.message}`);
@@ -1766,6 +2239,45 @@ async function saveBroadcast(data) {
     return id;
 }
 
+async function getPendingBroadcasts() {
+    const now = ts();
+    const rescueTime = new Date(Date.now() - 10 * 60 * 1000).toISOString(); // 10 minutes pour considérer une diffusion "stuck"
+    const windowStart = new Date(Date.now() - 120 * 60 * 1000).toISOString(); // 2h de fenêtre (ÉVITE LE SPAM DES VIEILLES DIFFUSIONS)
+    
+    // 1. Chercher les PENDING (classiques)
+    const { data: pending, error: pError } = await supabase.from(COL_BROADCASTS)
+        .select('*')
+        .eq('status', 'pending')
+        .lte('start_at', now)
+        .gte('start_at', windowStart)
+        .order('start_at', { ascending: true });
+        
+    if (pError) {
+        console.error('❌ [DB] getPendingBroadcasts error:', pError);
+        return [];
+    }
+
+    // 2. Chercher les IN_PROGRESS "bloqués" (plus d'activité depuis 10 mins et non complétés)
+    // On considère qu'une diffusion est bloquée si elle est 'in_progress' et créée depuis plus de 10 mins 
+    // SANS être passée en 'completed'.
+    const { data: stuck, error: sError } = await supabase.from(COL_BROADCASTS)
+        .select('*')
+        .eq('status', 'in_progress')
+        .lt('created_at', rescueTime) // Initié depuis plus de 10 mins
+        .gt('created_at', windowStart) // MAIS pas créé depuis plus de 2h
+        .is('completed_at', null)
+        .limit(5);
+
+    if (sError) console.error('❌ [DB] getStuckBroadcasts error:', sError);
+
+    const allToProcess = [...(pending || []), ...(stuck || [])];
+    if (allToProcess.length > 0) {
+        console.log(`[BC-SERVICE] ${allToProcess.length} diffusions à traiter (P: ${pending?.length || 0}, Stuck: ${stuck?.length || 0})`);
+    }
+
+    return allToProcess;
+}
+
 async function recordPollVote(broadcastId, optionIdx, userId, userName = 'Anonyme') {
     const { data: bc } = await supabase.from(COL_BROADCASTS).select('poll_data').eq('id', broadcastId).single();
     if (!bc) return 'not_found';
@@ -1779,14 +2291,14 @@ async function recordPollVote(broadcastId, optionIdx, userId, userName = 'Anonym
     poll.votes[userId] = {
         option: optionIdx,
         userName: userName,
-        platform: String(userId).startsWith('whatsapp') || String(userId).includes('@') ? 'whatsapp' : 'telegram',
+        platform: String(userId).split('_')[0] || 'telegram',
         timestamp: ts()
     };
 
     // Alerte Admin
     const { notifyAdmins } = require('./notifications');
     const label = poll.options[optionIdx] || `#${optionIdx}`;
-    await notifyAdmins(null, `🗳 <b>VOTE SONDAGE</b>\n\n👤 Par : <b>${userName}</b>\n🆔 Sondage ID : <code>${broadcastId}</code>\n🔘 Réponse : "<b>${label}</b>"`).catch(() => {});
+    // await notifyAdmins(null, `🗳 <b>VOTE SONDAGE</b>\n\n👤 Par : <b>${userName}</b>\n🆔 Sondage ID : <code>${broadcastId}</code>\n🔘 Réponse : "<b>${label}</b>"`).catch(() => {});
 
     const { error } = await supabase.from(COL_BROADCASTS).update({ poll_data: poll }).eq('id', broadcastId);
     return error ? 'error' : 'success';
@@ -1811,7 +2323,7 @@ async function recordPollFreeResponse(broadcastId, userId, userName, responseTex
 
     // Alerte Admin
     const { notifyAdmins } = require('./notifications');
-    await notifyAdmins(null, `🖋 <b>RÉPONSE LIBRE (SONDAGE)</b>\n\n👤 Par : <b>${userName}</b>\n🆔 Sondage ID : <code>${broadcastId}</code>\n📝 Message : "<i>${responseText}</i>"`).catch(() => {});
+    // await notifyAdmins(null, `🖋 <b>RÉPONSE LIBRE (SONDAGE)</b>\n\n👤 Par : <b>${userName}</b>\n🆔 Sondage ID : <code>${broadcastId}</code>\n📝 Message : "<i>${responseText}</i>"`).catch(() => {});
 
     const { error } = await supabase.from(COL_BROADCASTS).update({ poll_data: poll }).eq('id', broadcastId);
     return error ? 'error' : 'success';
@@ -1832,6 +2344,19 @@ async function updateBroadcast(broadcastId, data) {
         }
         await supabase.from(COL_BROADCASTS).update(filtered).eq('id', broadcastId);
     }
+}
+async function claimBroadcast(broadcastId) {
+    const { data, error } = await supabase
+        .from(COL_BROADCASTS)
+        .update({ status: 'in_progress' })
+        .eq('id', broadcastId)
+        .or('status.eq.pending,status.eq.stuck')
+        .select();
+
+    if (error || !data || data.length === 0) {
+        return false;
+    }
+    return true;
 }
 async function deleteBroadcast(id) {
     await supabase.from(COL_BROADCASTS).delete().eq('id', id);
@@ -1950,9 +2475,36 @@ async function useSupabaseAuthState(sessionId) {
                 .from(TABLE)
                 .select('value')
                 .eq('id', makeId(key))
+                .abortSignal(AbortSignal.timeout(10000))
                 .single();
-            if (error || !data) return null;
-            return JSON.parse(JSON.stringify(data.value), BufferJSON.reviver);
+            
+            if (!error && data) {
+                return JSON.parse(JSON.stringify(data.value), BufferJSON.reviver);
+            }
+
+            // [🛡️ REDONDANCE] Si la session principale est vide, on cherche dans le backup
+            const backupId = `wa_backup::${sessionId}::${key}`;
+            const { data: backupData } = await supabase
+                .from(TABLE)
+                .select('value')
+                .eq('id', backupId)
+                .maybeSingle();
+
+            if (backupData) {
+                // Restoration silencieuse vers la session principale pour éviter les futurs ralentissements
+                const serialized = JSON.parse(JSON.stringify(backupData.value));
+                supabase.from(TABLE).upsert({
+                    id: makeId(key),
+                    namespace: NAMESPACE,
+                    user_key: key,
+                    value: serialized,
+                    updated_at: new Date().toISOString()
+                }).then(() => {});
+
+                return JSON.parse(JSON.stringify(backupData.value), BufferJSON.reviver);
+            }
+
+            return null;
         } catch (e) {
             return null;
         }
@@ -1961,13 +2513,25 @@ async function useSupabaseAuthState(sessionId) {
     async function writeData(key, value) {
         try {
             const serialized = JSON.parse(JSON.stringify(value, BufferJSON.replacer));
-            await supabase.from(TABLE).upsert({
+            const payload = {
                 id: makeId(key),
                 namespace: NAMESPACE,
                 user_key: key,
                 value: serialized,
                 updated_at: new Date().toISOString()
+            };
+
+            // Écriture principale
+            await supabase.from(TABLE).upsert(payload, { onConflict: 'id' }).abortSignal(AbortSignal.timeout(10000));
+
+            // Écriture redondante (Backup) - Persiste même après clearSession()
+            const backupId = `wa_backup::${sessionId}::${key}`;
+            await supabase.from(TABLE).upsert({
+                ...payload,
+                id: backupId,
+                namespace: 'wa_backup'
             }, { onConflict: 'id' });
+
         } catch (e) {
             console.error(`[WA-DB] writeData error for key ${key}:`, e.message);
         }
@@ -2027,8 +2591,64 @@ async function useSupabaseAuthState(sessionId) {
             }
         },
         saveCreds: () => writeData('creds', creds),
-        clearSession: clearAllData
+        clearSession: clearAllData,
+        // LOCK SYSTEM 
+        claimLock: (ownerId) => claimLock(`wa_lock::${sessionId}`, ownerId),
+        checkLock: () => checkLock(`wa_lock::${sessionId}`),
+
+        // [🛡️ UI PERSISTENCE] Persistance des boutons pour le nettoyage des messages après restart
+        getMetadata: async (key) => {
+            const data = await readData(`meta-${key}`);
+            return data;
+        },
+        saveMetadata: async (key, value) => {
+            await writeData(`meta-${key}`, value);
+        }
     };
+}
+
+/**
+ * Système de verrouillage distribué générique
+ */
+async function claimLock(lockId, ownerId) {
+    const TABLE = 'bot_state';
+    try {
+        // 1. Vérifier si un verrou existe déjà et s'il est valide
+        const current = await checkLock(lockId);
+        if (current && current.owner !== ownerId) {
+            console.log(`[LOCK] Conflit : Verrou ${lockId} déjà tenu par ${current.owner}`);
+            return false;
+        }
+
+        // 2. Tenter de prendre ou renouveler le verrou
+        const { error } = await supabase.from(TABLE).upsert({
+            id: lockId,
+            namespace: 'global_lock',
+            user_key: lockId.split('::')[1] || lockId,
+            value: { owner: ownerId, since: current?.since || new Date().toISOString() },
+            updated_at: new Date().toISOString()
+        }, { onConflict: 'id' });
+        
+        if (error) return false;
+        return true;
+    } catch (e) { 
+        console.error(`[LOCK-ERR] ${lockId}:`, e.message);
+        return false; 
+    }
+}
+
+async function checkLock(lockId) {
+    const TABLE = 'bot_state';
+    try {
+        const { data } = await supabase.from(TABLE).select('value, updated_at').eq('id', lockId).single();
+        if (!data) return null;
+        
+        // On retourne la valeur PLUS la date de mise à jour pour que le channel puisse juger de la fraîcheur
+        return { 
+            ...data.value, 
+            updatedAt: new Date(data.updated_at).getTime() 
+        };
+    } catch (e) { return null; }
 }
 
 // ====== SUPPLIERS / FOURNISSEURS ======
@@ -2044,9 +2664,31 @@ async function getSupplier(id) {
     return data?.[0] || null;
 }
 
-async function getSupplierByTelegramId(telegramId) {
-    const { data } = await supabase.from(COL_SUPPLIERS).select('*').eq('telegram_id', String(telegramId)).limit(1);
-    return data?.[0] || null;
+async function getSupplierDeliveryMode(supplierId) {
+    const s = await getSupplier(supplierId);
+    if (!s || !s.notes) return 'admin'; // Default
+    if (s.notes.includes('DELIVERY_MODE:supplier')) return 'supplier';
+    return 'admin';
+}
+
+const _supplierCache = new Map();
+async function getSupplierByTelegramId(tgId) {
+    if (!tgId) return null;
+    const now = Date.now();
+    if (_supplierCache.has(tgId)) {
+        const cached = _supplierCache.get(tgId);
+        if (now < cached.expire) return cached.data;
+    }
+
+    try {
+        const { data, error } = await supabase.from(COL_SUPPLIERS).select('*').eq('telegram_id', String(tgId)).limit(1);
+        if (error) return null;
+        const supplier = data?.[0] || null;
+        _supplierCache.set(tgId, { data: supplier, expire: now + 300000 });
+        return supplier;
+    } catch (e) {
+        return null;
+    }
 }
 
 async function saveSupplier(supplier) {
@@ -2092,7 +2734,12 @@ async function markOrderSupplierReady(orderId, prepTime = null) {
 async function getMarketplaceProducts(supplierId = null) {
     let query = supabase.from(COL_SUPPLIER_PRODUCTS).select('*').order('created_at', { ascending: false });
     if (supplierId) query = query.eq('supplier_id', supplierId);
-    const { data } = await query;
+    
+    const { data, error } = await query;
+    if (error) {
+        console.error('❌ [DB] getMarketplaceProducts error:', error);
+        throw error;
+    }
     return data || [];
 }
 
@@ -2102,9 +2749,14 @@ async function getMarketplaceProduct(id) {
 }
 
 async function getAvailableMarketplaceProducts(supplierId = null) {
-    let query = supabase.from(COL_SUPPLIER_PRODUCTS).select('*').eq('is_available', true).gt('stock', 0).order('created_at', { ascending: false });
+    let query = supabase.from(COL_SUPPLIER_PRODUCTS).select('*').eq('is_available', true).gt('stock', 0);
     if (supplierId) query = query.eq('supplier_id', supplierId);
-    const { data } = await query;
+    
+    const { data, error } = await query.order('created_at', { ascending: false });
+    if (error) {
+        console.error('❌ [DB] getAvailableMarketplaceProducts error:', error);
+        throw error;
+    }
     return data || [];
 }
 
@@ -2119,10 +2771,59 @@ async function saveMarketplaceProduct(product) {
         product.updated_at = ts();
         if (product.is_available === undefined) product.is_available = true;
         if (product.stock === undefined) product.stock = 0;
+        
+        // Supprime is_validated avant insertion par précaution si on n'est pas sûr qu'elle existe
+        // On laisse le code normal, on l'enlève juste si erreur (plus rapide)
         const { data, error } = await supabase.from(COL_SUPPLIER_PRODUCTS).insert([product]).select();
+        
+        if (error && error.message.includes('column "is_validated" does not exist')) {
+            delete product.is_validated;
+            const retry = await supabase.from(COL_SUPPLIER_PRODUCTS).insert([product]).select();
+            if (retry.error) throw retry.error;
+            return retry.data?.[0] || product;
+        }
+        
         if (error) { console.error('saveMarketplaceProduct error:', error); throw error; }
         return data?.[0] || product;
     }
+}
+
+async function validateMarketplaceProduct(id, isValidated = true) {
+    try {
+        const { error } = await supabase.from(COL_SUPPLIER_PRODUCTS).update({ is_validated: isValidated, updated_at: ts() }).eq('id', id);
+        if (error && error.message.includes('column "is_validated" does not exist')) {
+            console.warn('⚠️ [DB] is_validated column is missing in supplier_marketplace, skipping validation update');
+            return;
+        }
+        if (error) throw error;
+    } catch(e) {
+        console.error('validateMarketplaceProduct error:', e);
+    }
+}
+
+/**
+ * Déplace (copie) un produit de la marketplace vers le catalogue principal
+ */
+async function promoteMarketplaceProduct(mpId) {
+    const { data: mpProd } = await supabase.from(COL_SUPPLIER_PRODUCTS).select('*').eq('id', mpId).single();
+    if (!mpProd) throw new Error("Produit marketplace introuvable");
+
+    // Créer dans le catalogue principal
+    const productData = {
+        name: mpProd.name,
+        description: mpProd.description,
+        price: mpProd.price,
+        image_url: mpProd.image_url,
+        stock: mpProd.stock,
+        is_active: mpProd.is_available === undefined ? true : mpProd.is_available,
+        unit: mpProd.unit || 'Pièce',
+        unit_value: mpProd.unit_value || '1',
+        supplier_id: mpProd.supplier_id,
+        marketplace_product_id: mpProd.id,
+        created_at: ts()
+    };
+    
+    return await saveProduct(productData);
 }
 
 async function deleteMarketplaceProduct(id) {
@@ -2193,22 +2894,76 @@ async function updateMarketplaceOrderStatus(orderId, status) {
 
 // ========== FIN MARKETPLACE ==========
 
+/**
+ * Sauvegarde complète d'un objet utilisateur (met à jour tous les champs)
+ */
+async function saveUser(user) {
+    if (!user || !user.id) return { error: 'Invalid user object' };
+    const { error } = await supabase.from(COL_USERS).upsert(user);
+    if (!error) clearUserCache(user.id);
+    return { error };
+}
+
+/**
+ * Mise à jour partielle d'un utilisateur
+ */
+async function updateUser(userId, data) {
+    if (!userId) return { error: 'Missing userId' };
+    const { error } = await supabase.from(COL_USERS).update(data).eq('id', userId);
+    if (!error) clearUserCache(userId);
+    return { error };
+}
+
+async function recalculateAllUserStats() {
+    console.log("[DB] Starting global user stats recalculation...");
+    
+    // 1. Fetch all users
+    const { data: users, error: userError } = await supabase.from(COL_USERS).select('id, order_count');
+    if (userError) throw userError;
+
+    // 2. Fetch all orders (we only need user_id)
+    const { data: orders, error: orderError } = await supabase.from(COL_ORDERS).select('user_id');
+    if (orderError) throw orderError;
+
+    // 3. Count orders per user
+    const orderCounts = {};
+    orders.forEach(o => {
+        if (o.user_id) {
+            orderCounts[o.user_id] = (orderCounts[o.user_id] || 0) + 1;
+        }
+    });
+
+    // 4. Update each user IF their count is wrong
+    let updated = 0;
+    for (const user of users) {
+        const actualCount = orderCounts[user.id] || 0;
+        if ((user.order_count || 0) !== actualCount) {
+             await supabase.from(COL_USERS).update({ order_count: actualCount }).eq('id', user.id);
+             updated++;
+             _userCache.delete(user.id);
+        }
+    }
+
+    console.log(`[DB] Recalculation complete. Updated ${updated} users.`);
+    return { updated };
+}
+
 module.exports = {
     supabase, COL_USERS, COL_PRODUCTS, COL_ORDERS, COL_SETTINGS, COL_BROADCASTS, COL_REFERRALS,
     incr, ts, makeDocId, decryptUser, decryptOrder, decryptReview,
-    registerUser, getAllActiveUsers, getAllUsersForBroadcast, markUserBlocked, markUserUnblocked, deleteUser, getUser, updateUserWallet, updateUserPoints,
+    registerUser, getAllActiveUsers, getAllUsersForBroadcast, markUserBlocked, markUserUnblocked, deleteUser, getUser, saveUser, updateUser, updateUserWallet, updateUserPoints,
     getUserCount, getActiveUserCount, getRecentUsers, getBlockedUsers, searchUsers, searchLivreurs,
     generateReferralCode, getReferralLeaderboard, incrementOrderCount,
     setLivreurStatus, updateLivreurPosition, getActiveLivreursCount,
     createOrder, updateOrderStatus, assignOrderLivreur, getOrder, deleteOrder, getAvailableOrders, getAllOrders,
-    saveBroadcast, updateBroadcast, deleteBroadcast, getBroadcastHistory, recordPollVote, recordPollFreeResponse, incrementStat, incrementDailyStat,
+    saveBroadcast, updateBroadcast, deleteBroadcast, getBroadcastHistory, getPendingBroadcasts, recordPollVote, recordPollFreeResponse, incrementStat, incrementDailyStat,
     getGlobalStats, getDailyStats, getStatsOverview, getAppSettings, updateAppSettings, getClientActiveOrders,
     getProducts, saveProduct, deleteProduct, setLivreurAvailability,
-    getAvailableLivreurs, getAllLivreurs, getOrderAnalytics, saveUserLocation, addMessageToTrack, getLastMenuId, getTrackedMessages, getLivreurOrders, getLivreurHistory, getAllTakenOrders, getOrdersByUser, getDetailedLivreurActivity, saveFeedback, setPendingFeedback, getAndClearPendingFeedback, nukeDatabase,
+    getAvailableLivreurs, getAllLivreurs, getOrderAnalytics, backfillOrderCities, saveUserLocation, addMessageToTrack, getLastMenuId, getTrackedMessages, getLivreurOrders, getLivreurHistory, getOrdersByUser, getDetailedLivreurActivity, saveFeedback, setPendingFeedback, getAndClearPendingFeedback, nukeDatabase,
     saveReview, getReviews, getPublicReviews, deleteReview, uploadMediaFromUrl, uploadMediaBuffer,
     incrementChatCount, saveClientReply, logHelpRequest,
     getUpcomingPlannedOrders, markNotifSent, registerUser, addToStat,
-    _userCache,
+    _userCache, clearUserCache, // <--- ADDED
     useSupabaseAuthState,
     // Suppliers
     COL_SUPPLIERS, getSuppliers, getSupplier, getSupplierByTelegramId, saveSupplier, deleteSupplier,
@@ -2216,7 +2971,11 @@ module.exports = {
     // Marketplace
     COL_SUPPLIER_PRODUCTS, COL_SUPPLIER_ORDERS,
     getMarketplaceProducts, getMarketplaceProduct, getAvailableMarketplaceProducts,
-    saveMarketplaceProduct, deleteMarketplaceProduct, updateMarketplaceStock,
+    saveMarketplaceProduct, deleteMarketplaceProduct, updateMarketplaceStock, promoteMarketplaceProduct,
     createMarketplaceOrder, getMarketplaceOrders, getMarketplaceOrder, updateMarketplaceOrderStatus,
-    approveUser, getPendingUsers, getPendingUserCount
+    approveUser, getPendingUsers, getPendingUserCount,
+    claimLock, checkLock,
+    backfillOrderCities,
+    getUserAnalytics,
+    recalculateAllUserStats
 };

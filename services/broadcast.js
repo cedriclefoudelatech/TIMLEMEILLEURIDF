@@ -1,5 +1,6 @@
-const { getAllUsersForBroadcast, saveBroadcast, updateBroadcast, markUserBlocked } = require('./database');
+const { getAllUsersForBroadcast, saveBroadcast, updateBroadcast, markUserBlocked, getPendingBroadcasts } = require('./database');
 const { registry } = require('../channels/ChannelRegistry');
+const { dispatcher } = require('./dispatcher');
 const fs = require('fs');
 const path = require('path');
 
@@ -15,12 +16,28 @@ function debugLog(msg) {
 }
 
 // Configuration des délais
-const MEDIA_BATCH_SIZE = 5;
-const TEXT_BATCH_SIZE = 25;
-const DELAY_BETWEEN_BATCHES_MS = 1200;
+const CONCURRENCY_LIMIT = 10; // On augmente pour compenser les latences DB/Réseau
+const BATCH_DELAY_MS = 100; // Délai réduit entre chaque envoi individuel
+const TELEGRAM_TIMEOUT_MS = 15000; // Timeout de 15s par requête
 
 let _bot = null;
-function setBroadcastBot(bot) { _bot = bot; }
+function setBroadcastBot(bot) { 
+    _bot = bot; 
+    debugLog(`[BC-SERVICE] Bot Telegram lié à la diffusion.`);
+}
+
+/**
+ * Attend que le bot soit prêt avant de lancer la diffusion
+ */
+async function _waitForReady() {
+    let attempts = 0;
+    while (!_bot && attempts < 10) {
+        debugLog(`[BC-WAIT] En attente du bot Telegram... (essai ${attempts + 1}/10)`);
+        await new Promise(r => setTimeout(r, 2000));
+        attempts++;
+    }
+    return !!_bot;
+}
 
 function _isBroadcastPrivileged(user) {
     if (user?.is_livreur) return true;
@@ -39,9 +56,34 @@ async function broadcastMessage(platform, message, options = {}) {
         poll_options = null,
         poll_allow_free = false
     } = options;
-    debugLog(`[BC-START] Plateforme: ${platform}, Médias: ${mediaFiles.length}, URLs: ${existingUrls.length}, Message: "${(message || '').substring(0, 30)}..."`);
+
+    let finalMessage = message;
+    let finalMediaUrls = [...existingUrls];
+
+    // --- NOUVEAU: Support du format stocké (message|||MEDIA_URLS|||json) ---
+    if (message && typeof message === 'string' && message.includes('|||MEDIA_URLS|||')) {
+        const parts = message.split('|||MEDIA_URLS|||');
+        finalMessage = parts[0];
+        try {
+            const extraUrls = JSON.parse(parts[1]);
+            if (Array.isArray(extraUrls)) {
+                finalMediaUrls = [...finalMediaUrls, ...extraUrls];
+            }
+        } catch (e) {
+            debugLog(`[BC-PARSE-ERR] ${e.message}`);
+        }
+    }
+
+    debugLog(`[BC-START] Plateforme: ${platform}, Médias: ${mediaFiles.length}, URLs: ${finalMediaUrls.length}, Message: "${(finalMessage || '').substring(0, 30)}..."`);
 
     // Récupérer toutes les cibles (users + groups)
+    // S'assurer que le bot est prêt (évite race condition au reboot)
+    const isReady = await _waitForReady();
+    if (!isReady) {
+        debugLog(`[BC-ERROR] Impossible de lancer la diffusion: Bot non prêt après 20s.`);
+        return { success: 0, failed: 0, blocked: 0, total: 0 };
+    }
+
     let bType = null;
     if (platform === 'users') bType = 'user';
     else if (platform === 'groups') bType = 'group';
@@ -63,11 +105,12 @@ async function broadcastMessage(platform, message, options = {}) {
         return { success: 0, failed: 0, blocked: 0, total: 0 };
     }
 
-    // 1. Upload des nouveaux médias vers Supabase Storage
-    const normalizedExistingUrls = existingUrls.map(u => {
+    // 1. Normalisation des URLs existantes envoyées par options OU extraites supra
+    const normalizedExistingUrls = finalMediaUrls.map(u => {
         if (typeof u === 'string') {
             const isVideo = u.match(/\.(mp4|mov|avi|wmv|webm|mkv)(\?.*)?$/i);
-            return { url: u, type: isVideo ? 'video' : 'photo' };
+            const type = isVideo ? 'video' : 'photo';
+            return { url: u, type };
         }
         return u;
     });
@@ -126,10 +169,15 @@ async function broadcastMessage(platform, message, options = {}) {
             start_at,
             end_at,
             badge,
-            poll_data: poll_options ? { options: poll_options.split('|'), title: message, poll_allow_free: options.poll_allow_free || false } : null
+            poll_data: (poll_options && typeof poll_options === 'string') ? { 
+                options: poll_options.split('|'), 
+                title: message, 
+                poll_allow_free: options.poll_allow_free || false 
+            } : null
         });
     } else {
-        // Si on a déjà un ID, on met à jour son statut au lancement réel
+        // Déjà un ID (venant du worker), on est déjà passé par checkPending
+        // Mais par sécurité on s'assure qu'il est bien in_progress
         if (!isFuture) {
             await updateBroadcast(broadcastId, { status: 'in_progress' });
         }
@@ -146,80 +194,56 @@ async function broadcastMessage(platform, message, options = {}) {
     let previouslyBlockedCount = 0;
     const newlyBlockedNames = [];
 
-    const currentBatchSize = unifiedMediaList.length > 0 ? MEDIA_BATCH_SIZE : TEXT_BATCH_SIZE;
-
-    // On sépare ceux déjà bloqués en DB
-    const eligibleTargets = [];
+    // Déduplication et filtrage des cibles éligibles
     const seenPlatformIds = new Set();
-    for (const u of targets) {
+    const eligibleTargets = targets.filter(u => {
         if (u.is_blocked) {
             previouslyBlockedCount++;
+            return false;
+        }
+        const pid = String(u.platform_id || '').replace(/^(telegram_|whatsapp_)/, '');
+        if (seenPlatformIds.has(pid)) return false;
+        seenPlatformIds.add(pid);
+        return true;
+    });
+
+    const totalToProcess = eligibleTargets.length;
+    debugLog(`[BC-READY] ${totalToProcess} cibles éligibles pour l'envoi.`);
+
+    // --- ENVOI SEQUENTIEL AVEC CONCURRENCE LIMITÉE ---
+    const { default: pLimit } = await import('p-limit');
+    const limit = pLimit(CONCURRENCY_LIMIT);
+
+    const tasks = eligibleTargets.map((user, index) => limit(async () => {
+        // Décalage fixe entre les débuts de tâches pour lisser l'envoi
+        // (moins gourmand en mémoire qu'un décalage cumulatif sur 1000 users)
+        const jitter = Math.floor(Math.random() * 100);
+        await new Promise(r => setTimeout(r, BATCH_DELAY_MS + jitter));
+
+        const res = await sendToUser(user, finalMessage, unifiedMediaList, { ...options, broadcastId });
+        
+        if (res.success) {
+            successCount++;
         } else {
-            // Dédupliquer par platform_id pour éviter les doublons
-            const pid = String(u.platform_id || '').replace(/^(telegram_|whatsapp_)/, '');
-            if (seenPlatformIds.has(pid)) {
-                debugLog(`[BC-DEDUP] Doublon ignoré: ${u.id} (platform_id: ${pid})`);
-                continue;
-            }
-            seenPlatformIds.add(pid);
-            eligibleTargets.push(u);
-        }
-    }
-
-    let targetsToProcess = [...eligibleTargets];
-
-    // Seed Telegram file_ids by sending to the first user synchronously.
-    if (unifiedMediaList.length > 0 && targetsToProcess.length > 0) {
-        debugLog("[BC-SEED] Initializing file_id caching with first user...");
-        let seederSuccess = false;
-        while (targetsToProcess.length > 0 && !seederSuccess) {
-            const seedUser = targetsToProcess.shift();
-            const res = await sendToUser(seedUser, message, unifiedMediaList);
-            if (res.success) {
-                successCount++;
-                seederSuccess = true;
-                debugLog("[BC-SEED] Cached Telegram file_ids successfully.");
-            } else {
-                if (res.blocked) {
-                    newlyBlockedCount++;
-                    newlyBlockedNames.push(seedUser.first_name || seedUser.platform_id);
-                } else failedCount++;
-            }
-            await new Promise(r => setTimeout(r, 500));
-        }
-    }
-
-    // Now loop through remaining targets
-    for (let i = 0; i < targetsToProcess.length; i += currentBatchSize) {
-        const batch = targetsToProcess.slice(i, i + currentBatchSize);
-        debugLog(`[BC-BATCH] Lot ${Math.floor(i / currentBatchSize) + 1} (${batch.length} cibles)`);
-
-        const results = await Promise.allSettled(
-            batch.map((user) => sendToUser(user, message, unifiedMediaList, { ...options, broadcastId }))
-        );
-
-        for (const [idx, result] of results.entries()) {
-            if (result.status === 'fulfilled') {
-                const { success, blocked, error } = result.value;
-                if (success) {
-                    successCount++;
-                } else {
-                    if (blocked) {
-                        newlyBlockedCount++;
-                        newlyBlockedNames.push(batch[idx].first_name || batch[idx].platform_id);
-                    } else failedCount++;
-                    debugLog(`[BC-FAILED] ${batch[idx].platform_id}: ${error}`);
-                }
+            if (res.blocked) {
+                newlyBlockedCount++;
+                newlyBlockedNames.push(user.first_name || user.platform_id);
             } else {
                 failedCount++;
-                debugLog(`[BC-FATAL] ${batch[idx].platform_id}: ${result.reason}`);
             }
         }
 
-        if (i + currentBatchSize < eligibleTargets.length) {
-            await new Promise(r => setTimeout(r, DELAY_BETWEEN_BATCHES_MS));
+        // Mise à jour régulière du statut en DB toutes les 10 cibles pour feedback dashboard
+        if ((successCount + failedCount + newlyBlockedCount) % 10 === 0) {
+            await updateBroadcast(broadcastId, {
+                success: successCount,
+                failed: failedCount,
+                blocked: newlyBlockedCount + previouslyBlockedCount
+            }).catch(() => {});
         }
-    }
+    }));
+
+    await Promise.allSettled(tasks);
 
     // Finaliser log en DB
     const finalBlockedCount = newlyBlockedCount + previouslyBlockedCount;
@@ -227,13 +251,13 @@ async function broadcastMessage(platform, message, options = {}) {
         status: 'completed',
         success: successCount,
         failed: failedCount,
-        blocked: finalBlockedCount, // Total bloqués (nouveaux + anciens)
+        blocked: finalBlockedCount,
         previously_blocked: previouslyBlockedCount,
         blocked_names: newlyBlockedNames.length > 0 ? newlyBlockedNames.join(', ') : null,
         completed_at: ts()
     }).catch(e => debugLog(`[BC-LOG-ERR] ${e.message}`));
 
-    debugLog(`[BC-END] Terminé. Succès: ${successCount}, Échecs: ${failedCount}, Total Bloqués: ${finalBlockedCount} (Nouveaux: ${newlyBlockedCount}, Anciens: ${previouslyBlockedCount})`);
+    debugLog(`[BC-END] Terminé. Succès: ${successCount}, Échecs: ${failedCount}, Total Bloqués: ${finalBlockedCount}`);
     return { success: successCount, failed: failedCount, blocked: finalBlockedCount, total: totalTargets, broadcastId };
 }
 
@@ -272,6 +296,11 @@ async function sendToUser(user, message, unifiedMediaList = [], options = {}) {
                 if (mediaUrl && !mediaUrl.startsWith('http') && mediaUrl.includes('/')) {
                     const abs = path.resolve(process.cwd(), mediaUrl.startsWith('/') ? mediaUrl.substring(1) : mediaUrl);
                     if (fs.existsSync(abs)) mediaUrl = abs;
+                }
+
+                // Hydrater le cache du dispatcher pour le fallback numérique WA
+                if (buttons.length > 0) {
+                    dispatcher.setUserLastButtons(pid, buttons);
                 }
 
                 await channel.sendInteractive(cleanPid, message, buttons, {
@@ -328,7 +357,9 @@ async function sendToUser(user, message, unifiedMediaList = [], options = {}) {
     }
 
     const { Markup } = require('telegraf');
-    const poll_options = options.poll_options ? options.poll_options.split('|') : null;
+    const poll_options = (options.poll_options && typeof options.poll_options === 'string') 
+        ? options.poll_options.split('|') 
+        : null;
     const poll_allow_free = options.poll_allow_free || false;
     const broadcastId = options.broadcastId;
 
@@ -348,20 +379,25 @@ async function sendToUser(user, message, unifiedMediaList = [], options = {}) {
     const maxCaption = 1020;
     const caption = message ? (message.length > maxCaption ? message.substring(0, maxCaption - 3) + '...' : message) : '';
 
-    // Helper function for safe send with fallback
+    // Helper function for safe send with fallback and TOUGH TIMEOUT
     const safeSend = async (method, ...args) => {
-        try {
-            // First attempt: HTML
-            return await _bot.telegram[method](chatId, ...args, { parse_mode: 'HTML' });
-        } catch (err) {
-            const desc = err.description || '';
-            if (desc.includes('can\'t parse entities') || desc.includes('bad request')) {
-                debugLog(`[BC-RETRY] Fallback to Plain text for ${chatId} (${method})`);
-                // Second attempt: Plain text (no parse_mode)
-                return await _bot.telegram[method](chatId, ...args);
+        const timeout = (ms) => new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout API Telegram')), ms));
+        
+        const execute = async () => {
+            try {
+                // First attempt: HTML
+                return await _bot.telegram[method](chatId, ...args, { parse_mode: 'HTML' });
+            } catch (err) {
+                const desc = (err.description || '').toLowerCase();
+                if (desc.includes('can\'t parse entities') || desc.includes('bad request')) {
+                    debugLog(`[BC-RETRY] Fallback to Plain text for ${chatId} (${method})`);
+                    return await _bot.telegram[method](chatId, ...args);
+                }
+                throw err;
             }
-            throw err;
-        }
+        };
+
+        return await Promise.race([execute(), timeout(TELEGRAM_TIMEOUT_MS)]);
     };
     try {
         if (unifiedMediaList.length > 1) {
@@ -488,4 +524,36 @@ async function sendToUser(user, message, unifiedMediaList = [], options = {}) {
     }
 }
 
-module.exports = { broadcastMessage, setBroadcastBot };
+let isProcessing = false;
+async function processPendingBroadcasts() {
+    if (isProcessing) return;
+    isProcessing = true;
+    try {
+        const pendings = await getPendingBroadcasts();
+        if (pendings.length === 0) {
+            isProcessing = false;
+            return;
+        }
+
+        debugLog(`[BC-WORKER] ${pendings.length} diffusions trouvées.`);
+        for (const bc of pendings) {
+            // Marquage ATOMIQUE en DB pour éviter TOUT doublon entre instances
+            const claimed = await claimBroadcast(bc.id);
+            if (!claimed) continue;
+
+            const pollOpts = bc.poll_data?.options ? bc.poll_data.options.join('|') : null;
+            // On lance la diffusion
+            await broadcastMessage(bc.target_platform, bc.message || "", { 
+                id: bc.id,
+                start_at: bc.start_at,
+                poll_options: pollOpts
+            });
+        }
+    } catch (e) {
+        debugLog(`[BC-WORKER-ERR] ${e.message}`);
+    } finally {
+        isProcessing = false;
+    }
+}
+
+module.exports = { broadcastMessage, setBroadcastBot, processPendingBroadcasts };

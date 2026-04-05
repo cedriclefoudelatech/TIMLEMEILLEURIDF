@@ -50,21 +50,50 @@ class WhatsAppChannel extends Channel {
                 for (const msg of (val.messages || [])) {
                     this._touchSession(msg.from);
                     if (this.messageHandler) {
-                        await this.messageHandler({
+                        const messageData = {
                             from: msg.from,
                             name: contact?.profile?.name || 'WhatsApp User',
                             text: this._extractText(msg),
                             type: msg.type,
                             rawId: msg.id,
-                        });
+                        };
+
+                        // Extraction media + résolution URL pour relay Admin
+                        if (msg.image) {
+                            const url = await this.resolveMediaUrl(msg.image.id);
+                            messageData.photo = [{ file_id: msg.image.id, url: url }];
+                            if (msg.image.caption) messageData.caption = msg.image.caption;
+                        } else if (msg.video) {
+                            const url = await this.resolveMediaUrl(msg.video.id);
+                            messageData.video = { file_id: msg.video.id, url: url };
+                            if (msg.video.caption) messageData.caption = msg.video.caption;
+                        }
+
+                        await this.messageHandler(messageData);
                     }
                 }
             }
         }
     }
 
+    async resolveMediaUrl(mediaId) {
+        if (!mediaId || !this.accessToken) return null;
+        try {
+            const graphUrl = `https://graph.facebook.com/${API_VERSION}/${mediaId}`;
+            const response = await axios.get(graphUrl, {
+                headers: { Authorization: `Bearer ${this.accessToken}` }
+            });
+            return response.data?.url;
+        } catch (error) {
+            console.error(`[WA-Media] Error resolving ${mediaId}:`, error.response?.data || error.message);
+            return null;
+        }
+    }
+
     _extractText(msg) {
         if (msg.text) return msg.text.body;
+        if (msg.image) return msg.image.caption || '';
+        if (msg.video) return msg.video.caption || '';
         if (msg.interactive?.button_reply) return msg.interactive.button_reply.id;
         if (msg.button) return msg.button.text;
         return '';

@@ -17,7 +17,7 @@ const { registry } = require('./channels/ChannelRegistry');
 const { initChannels } = require('./services/channel_init');
 const { registerUser, getAppSettings, markUserBlocked, markUserUnblocked, getAllUsersForBroadcast, getAllActiveUsers, updateUserData } = require('./services/database');
 const { setBroadcastBot, broadcastMessage } = require('./services/broadcast');
-const { safeEdit } = require('./services/utils');
+const { safeEdit, cleanupUserChat } = require('./services/utils');
 const { notifyAdmins } = require('./services/notifications');
 
 // Handlers
@@ -44,7 +44,7 @@ async function main() {
     const server = createServer();
     server.listen(finalPort, '0.0.0.0', () => {
         console.log(`\n✅ SERVEUR WEB ACTIF SUR LE PORT ${finalPort}`);
-        console.log(`🔗 TEST HEALTH : https://timlemeilleuridf-production.up.railway.app/_health\n`);
+        console.log(`🔗 TEST HEALTH : https://TIMLEMEILLEURidf-production.up.railway.app/_health\n`);
     });
 
     // 2. Initialisation du Dispatcher (Simule Telegraf)
@@ -67,8 +67,8 @@ async function main() {
 
             // 2. Check if maintenance mode is enabled
             if (settings && (settings.maintenance_mode === true || settings.maintenance_mode === 'true')) {
-                const adminContact = settings.maintenance_contact || '';
-                const maintenanceMessage = settings.maintenance_message || '🔧 <b>Le bot est actuellement en maintenance.</b>\n\nNous revenons bientôt !';
+                const adminContact = settings.maintenance_contact || 'https://t.me/TIMLEMEILLEUR_contact';
+                const maintenanceMessage = settings.maintenance_message || '🔧 <b>Le bot est actuellement en maintenance.</b>\n\nNous revenons bientôt !\n\nContactez l\'admin : @TIMLEMEILLEUR_contact';
 
                 if (ctx.callbackQuery) {
                     await ctx.answerCbQuery(maintenanceMessage, { show_alert: true }).catch(() => { });
@@ -103,24 +103,7 @@ async function main() {
                 }
             }
 
-            // ═══ PUSH TO TELEGRAM (FORWARDING) ═══
-            // L'admin veut tout recevoir comme pour La Frappe
-            if (ctx.from?.id && !ctx._isPrivileged) {
-                const text = ctx.message?.text || ctx.text || '';
-                const isAction = !!ctx.callbackQuery;
-                const platform = ctx.platform.toUpperCase();
-                
-                // On ne forwarde pas les photos/vidéos ici carsendMessageToUser est limité au texte ou média simple
-                // Pour l'instant on forwarde le texte ou l'action
-                if (text) {
-                    const adminMsg = `[${platform}] 👤 <b>${ctx.from.first_name || 'Inconnu'}</b> (@${ctx.from.username || '-'}) [<code>${ctx.from.id}</code>]\n` +
-                                     `💬 ${isAction ? '🔘 Action : ' : ''}<code>${text}</code>`;
-                    notifyAdmins(null, adminMsg).catch(() => {});
-                }
-            }
-
             await next();
-
 
             // Nettoyage messages telegram
             if (ctx.platform === 'telegram' && ctx.message && ctx.chat?.type === 'private') {
@@ -149,6 +132,7 @@ async function main() {
         const userId = ctx.from.id;
         awaitingPollResponse.set(userId, { bcId, bcIndex });
         await ctx.answerCbQuery();
+        await cleanupUserChat(ctx);
         await ctx.reply("🖋 <b>Veuillez écrire votre réponse ci-dessous :</b>", { parse_mode: 'HTML' });
     });
 
@@ -156,7 +140,7 @@ async function main() {
         const bcId = ctx.match[1];
         const optIdx = parseInt(ctx.match[2]);
         const bcIndex = ctx.match[3];
-        const userId = ctx.from.id;
+        const userId = `${ctx.platform}_${ctx.from.id}`;
         const { recordPollVote } = require('./services/database');
 
         try {
@@ -169,6 +153,7 @@ async function main() {
             }
 
             await ctx.answerCbQuery("✅ Vote enregistré, merci !");
+            await cleanupUserChat(ctx);
 
             if (bcIndex !== undefined) {
                 await ctx.reply("✅ Vote enregistré !");
@@ -201,6 +186,7 @@ async function main() {
                     await recordPollFreeResponse(bcId, userId, userName, text);
                     const replyText = `✅ <b>Votre réponse a été enregistrée :</b>\n\n<i>"${text}"</i>\n\nMerci pour votre participation !`;
                     
+                    await cleanupUserChat(ctx);
                     if (bcIndex !== undefined) {
                         await ctx.reply(replyText);
                         return ctx.reply("🔄 Menu Principal", await getMainMenuKeyboard(ctx, ctx.state.settings, ctx.state.user));
@@ -250,9 +236,24 @@ async function main() {
     if (replicaIndex === '0') {
         console.log('[System] Replica 0: Starting all channels (WA + TG)...');
         await initChannels();
+        
+        // Background Broadcast Worker
+        const { processPendingBroadcasts } = require('./services/broadcast');
+        const bcInterval = 15000;
+        
+        // Execute immediately on startup, then every 15s
+        const runBcWorker = async () => {
+            try {
+                await processPendingBroadcasts();
+            } catch (e) {
+                console.error('[BC-WORKER-ERR] Loop error:', e.message);
+            }
+        };
+        runBcWorker();
+        setInterval(runBcWorker, bcInterval);
+        console.log('👷 Broadcast Worker active (Replica 0)');
     } else {
         console.log(`[System] Replica ${replicaIndex}: Bot background channels disabled to avoid conflicts.`);
-        // Note: Seule la réplica 0 gère WA et TG pour éviter les conflits 440 (Baileys) et 409 (Telegram getUpdates)
     }
 
     // 3. Liaison Canaux -> Dispatcher
@@ -294,7 +295,7 @@ async function main() {
             setInterval(() => checkAbandonedCarts(bot), 1800000);
             setInterval(() => runAutomatedSync(bot), 900000);
         }
-        setInterval(() => checkScheduledBroadcasts(), 60000);
+        // Removed duplicate checkScheduledBroadcasts - handled by Replica 0 worker in broadcast.js
     };
     runAutomatedTasks();
 
@@ -309,10 +310,20 @@ async function checkPlannedOrders(bot) {
         if (orders.length === 0) return;
         const nowParis = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Paris" }));
         for (const order of orders) {
-            if (!order.scheduled_at) continue;
-            const [datePart, timePart] = order.scheduled_at.split(' ');
-            const [h, m] = timePart.replace('h', ':').split(':');
-            const schedDate = new Date(`${datePart}T${h}:${m}:00`);
+            if (!order.scheduled_at || !order.scheduled_at.includes(' ')) continue;
+            
+            const parts = order.scheduled_at.split(' ');
+            const datePart = parts[0];
+            const timePart = parts[1];
+            if (!timePart) continue;
+
+            const timeClean = timePart.replace('h', ':');
+            const [h, m] = timeClean.split(':');
+            if (h === undefined || m === undefined) continue;
+
+            const schedDate = new Date(`${datePart}T${h.padStart(2, '0')}:${m.padStart(2, '0')}:00`);
+            if (isNaN(schedDate.getTime())) continue;
+
             const diffMin = Math.round((schedDate - nowParis) / 60000);
             if (diffMin <= 60 && diffMin > 30 && !order.notif_1h_sent) {
                 await sendPlannedAlert(bot, order, '1h');
@@ -331,15 +342,15 @@ async function checkPlannedOrders(bot) {
 async function sendPlannedAlert(bot, order, type) {
     const text = `⏰ <b>RAPPEL COMMANDE PLANIFIÉE (${type})</b>\n\n...`;
     if (order.livreur_id) {
-        const { sendMessageToUser } = require('./services/notifications');
-        await sendMessageToUser(order.livreur_id, text).catch(() => { });
+        const livreurTgId = order.livreur_id.replace('telegram_', '');
+        await bot.telegram.sendMessage(livreurTgId, text, { parse_mode: 'HTML' }).catch(() => { });
     }
     notifyAdmins(bot, `📢 [INFO ADMIN] ${text}`);
 }
 
 async function checkScheduledBroadcasts() {
     try {
-        const { supabase, COL_BROADCASTS } = require('./services/database');
+        const { supabase, COL_BROADCASTS, COL_USERS } = require('./services/database'); // Added COL_USERS
         const { broadcastMessage } = require('./services/broadcast');
         const now = new Date().toISOString();
         const { data: pending } = await supabase.from(COL_BROADCASTS).select('*').eq('status', 'pending').lte('start_at', now);
@@ -381,24 +392,30 @@ async function runAutomatedSync(bot) {
             const batch = users.slice(i, i + batchSize);
             await Promise.allSettled(batch.map(async (u) => {
                 try {
-                    const chatId = String(u.platform_id || '').replace('telegram_', '');
-                    if (!chatId) return;
+                    const chatId = String(u.platform_id || u.id || '').replace('telegram_', '');
+                    if (!chatId || isNaN(chatId)) return;
                     
                     // On teste si l'utilisateur a bloqué le bot
-                    await bot.telegram.sendChatAction(chatId, 'typing');
-                    
-                    // Si on arrive ici, le bot n'est pas bloqué
-                    if (u.is_blocked && (!u.data || u.data.blocked_by_admin !== true)) {
-                        await markUserUnblocked(u.id);
+                    try {
+                        await bot.telegram.sendChatAction(chatId, 'typing');
+                        
+                        // Si le bot n'est pas bloqué mais l'user était marqué bloqué (auto) -> on débloque
+                        if (u.is_blocked && (!u.data || u.data.blocked_by_admin !== true)) {
+                            await markUserUnblocked(u.id);
+                            console.log(`[Sync] User ${u.id} reachable again, unblocking.`);
+                        }
+                    } catch (err) {
+                        // 403 = l'utilisateur a bloqué le bot
+                        if (err.code === 403) {
+                            // On ne re-marque bloqué QUE s'il ne l'est pas déjà
+                            if (!u.is_blocked) {
+                                await markUserBlocked(u.id, false);
+                                console.log(`[Sync] User ${u.id} blocked the bot.`);
+                            }
+                        }
                     }
-                } catch (err) {
-                    // 403 = l'utilisateur a bloqué le bot
-                    if (err.code === 403) {
-                        await markUserBlocked(u.id, false);
-                    }
-                }
+                } catch (e) { }
             }));
-            // Petit délai entre les batchs pour laisser respirer l'API
             await new Promise(r => setTimeout(r, 500));
         }
         console.log(`[Sync] Finished sync for ${users.length} users.`);
@@ -406,30 +423,5 @@ async function runAutomatedSync(bot) {
         console.error('❌ Error runAutomatedSync:', e.message);
     }
 }
-
-// ═══════════════════════════════════════════════════
-// GESTION PROPRE DU SHUTDOWN (évite les conflits 409)
-// ═══════════════════════════════════════════════════
-const gracefulShutdown = async (signal) => {
-    console.log(`\n⚠️ Signal ${signal} reçu — Arrêt propre en cours...`);
-    try {
-        await registry.stopAll();
-        console.log('✅ Tous les canaux arrêtés proprement.');
-    } catch (e) {
-        console.error('❌ Erreur pendant le shutdown:', e.message);
-    }
-    process.exit(0);
-};
-
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-
-process.on('uncaughtException', (err) => {
-    console.error('💥 UNCAUGHT EXCEPTION:', err.message, err.stack);
-});
-
-process.on('unhandledRejection', (reason) => {
-    console.error('💥 UNHANDLED REJECTION:', reason);
-});
 
 main().catch(console.error);

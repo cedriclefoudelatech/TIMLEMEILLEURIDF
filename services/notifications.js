@@ -40,33 +40,35 @@ async function notifyAdmins(bot, message, options = {}) {
             return;
         }
 
-        // --- Parsing des IDs Administrateurs ---
+        // --- Parsing des IDs Administrateurs et Modérateurs ---
         let admins = [];
-        const dbRaw = settings.admin_telegram_id;
-        console.log('[Notification-Admin] rawAdmins en base:', typeof dbRaw, dbRaw);
+        let moderators = [];
         
-        if (Array.isArray(dbRaw)) {
-            admins = dbRaw.map(String);
-        } else if (typeof dbRaw === 'string') {
-            // Nettoyage complet (espaces, guillemets, crochets JSON mal formés)
-            admins = dbRaw.replace(/[\[\]"']/g, '').split(/[\s,]+/).filter(Boolean);
-        } else if (dbRaw && typeof dbRaw === 'object') {
-             admins = Object.values(dbRaw).map(String);
-        } else if (dbRaw) {
-            admins = [String(dbRaw)];
-        }
+        const dbRaw = settings.admin_telegram_id;
+        const modRaw = settings.moderator_telegram_id;
+        
+        const parseIds = (raw) => {
+            if (Array.isArray(raw)) return raw.map(String);
+            if (typeof raw === 'string') return raw.replace(/[\[\]"']/g, '').split(/[\s,]+/).filter(Boolean);
+            if (raw && typeof raw === 'object') return Object.values(raw).map(String);
+            if (raw) return [String(raw)];
+            return [];
+        };
 
+        admins = parseIds(dbRaw);
+        moderators = parseIds(modRaw);
+        
         const envAdmin = process.env.ADMIN_TELEGRAM_ID;
-        const allAdmins = [...new Set([...admins, envAdmin].filter(Boolean))];
+        const allRecipients = [...new Set([...admins, ...moderators, envAdmin].filter(Boolean))];
 
-        if (allAdmins.length === 0) {
-            console.warn('[Notification-Admin] AUCUN admin trouvé (Base + ENV vides)');
+        if (allRecipients.length === 0) {
+            console.warn('[Notification-Admin] AUCUN admin/mod trouvé (Base + ENV vides)');
             return;
         }
 
-        console.log(`[Notification-Admin] 🚀 Liaison vers ${allAdmins.length} admins: ${allAdmins.join(', ')}`);
+        console.log(`[Notification-Admin] 🚀 Liaison vers ${allRecipients.length} destinataires: ${allRecipients.join(', ')}`);
 
-        const sendPromises = allAdmins.map(async (adminId) => {
+        const sendPromises = allRecipients.map(async (adminId) => {
             const idStr = String(adminId).trim();
             if (!idStr) return null;
             // Normaliser l'ID (ajouter telegram_ si besoin pour le dispatcheur interne)
@@ -143,21 +145,30 @@ async function notifySuppliers(bot, cart, orderId, address, settings = null, isF
                         } catch (e) { /* fallback au nom du panier */ }
                     }
 
+                    const isRetail = !orderId.startsWith('mpo_');
+                    const platformIcon = isRetail ? (orderId.includes('_') ? '🟢' : '🔵') : '🏪';
+                    const orderType = isRetail ? 'CLIENT' : 'ADMIN';
+
                     const badge = isFirstOrder ? "\n🔥 <b>[ NOUVEAU CLIENT ]</b> 🔥\n" : "";
-                    const supplierMsg = (settings.msg_supplier_new_order || "📦 <b>Nouvelle commande !</b>") +
+                    const supplierMsg = `${platformIcon} <b>NOUVELLE COMMANDE ${orderType}</b>` +
                         badge +
                         `\n\n📦 Produit : ${esc(prodName)} x${item.qty || 1}\n` +
                         `📍 Adresse : ${esc(address)}\n` +
+                        `💰 Prix : ${item.price}€\n` +
                         `🔑 Commande : #${orderId.slice(-5)}`;
 
-                    console.log(`[NotifySupplier] Sending notification to supplier ${supplier.name} (telegram_${supplier.telegram_id}) for order #${orderId.slice(-5)}`);
+                    console.log(`[NotifySupplier] Sending notification to supplier ${supplier.name} for ${orderType} order #${orderId.slice(-5)}`);
+
+                    const buttons = [];
+                    if (isRetail) {
+                        buttons.push([{ text: '✅ Accepter', callback_data: `retail_accept_${orderId}` }, { text: '❌ Refuser', callback_data: `retail_reject_${orderId}` }]);
+                    }
+                    buttons.push([{ text: '📋 Mes Commandes', callback_data: 'mp_my_orders' }]);
+                    buttons.push([{ text: '🏪 Mon Magasin', callback_data: 'mp_my_shop' }]);
 
                     sendMessageToUser(`telegram_${supplier.telegram_id}`, supplierMsg, {
                         reply_markup: {
-                            inline_keyboard: [
-                                [{ text: '📋 Voir mes commandes', callback_data: 'mp_my_orders' }],
-                                [{ text: '🏪 Mon Magasin', callback_data: 'mp_my_shop' }]
-                            ]
+                            inline_keyboard: buttons
                         }
                     }, bot)
                         .then(() => {
@@ -180,7 +191,9 @@ async function notifySuppliers(bot, cart, orderId, address, settings = null, isF
  */
 async function sendMessageToUser(userId, message, options = {}, providedBot = null) {
     const idStr = String(userId);
-    const platform = (idStr.startsWith('whatsapp_') || idStr.includes('@')) ? 'whatsapp' : 'telegram';
+    const platform = idStr.startsWith('whatsapp_') ? 'whatsapp' : 
+                     (idStr.startsWith('telegram_') ? 'telegram' : 
+                     (idStr.includes('@') ? 'whatsapp' : 'telegram'));
     const cleanId = idStr.replace(/^(telegram_|whatsapp_)/, '');
 
     try {
@@ -209,6 +222,14 @@ async function sendMessageToUser(userId, message, options = {}, providedBot = nu
                 }
                 return await wa.sendInteractive(cleanId, message, waButtons, options);
             }
+
+            // Gestion média pour WhatsApp
+            if (options.photo || options.video || options.media_url) {
+                const mediaUrl = options.photo || options.video || options.media_url;
+                const mediaType = options.video ? 'video' : (options.photo ? 'photo' : (options.media_type || 'photo'));
+                return await wa.sendMessage(cleanId, message, { ...options, media_url: mediaUrl, media_type: mediaType });
+            }
+
             return await wa.sendMessage(cleanId, message, options);
         }
 
@@ -233,7 +254,23 @@ async function sendMessageToUser(userId, message, options = {}, providedBot = nu
         if (options.parse_mode) extra.parse_mode = options.parse_mode;
         if (options.protect_content !== undefined) extra.protect_content = options.protect_content;
 
-        const sent = await realBot.telegram.sendMessage(cleanId, message, extra);
+        let sent;
+        try {
+            if (options.photo) {
+                sent = await realBot.telegram.sendPhoto(cleanId, options.photo, { caption: message, ...extra });
+            } else if (options.video) {
+                sent = await realBot.telegram.sendVideo(cleanId, options.video, { caption: message, ...extra });
+            } else {
+                sent = await realBot.telegram.sendMessage(cleanId, message, extra);
+            }
+        } catch (botErr) {
+            // Fallback en cas d'erreur média (URL invalide, file_id expiré)
+            if (options.photo || options.video) {
+                console.warn(`[MSG-Gen] Fallback texte pur car média échoué pour ${cleanId}: ${botErr.message}`);
+                sent = await realBot.telegram.sendMessage(cleanId, message || 'Fichier média (erreur de chargement)', extra);
+            } else throw botErr;
+        }
+
         if (sent && sent.message_id) {
             const { trackIntermediateMessage } = require('./utils');
             trackIntermediateMessage(userId, sent.message_id).catch(() => {});

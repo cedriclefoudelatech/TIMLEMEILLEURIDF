@@ -45,8 +45,8 @@ async function main() {
 
             // Check if maintenance mode is enabled
             if (settings.maintenance_mode === true || settings.maintenance_mode === 'true') {
-                const adminContact = settings.maintenance_contact || 'https://t.me/lafrappex';
-                const maintenanceMessage = settings.maintenance_message || '🔧 <b>Le bot est actuellement en maintenance.</b>\n\nNous revenons bientôt !\n\nContactez l\'admin : @lafrappex';
+                const adminContact = settings.maintenance_contact || 'https://t.me/TIMLEMEILLEURx';
+                const maintenanceMessage = settings.maintenance_message || '🔧 <b>Le bot est actuellement en maintenance.</b>\n\nNous revenons bientôt !\n\nContactez l\'admin : @TIMLEMEILLEURx';
 
                 if (ctx.callbackQuery) {
                     await ctx.answerCbQuery(maintenanceMessage, { show_alert: true }).catch(() => { });

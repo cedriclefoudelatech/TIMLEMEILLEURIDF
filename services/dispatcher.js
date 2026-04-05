@@ -1,5 +1,5 @@
 const { registry } = require('../channels/ChannelRegistry');
-const { registerUser, getAppSettings } = require('./database');
+const { registerUser, getAppSettings, markUserBlocked, markUserUnblocked, addMessageToTrack } = require('./database');
 const { createPersistentMap } = require('./persistent_map');
 const { waLog } = require('./wa_log_shared');
 
@@ -16,17 +16,19 @@ class Dispatcher {
     }
 
     // Normalise les IDs utilisateurs (surtout WhatsApp : retire le suffixe de session :1, :2...)
-    _normalizeId(id) {
+    _normalizeId(id, platform = null) {
         if (!id) return id;
         let s = String(id).replace(/^(telegram_|whatsapp_)/, '');
-        if (s.includes('@s.whatsapp.net')) {
-            return s.split(':')[0].split('@')[0] + '@s.whatsapp.net';
+        
+        // Supprimer les suffixes de session (:1, :2)
+        s = s.split(':')[0];
+
+        if (s.includes('@s.whatsapp.net') || s.includes('@lid')) {
+            return s;
         }
-        if (s.includes('@lid')) {
-            return s.split(':')[0].split('@')[0] + '@lid';
-        }
+
         // Pour les IDs numériques purs venant de WhatsApp via notifications.js
-        if (/^\d+$/.test(s) && !s.includes('@')) {
+        if (platform === 'whatsapp' || (!platform && s.length >= 8 && /^\d+$/.test(s) && !s.includes('@'))) {
             return s + '@s.whatsapp.net';
         }
         return s;
@@ -53,7 +55,12 @@ class Dispatcher {
     use(fn) { this.middleware.push(fn); }
     command(cmd, fn) { this.commands.set(cmd, fn); }
     action(trigger, fn) { this.actions.set(trigger, fn); }
-    on(type, fn) { this.onHandlers.push({ type, fn }); }
+    on(types, fn) {
+        const typeArray = Array.isArray(types) ? types : [types];
+        for (const t of typeArray) {
+            this.onHandlers.push({ type: t, fn });
+        }
+    }
     catch(fn) { this.catchHandler = fn; }
 
     // --- Gestion des messages entrants ---
@@ -73,26 +80,32 @@ class Dispatcher {
         }
 
         const fromRaw = String(msg.from || '');
-        const fromStr = this._normalizeId(fromRaw);
+        const userId = this._normalizeId(fromRaw, channel.type);
         const isCallback = !!msg.isAction;
 
-        // Auto-enregistrement/mise à jour de l'utilisateur pour ce canal
-        // OPTIMISATION: Sur les callbacks (boutons), on skip registerUser car l'user est déjà enregistré
-        // et on charge les settings en parallèle pour gagner du temps
         try {
-            const userId = channel.type === 'whatsapp' ? fromStr : fromStr.split('@')[0];
+            const settings = await getAppSettings();
+            msg._settings = settings;
 
             if (isCallback) {
-                // Callback = user déjà connu → charger settings + user cache en parallèle (pas de registerUser)
-                const settings = await getAppSettings(); // cached 10min
+                // Callback = user déjà connu → charger user cache
                 const docId = `${channel.type}_${userId}`;
-                const cachedEntry = require('./database')._userCache?.get(docId);
-                msg.user = cachedEntry?.data || null;
+                
+                // Try from cache
+                let entry = require('./database')._userCache?.get(docId);
+                let registeredUser = entry?.data || null;
+                
+                // If not in cache, try from DB
+                if (!registeredUser) {
+                    const { getUser } = require('./database');
+                    const dbUser = await getUser(userId, channel.type);
+                    registeredUser = dbUser;
+                }
+                
+                msg.user = registeredUser;
                 msg._isNewUser = false;
-                msg._settings = settings; // Passer au contexte pour éviter un 2e appel
             } else {
                 // Message normal → enregistrer l'utilisateur
-                const settings = await getAppSettings();
                 const { isNew, user: registeredUser } = await registerUser({
                     id: userId,
                     first_name: msg.name || settings.default_wa_name || 'Utilisateur WhatsApp',
@@ -102,14 +115,13 @@ class Dispatcher {
 
                 msg.user = registeredUser;
                 msg._isNewUser = isNew;
-                msg._settings = settings; // Passer au contexte pour éviter un 2e appel
             }
         } catch (e) {
-            console.error(`[Dispatcher] Auto-reg failed:`, e.message);
+            console.error(`[Dispatcher] Auto-reg failed: ${e.message}`);
         }
 
         // Uniformisation du contexte
-        const ctx = await this._createUnifiedContext(channel, msg, fromStr);
+        const ctx = await this._createUnifiedContext(channel, msg, userId);
         
         try {
             // 1. Exécuter les middlewares
@@ -119,6 +131,48 @@ class Dispatcher {
                 if (index < this.middleware.length) {
                     await this.middleware[index](ctx, next);
                 } else {
+                    // 3. Gestion des approbations (STRICT)
+                    const registeredUser = ctx.state.user;
+                    const isApproved = registeredUser?.is_approved !== false || registeredUser?.is_livreur === true || (await require('../handlers/admin').isAdmin(ctx));
+
+                    const isStartCommand = ctx.message?.text?.startsWith('/start') || ctx.message?.text?.toLowerCase() === 'start';
+                    const isPermittedAction = ctx.callbackQuery && [
+                        'check_sub', 'refresh_status', 'help_menu', 'help_chat_admin', 'user_chat_reply_admin', 'cancel_user_support'
+                    ].some(a => ctx.callbackQuery.data === a || 
+                        ctx.callbackQuery.data.startsWith('approve_') || 
+                        ctx.callbackQuery.data.startsWith('poll_vote_') || 
+                        ctx.callbackQuery.data.startsWith('poll_free_') ||
+                        ctx.callbackQuery.data.startsWith('feedback_rate_') ||
+                        ctx.callbackQuery.data.startsWith('review_rate_') ||
+                        ctx.callbackQuery.data.startsWith('order_view_')
+                    );
+
+                    // Permettre les messages si une session de support est en cours (même si non approuvé)
+                    const { activeUserSessions, awaitingUserSupportReply } = require('../handlers/admin');
+                    const uKey = `${ctx.platform}_${this._normalizeId(ctx.from.id, ctx.platform)}`;
+                    const isSupportSession = activeUserSessions.has(uKey) || awaitingUserSupportReply.has(uKey);
+
+                    if (!isApproved && !isStartCommand && !isPermittedAction && !isSupportSession) {
+                        if (ctx.callbackQuery) {
+                            return ctx.answerCbQuery("🛑 Votre accès est en attente de validation par l'administrateur.", { show_alert: true }).catch(() => { });
+                        }
+                        
+                        // Si message texte sur WhatsApp/Telegram non approuvé -> redirection vers /start (via command handler)
+                        if (this.commands.has('start')) {
+                            console.log(`[Dispatcher] Redirection user non-approuvé ${ctx.from.id} vers /start`);
+                            return await this.commands.get('start')(ctx);
+                        }
+                        return; // Bloquer
+                    }
+
+                    // Gestion des bannissements
+                    if (registeredUser && registeredUser.is_blocked) {
+                        if (ctx.callbackQuery) {
+                            return ctx.answerCbQuery("⛔️ Votre compte est suspendu.", { show_alert: true }).catch(() => { });
+                        }
+                        return ctx.reply("⛔️ <b>ACCÈS REFUSÉ</b>\n\nVotre compte a été suspendu par l'administration. Contactez le support pour plus d'informations.", { parse_mode: 'HTML' }).catch(() => { });
+                    }
+
                     await this._route(ctx);
                 }
             };
@@ -142,8 +196,7 @@ class Dispatcher {
     }
 
     async _createUnifiedContext(channel, msg, normalizedFrom) {
-        const fromStr = normalizedFrom || this._normalizeId(msg.from);
-        const userId = channel.type === 'whatsapp' ? fromStr : fromStr.split('@')[0];
+        const userId = normalizedFrom || this._normalizeId(msg.from, channel.type);
         // Réutiliser les settings déjà chargées dans handleUpdate pour éviter un 2e appel
         const settings = msg._settings || await getAppSettings();
         
@@ -282,6 +335,8 @@ class Dispatcher {
                         console.log(`[WA-Stored] IDs stockés pour ${userId}:`, sentIds);
                     }
                 }
+                const trackId = res?.message_id || res?.messageId || (res?.sentIds ? res.sentIds[0] : null);
+                if (trackId) addMessageToTrack(userId, trackId).catch(() => {});
                 return res;
             },
             replyWithHTML: async (text, extra = {}) => ctx.reply(text, { ...extra, parse_mode: 'HTML' }),
@@ -308,6 +363,9 @@ class Dispatcher {
 
                 if (channel.type === 'whatsapp' && res.sentIds) this.userLastMessageIds.set(userId, res.sentIds);
                 else if (channel.type === 'whatsapp' && res.messageId) this.userLastMessageIds.set(userId, [res.messageId]);
+                
+                const trackId = res?.message_id || res?.messageId || (res?.sentIds ? res.sentIds[0] : null);
+                if (trackId) addMessageToTrack(userId, trackId).catch(() => {});
                 return res;
             },
             replyWithVideo: async (video, extra = {}) => {
@@ -333,6 +391,9 @@ class Dispatcher {
 
                 if (channel.type === 'whatsapp' && res.sentIds) this.userLastMessageIds.set(userId, res.sentIds);
                 else if (channel.type === 'whatsapp' && res.messageId) this.userLastMessageIds.set(userId, [res.messageId]);
+                
+                const trackId = res?.message_id || res?.messageId || (res?.sentIds ? res.sentIds[0] : null);
+                if (trackId) addMessageToTrack(userId, trackId).catch(() => {});
                 return res;
             },
             answerCbQuery: async (text) => {
@@ -416,17 +477,18 @@ class Dispatcher {
     }
 
     async _route(ctx) {
+        const userId = ctx.from.id;
         const msg = ctx.message || {};
         const text = msg.text || ctx.text || '';
         const lowerText = text.toLowerCase().trim();
         const platform = ctx.platform.toUpperCase();
         console.log(`\n====== [${platform}] NOUVEAU MESSAGE ======`);
-        console.log(`[${platform}] De: ${ctx.from.id} | Texte: "${text}" | Est un bouton: ${!!ctx.callbackQuery}`);
+        console.log(`[${platform}] De: ${userId} | Texte: "${text}" | Est un bouton: ${!!ctx.callbackQuery}`);
 
         // 1. Gestion des CALLBACKS (Boutons Telegram & Actions WhatsApp)
         if (ctx.callbackQuery) {
             const data = ctx.callbackQuery.data;
-            console.log(`[Dispatcher-CB] Bouton détecté: "${data}" (User: ${ctx.from.id})`);
+            console.log(`[Dispatcher-CB] Bouton détecté: "${data}" (User: ${userId})`);
             const found = await this._routeAction(ctx, data);
             if (found) {
                 console.log(`[${platform}] ✅ Handler trouvé et exécuté pour: "${data}"`);
@@ -439,6 +501,7 @@ class Dispatcher {
         // 2. Commande explicite /cmd
         if (text.startsWith('/')) {
             const cmd = text.split(' ')[0].substring(1);
+            console.log(`[Dispatcher] Checking command: "/${cmd}" (Available: ${Array.from(this.commands.keys()).join(', ')})`);
             if (this.commands.has(cmd)) {
                 console.log(`[${platform}] 📟 Commande /${cmd} trouvée`);
                 return await this.commands.get(cmd)(ctx);
@@ -452,50 +515,64 @@ class Dispatcher {
             if (this.commands.has('start')) return await this.commands.get('start')(ctx);
         }
 
-        // 3b. WhatsApp: auto-accueil si premier message (pas besoin de /start)
-        if (ctx.platform === 'whatsapp' && !this.userLastButtons.has(ctx.from.id)) {
-            console.log(`[${platform}] 🤝 Auto-welcome (premier message)`);
-            if (this.commands.has('start')) return await this.commands.get('start')(ctx);
-        }
+        // 3b. WhatsApp: Fallback numérique (AVANT l'auto-accueil pour intercepter les choix de menus)
+        const shortId = String(userId).replace(/^(telegram_|whatsapp_)/, '').split('@')[0];
+        const lastButtons = this.userLastButtons.get(shortId);
 
-        // 4. Handlers globaux (on text, message, etc.)
-        console.log(`[${platform}] 📝 Passage dans ${this.onHandlers.filter(h=>h.type==='text').length} handlers texte...`);
-        for (const h of this.onHandlers) {
-            if (h.type === 'text' && (ctx.message.text || ctx.text)) {
-                await h.fn(ctx, () => {});
-            } else if (h.type === 'photo' && ctx.message.photo) {
-                await h.fn(ctx, () => {});
-            } else if (h.type === 'video' && ctx.message.video) {
-                await h.fn(ctx, () => {});
-            } else if (h.type === 'message') {
-                await h.fn(ctx, () => {});
-            } else if (h.type === 'location' && ctx.message.location) {
-                await h.fn(ctx, () => {});
-            }
-        }
-
-        // 5. WhatsApp: Fallback numérique seulement si non traité par le reste
-        if (ctx.channel.type === 'whatsapp' && /^\d+$/.test(lowerText)) {
-            waLog(`[${platform}] 🔢 PRÉ-FALLBACK: _handled=${ctx._handled}, texte="${lowerText}"`);
-        }
         if (ctx.channel.type === 'whatsapp' && /^\d+$/.test(lowerText) && !ctx._handled) {
             const index = parseInt(lowerText) - 1;
-            const lastButtons = this.userLastButtons.get(ctx.from.id);
-            waLog(`[${platform}] 🔢 Raccourci numérique "${lowerText}" → index ${index}`);
-            waLog(`[${platform}] 🗂️ Boutons mémorisés: ${lastButtons ? lastButtons.map(b=>b.id).join(', ') : 'AUCUN'}`);
+            waLog(`[${platform}] 🔢 Raccourci numérique "${lowerText}" (index ${index}) — UserShortID: ${shortId}`);
+            waLog(`[${platform}] 🗂️ Boutons mémorisés: ${lastButtons ? lastButtons.map(b=>b.id || 'btn').join(', ') : 'AUCUN'}`);
 
             if (lastButtons && lastButtons[index]) {
                 const btn = lastButtons[index];
                 const trigger = btn.id || btn.callback_data;
                 waLog(`[${platform}] ✅ Déclenchement: "${trigger}"`);
-                if (trigger) await this._routeAction(ctx, trigger);
+                if (trigger) {
+                    ctx._handled = true;
+                    return await this._routeAction(ctx, trigger);
+                }
             } else if (!lastButtons) {
-                waLog(`[${platform}] ❌ Pas de boutons mémorisés pour ${ctx.from.id} — envoyer /start d'abord`);
+                waLog(`[${platform}] ❌ Pas de boutons mémorisés pour ${shortId} — envoi /start via auto-welcome possible`);
             } else {
                 waLog(`[${platform}] ❌ Index ${index} hors limite (${lastButtons.length} boutons disponibles)`);
             }
         }
+
+        // 3c. WhatsApp: auto-accueil si premier message (pas besoin de /start)
+        if (ctx.platform === 'whatsapp' && !lastButtons && !ctx._handled) {
+            console.log(`[${platform}] 🤝 Auto-welcome (premier message ID: ${shortId})`);
+            if (this.commands.has('start')) return await this.commands.get('start')(ctx);
+        }
+
+        // 4. Handlers globaux (on text, message, etc.)
+        console.log(`[${platform}] 📝 Passage dans ${this.onHandlers.length} handlers globaux...`);
+        
+        let handlerIndex = -1;
+        const runHandlers = async () => {
+            handlerIndex++;
+            if (handlerIndex >= this.onHandlers.length) return;
+
+            const h = this.onHandlers[handlerIndex];
+            let match = false;
+            
+            if (h.type === 'text' && (ctx.message.text || ctx.text)) match = true;
+            else if (h.type === 'photo' && ctx.message.photo) match = true;
+            else if (h.type === 'video' && ctx.message.video) match = true;
+            else if (h.type === 'message') match = true;
+            else if (h.type === 'location' && ctx.message.location) match = true;
+            else if (h.type === 'callback_query' && ctx.callbackQuery) match = true;
+
+            if (match) {
+                await h.fn(ctx, runHandlers);
+            } else {
+                await runHandlers();
+            }
+        };
+
+        await runHandlers();
         waLog(`[${platform}] _handled: ${ctx._handled}`);
+
     }
 
     async _routeAction(ctx, data) {
@@ -527,12 +604,13 @@ class Dispatcher {
      * Permet aux services externes (notif, etc.) d'hydrater le cache des boutons
      * pour que les raccourcis numériques WhatsApp fonctionnent sur les messages envoyés hors ctx.reply
      */
-    setUserLastButtons(userId, buttons) {
-        if (!userId || !buttons) return;
-        this.userLastButtons.set(String(userId), buttons);
-        console.log(`[Dispatcher] Buttons cache hydrated for ${userId} (${buttons.length} buttons)`);
+    setUserLastButtons(id, buttons) {
+        if (!id || !buttons) return;
+        const shortId = String(id).replace(/^(telegram_|whatsapp_)/, '').split('@')[0];
+        this.userLastButtons.set(shortId, buttons);
+        console.log(`[Dispatcher] Buttons cache hydrated for ${shortId} (${buttons.length} buttons)`);
     }
 }
 
 const dispatcher = new Dispatcher();
-module.exports = { dispatcher };
+module.exports = { dispatcher, Dispatcher };

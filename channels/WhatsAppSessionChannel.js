@@ -45,9 +45,57 @@ class WhatsAppSessionChannel extends Channel {
 
     async start() {
         await loadBaileys();
-        const { state, saveCreds, clearSession } = await useSupabaseAuthState(this.sessionId);
+        const { state, saveCreds, clearSession, claimLock, checkLock } = await useSupabaseAuthState(this.sessionId);
         this._clearSession = clearSession;
-        const { version, isLatest } = await fetchLatestBaileysVersion();
+
+        // --- LOCK SYSTEM (PREVENTS CONFLICT 440) ---
+        const myInstanceId = `${process.env.RAILWAY_SERVICE_NAME || 'local'}-${process.env.RAILWAY_REPLICA_INDEX || '0'}-${process.pid}`;
+        const activeLock = await checkLock();
+        
+        if (activeLock && activeLock.owner !== myInstanceId) {
+            const now = Date.now();
+            const updatedAt = activeLock.updatedAt || 0;
+            const diff = now - updatedAt;
+
+            // Si le lock existe et qu'il a été mis à jour il y a moins de 5 minutes, il est ACTIF
+            if (activeLock.owner && diff < 300000) {
+                const waitTime = 30000;
+                waLog(`[WA-LOCK] Session busy (owned by ${activeLock.owner}, updated ${Math.round(diff/1000)}s ago). Waiting ${waitTime}ms to avoid conflict 440...`);
+                this.isActive = false;
+                setTimeout(() => this.start(), waitTime);
+                return;
+            }
+        }
+        
+        // Prendre le lock
+        await claimLock(myInstanceId);
+        waLog(`[WA-LOCK] Session locked for our instance: ${myInstanceId}`);
+        this.isActive = true; // Marquer comme actif pour le heartbeat dès maintenant
+
+        // [🛡️ REDONDANCE] Heartbeat pour garder le lock vivant
+        // On le lance immédiatement pour éviter tout timeout pendant la connexion Baileys
+        if (this._lockHeartbeat) clearInterval(this._lockHeartbeat);
+        this._lockHeartbeat = setInterval(async () => {
+             // Met à jour le timestamp 'updatedAt' dans Supabase
+             await claimLock(myInstanceId).catch(err => {
+                 waLog(`[WA-LOCK] Heartbeat failed: ${err.message}`);
+             });
+        }, 60000); // 1 minute (plus agressif pour être sûr)
+
+        let version = [2, 3000, 1015901307];
+        let isLatest = false;
+        try {
+            const latest = await Promise.race([
+                fetchLatestBaileysVersion(),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Version fetch timeout')), 5000))
+            ]).catch(() => null);
+            if (latest && latest.version) {
+                version = latest.version;
+                isLatest = latest.isLatest;
+            }
+        } catch (e) {
+            console.warn('[WA] Version fetch failed, using fallback.');
+        }
         console.log(`[WA] Using version v${version.join('.')}, isLatest: ${isLatest}`);
 
         const logger = pino({ level: 'silent' });
@@ -259,10 +307,14 @@ class WhatsAppSessionChannel extends Channel {
     onMessage(handler) { this.messageHandler = handler; }
 
     async sendMessage(userId, text, options = {}) {
-        if (!this.sock || !this.isActive) return { success: false, error: 'Not connected' };
+        const jid = this._normalizeId(userId);
+        
+        if (!this.sock || !this.isActive) {
+            waLog(`[WA-Send-Error] Disconnected! State: ${!!this.sock ? 'WaitSock' : 'NoSock'}, Active: ${this.isActive} | To: ${jid}`);
+            return { success: false, error: 'WhatsApp not connected or session locked' };
+        }
 
-        // Sécurité JID: on s'assure que l'ID a le bon suffixe si c'est un pur numéro
-        const jid = (userId.includes('@')) ? userId : `${userId}@s.whatsapp.net`;
+        waLog(`[WA-Send] Sending to ${jid} | HasMedia: ${!!(options.source || options.media_url)}`);
         const cleanText = this._stripHTML(text);
 
         try {
@@ -427,13 +479,21 @@ class WhatsAppSessionChannel extends Channel {
 
     _normalizeId(id) {
         if (!id) return id;
-        const s = String(id);
+        let s = String(id).trim();
+        
+        // Remove 'whatsapp_' prefix if present (from notifications.js)
+        if (s.startsWith('whatsapp_')) s = s.replace('whatsapp_', '');
+
         if (s.includes('@s.whatsapp.net')) {
             return s.split(':')[0].split('@')[0] + '@s.whatsapp.net';
         }
         if (s.includes('@lid')) {
             return s.split(':')[0].split('@')[0] + '@lid';
         }
+        
+        // Default to s.whatsapp.net if no suffix
+        if (!s.includes('@')) return s + '@s.whatsapp.net';
+        
         return s;
     }
 }

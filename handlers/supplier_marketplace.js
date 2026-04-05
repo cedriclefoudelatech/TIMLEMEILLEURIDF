@@ -13,10 +13,10 @@ const {
     getMarketplaceProducts, getMarketplaceProduct, getAvailableMarketplaceProducts,
     saveMarketplaceProduct, deleteMarketplaceProduct, updateMarketplaceStock,
     createMarketplaceOrder, getMarketplaceOrders, getMarketplaceOrder, updateMarketplaceOrderStatus,
-    getAppSettings, uploadMediaFromUrl
+    getAppSettings, uploadMediaFromUrl, getOrder, updateOrderStatus, getSupplierDeliveryMode
 } = require('../services/database');
 const { safeEdit, esc, trackIntermediateMessage } = require('../services/utils');
-const { notifyAdmins, sendMessageToUser } = require('../services/notifications');
+const { notifyAdmins, sendMessageToUser, notifyLivreurs } = require('../services/notifications');
 const { createPersistentMap } = require('../services/persistent_map');
 
 // État pour le flow d'ajout de produit fournisseur
@@ -68,8 +68,10 @@ function setupMarketplaceHandlers(bot) {
     // Menu principal magasin fournisseur
     bot.action('mp_my_shop', async (ctx) => {
         await ctx.answerCbQuery();
+        const userId = `telegram_${ctx.from.id}`;
+        const user = await require('../services/database').getUser(userId);
         const supplier = await getSupplierByTelegramId(String(ctx.from.id));
-        if (!supplier) return safeEdit(ctx, '❌ Vous n\'êtes pas enregistré comme fournisseur.', Markup.inlineKeyboard([[Markup.button.callback('◀️ Menu', 'main_menu')]]));
+        if (!supplier) return safeEdit(ctx, t(user, 'msg_not_supplier', '❌ Vous n\'êtes pas enregistré comme fournisseur.'), Markup.inlineKeyboard([[Markup.button.callback(t(user, 'btn_back_quick_menu', '◀️ Menu'), 'main_menu')]]));
 
         const [products, retailProducts, orders] = await Promise.all([
             getMarketplaceProducts(supplier.id),
@@ -79,30 +81,66 @@ function setupMarketplaceHandlers(bot) {
         const available = products.filter(p => p.is_available && p.stock > 0);
         const pendingOrders = orders.filter(o => ['pending', 'accepted'].includes(o.status));
 
-        let text = `🏪 <b>Mon Magasin</b>\n\n`;
+        let text = t(user, 'label_my_shop', `🏪 <b>Mon Magasin</b>`) + `\n\n`;
         text += `👤 <b>${esc(supplier.name)}</b>\n`;
-        text += `📦 Marketplace : ${products.length} produit(s) | ${available.length} dispo\n`;
-        text += `🛒 Bot Client : ${retailProducts.length} produit(s)\n`;
-        if (pendingOrders.length > 0) text += `🔔 <b>${pendingOrders.length} commande(s) marketplace !</b>\n`;
+        text += t(user, 'label_marketplace_products', `📦 Marketplace`) + ` : ${products.length} produit(s) | ${available.length} dispo\n`;
+        text += t(user, 'label_retail_bot_products', `🛒 Bot Client`) + ` : ${retailProducts.length} produit(s)\n`;
+        if (pendingOrders.length > 0) text += `🔔 <b>${pendingOrders.length} ` + t(user, 'label_orders_plural', `commande(s)`) + ` marketplace !</b>\n`;
         
         const pickupIcon = supplier.allow_pickup !== false ? '✅' : '❌';
         const deliveryIcon = supplier.allow_delivery !== false ? '✅' : '❌';
-        text += `\n📍 Retrait : ${pickupIcon} | 🚚 Livraison : ${deliveryIcon}\n`;
-        text += `\n<i>Gérez votre boutique directement depuis Telegram</i>`;
+        text += `\n📍 ` + t(user, 'label_pickup', `Retrait`) + ` : ${pickupIcon} | 🚚 ` + t(user, 'label_delivery', `Livraison`) + ` : ${deliveryIcon}\n`;
+        text += `\n<i>` + t(user, 'msg_manage_shop_from_tg', `Gérez votre boutique directement depuis Telegram`) + `</i>`;
 
         await safeEdit(ctx, text, Markup.inlineKeyboard([
-            [Markup.button.callback('📦 Produits Marché', 'mp_my_products'), Markup.button.callback('➕ Ajouter Marché', 'mp_add_product')],
-            [Markup.button.callback('🛒 Mes Produits Bot', 'mp_retail_products')],
-            [Markup.button.callback(`📋 Commandes${pendingOrders.length ? ' ('+pendingOrders.length+')' : ''}`, 'mp_my_orders'), Markup.button.callback('⚙️ Réglages', 'mp_shop_settings')],
-            [Markup.button.callback('📊 Stats', 'mp_my_stats'), Markup.button.callback('◀️ Retour', 'supplier_menu')]
+            [Markup.button.callback(t(user, 'label_mp_products_btn', '📦 Produits Marché'), 'mp_my_products'), Markup.button.callback(t(user, 'btn_add_marketplace', '➕ Ajouter Marketplace'), 'mp_add_product')],
+            [Markup.button.callback(t(user, 'label_bot_products_btn', '🛒 Produits Bot'), 'mp_retail_products'), Markup.button.callback(t(user, 'btn_propose_retail', '🤝 Propose (Bot)'), 'mp_add_retail_product')],
+            [Markup.button.callback(`📋 ` + t(user, 'label_orders_btn', 'Commandes') + `${pendingOrders.length ? ' ('+pendingOrders.length+')' : ''}`, 'mp_my_orders'), Markup.button.callback(t(user, 'btn_shop_settings', '⚙️ Réglages'), 'mp_shop_settings')],
+            [Markup.button.callback(t(user, 'label_admin_chat_btn', '💬 Support Admin'), 'help_chat_admin')],
+            [Markup.button.callback(t(user, 'btn_shop_stats', '📊 Stats'), 'mp_my_stats'), Markup.button.callback(t(user, 'btn_shop_guide', '❓ Guide Shop'), 'mp_shop_guide')],
+            [Markup.button.callback(t(user, 'btn_back_menu', '◀️ Retour Menu'), 'main_menu')]
         ]));
     });
 
+    bot.on('text', async (ctx, next) => {
+        const id = String(ctx.from.id);
+        const text = ctx.message.text ? ctx.message.text.trim() : '';
+
+        if (text === '/guide') {
+            await ctx.deleteMessage().catch(() => {});
+            return showShopGuide(ctx);
+        }
+        return next();
+    });
+
+    bot.action('mp_shop_guide', async (ctx) => {
+        await ctx.answerCbQuery();
+        return showShopGuide(ctx);
+    });
+
+    async function showShopGuide(ctx) {
+        const userId = `telegram_${ctx.from.id}`;
+        const user = await require('../services/database').getUser(userId);
+        const text = t(user, 'label_shop_guide', `📖 <b>GUIDE DES BOUTONS (SHOP)</b>`) + `\n\n` +
+            t(user, 'label_shop_guide_wholesale', `📦 <b>Produits Marché</b> : Vos stocks en <b>GROS</b> que vous proposez à l'administration.`) + `\n` +
+            t(user, 'label_shop_guide_retail', `🛒 <b>Produits Bot</b> : Les produits du menu client général qui vous sont liés.`) + `\n\n` +
+            t(user, 'label_shop_guide_orders', `📋 <b>Commandes</b> : Suivre vos ventes et valider quand un produit est "Prêt".`) + `\n` +
+            t(user, 'label_shop_guide_settings', `⚙️ <b>Réglages</b> : Activer ou désactiver le Retrait / la Livraison.`) + `\n\n` +
+            t(user, 'label_admin_chat_btn', `💬 <b>Support Admin</b>`) + ` : ` + t(user, 'msg_guide_chat_desc', `Ouvrir un chat Direct avec l'administrateur principal.`) + `\n` +
+            t(user, 'btn_shop_stats', `📊 <b>Stats</b>`) + ` : ` + t(user, 'msg_guide_stats_desc', `Voir votre chiffre d'affaires et historique.`);
+
+        return safeEdit(ctx, text, Markup.inlineKeyboard([
+            [Markup.button.callback(t(user, 'btn_back_to_shop', '◀️ Retour au Magasin'), 'mp_my_shop')]
+        ]));
+    }
+
     bot.action('mp_quit_confirm', async (ctx) => {
         await ctx.answerCbQuery();
-        await safeEdit(ctx, '⚠️ <b>Êtes-vous sûr ?</b>\n\nVotre boutique ne sera plus visible et vous ne recevrez plus de commandes.', Markup.inlineKeyboard([
-            [Markup.button.callback('✅ Oui, quitter', 'mp_quit_final')],
-            [Markup.button.callback('◀️ Retour', 'mp_my_shop')]
+        const userId = `telegram_${ctx.from.id}`;
+        const user = await require('../services/database').getUser(userId);
+        await safeEdit(ctx, t(user, 'msg_quit_shop_confirm_text', '⚠️ <b>Êtes-vous sûr ?</b>\n\nVotre boutique ne sera plus visible et vous ne recevrez plus de commandes.'), Markup.inlineKeyboard([
+            [Markup.button.callback(t(user, 'btn_confirm_quit', '✅ Oui, quitter'), 'mp_quit_final')],
+            [Markup.button.callback(t(user, 'btn_back', '◀️ Retour'), 'mp_my_shop')]
         ]));
     });
 
@@ -122,29 +160,29 @@ function setupMarketplaceHandlers(bot) {
     // Liste des produits du fournisseur
     bot.action('mp_my_products', async (ctx) => {
         await ctx.answerCbQuery();
+        const userId = `telegram_${ctx.from.id}`;
+        const user = await require('../services/database').getUser(userId);
         const supplier = await getSupplierByTelegramId(String(ctx.from.id));
-        if (!supplier) return safeEdit(ctx, '❌ Accès refusé.');
+        if (!supplier) return safeEdit(ctx, '❌ DENIED');
 
         const products = await getMarketplaceProducts(supplier.id);
         if (products.length === 0) {
-            return safeEdit(ctx, '📭 Votre magasin est vide.\nAjoutez votre premier produit !', Markup.inlineKeyboard([
-                [Markup.button.callback('➕ Ajouter un Produit', 'mp_add_product')],
-                [Markup.button.callback('◀️ Retour', 'mp_my_shop')]
+            return safeEdit(ctx, t(user, 'msg_shop_empty', '📭 Votre magasin est vide.\nAjoutez votre premier produit !'), Markup.inlineKeyboard([
+                [Markup.button.callback(t(user, 'btn_add_product', '➕ Ajouter un Produit'), 'mp_add_product')],
+                [Markup.button.callback(t(user, 'btn_back', '◀️ Retour'), 'mp_my_shop')]
             ]));
         }
 
-        let text = `📦 <b>Mes Produits Marché (${products.length})</b>\n\n`;
-        text += `Ces produits sont destinés à l'administration.\n\n`;
+        let text = t(user, 'label_my_products_wholesale', `📦 <b>Mes Produits Marché ({count})</b>`, { count: products.length }) + `\n\n`;
+        text += t(user, 'msg_wholesale_desc', `Ces produits sont destinés à l'administration.\n\n`);
         
-        const buttons = [];
-        for (let i = 0; i < products.length; i += 2) {
-            const row = [Markup.button.callback(`✏️ ${products[i].name.substring(0, 18)}`, `mp_edit_${products[i].id}`)];
-            if (i + 1 < products.length) {
-                row.push(Markup.button.callback(`✏️ ${products[i+1].name.substring(0, 18)}`, `mp_edit_${products[i+1].id}`));
-            }
-            buttons.push(row);
-        }
-        buttons.push([Markup.button.callback('➕ Ajouter', 'mp_add_product'), Markup.button.callback('◀️ Retour', 'mp_my_shop')]);
+        const chunk = (arr, size) => Array.from({ length: Math.ceil(arr.length / size) }, (v, i) => arr.slice(i * size, i * size + size));
+        const productRows = chunk(products, 2);
+        
+        const buttons = productRows.map(row => row.map(p => {
+            return Markup.button.callback(`✏️ ${p.name.substring(0, 18)}`, `mp_edit_${p.id}`);
+        }));
+        buttons.push([Markup.button.callback(t(user, 'btn_add', '➕ Ajouter'), 'mp_add_product'), Markup.button.callback(t(user, 'btn_back', '◀️ Retour'), 'mp_my_shop')]);
 
         await safeEdit(ctx, text, Markup.inlineKeyboard(buttons));
     });
@@ -165,14 +203,12 @@ function setupMarketplaceHandlers(bot) {
         let text = `🛒 <b>Mes Produits Client (${products.length})</b>\n\n`;
         text += `Ces produits apparaissent dans le catalogue général du bot.\n\n`;
         
-        const buttons = [];
-        for (let i = 0; i < products.length; i += 2) {
-            const row = [Markup.button.callback(`${products[i].name.substring(0, 18)}`, `mp_retail_view_${products[i].id}`)];
-            if (i + 1 < products.length) {
-                row.push(Markup.button.callback(`${products[i+1].name.substring(0, 18)}`, `mp_retail_view_${products[i+1].id}`));
-            }
-            buttons.push(row);
-        }
+        const chunk = (arr, size) => Array.from({ length: Math.ceil(arr.length / size) }, (v, i) => arr.slice(i * size, i * size + size));
+        const productRows = chunk(products, 2);
+        
+        const buttons = productRows.map(row => row.map(p => {
+             return Markup.button.callback(`${p.name.substring(0, 18)}`, `mp_retail_view_${p.id}`);
+        }));
         buttons.push([Markup.button.callback('◀️ Retour', 'mp_my_shop')]);
 
         await safeEdit(ctx, text, Markup.inlineKeyboard(buttons));
@@ -181,20 +217,46 @@ function setupMarketplaceHandlers(bot) {
     // Vue simplifiée d'un produit retail
     bot.action(/^mp_retail_view_(.+)$/, async (ctx) => {
         await ctx.answerCbQuery();
+        const userId = `telegram_${ctx.from.id}`;
+        const user = await require('../services/database').getUser(userId);
         const pId = ctx.match[1];
-        const { getProduct } = require('../services/database');
-        const p = await getProduct(pId);
-        if (!p) return safeEdit(ctx, '❌ Produit introuvable.', Markup.inlineKeyboard([[Markup.button.callback('◀️ Retour', 'mp_retail_products')]]));
+        const { getProducts } = require('../services/database');
+        const all = await getProducts(true); // include inactive
+        const p = all.find(x => String(x.id) === String(pId));
+        
+        if (!p) return safeEdit(ctx, '❌ NOT FOUND', Markup.inlineKeyboard([[Markup.button.callback(t(user, 'btn_back', '◀️ Retour'), 'mp_retail_products')]]));
 
+        const is_active = p.is_active !== false && (typeof p.stock !== 'number' || p.stock > 0);
         let text = `🛒 <b>${esc(p.name)}</b> (Catalogue Bot)\n\n`;
-        text += `💰 Prix: ${p.price}€\n`;
-        text += `📦 Disponibilité: ${p.is_available ? '✅ En vente' : '❌ Masqué'}\n`;
-        text += `🏷 Catégorie: ${esc(p.category || 'Aucune')}\n\n`;
-        text += `<i>Note: Ces produits sont gérés par l\'administrateur depuis le dashboard.</i>`;
+        text += t(user, 'label_price_unit', `💰 Prix:`) + ` ${p.price}€\n`;
+        text += t(user, 'label_availability', `📦 Disponibilité:`) + ` ${is_active ? t(user, 'label_on_sale', '✅ En vente') : t(user, 'label_out_of_stock', '❌ Masqué/Rupture')}\n`;
+        text += t(user, 'label_category', `🏷 Catégorie:`) + ` ${esc(p.category || 'Aucune')}\n\n`;
+        text += `<i>` + t(user, 'msg_retail_pause_hint', `Vous pouvez mettre en pause ce produit s\'il est en rupture de stock.`) + `</i>`;
 
         await safeEdit(ctx, text, Markup.inlineKeyboard([
-             [Markup.button.callback('◀️ Retour Liste', 'mp_retail_products'), Markup.button.callback('🏠 Menu Magasin', 'mp_my_shop')]
+             [Markup.button.callback(is_active ? t(user, 'btn_pause_label', '⏸ Mettre en pause') : t(user, 'btn_resume_label', '▶️ Remettre en vente'), `mp_retail_toggle_${p.id}`)],
+             [Markup.button.callback(t(user, 'btn_back_list', '◀️ Retour Liste'), 'mp_retail_products'), Markup.button.callback(t(user, 'btn_shop_home', '🏠 Menu Magasin'), 'mp_my_shop')]
         ]));
+    });
+
+    bot.action(/^mp_retail_toggle_(.+)$/, async (ctx) => {
+        const pId = ctx.match[1];
+        const { getProducts, saveProduct } = require('../services/database');
+        const all = await getProducts(true);
+        const p = all.find(x => String(x.id) === String(pId));
+        if (!p) return ctx.answerCbQuery('Produit introuvable.');
+
+        const newStatus = (p.is_active === false) ? true : false;
+        await saveProduct({ id: p.id, is_active: newStatus });
+        
+        await ctx.answerCbQuery(`Produit ${newStatus ? 'activé' : 'désactivé'} !`);
+        // Re-afficher la vue
+        ctx.match = [null, p.id];
+        const handler = bot.actions.find(a => a.re instanceof RegExp && a.re.test(`mp_retail_view_${p.id}`));
+        // Simplement relancer mp_retail_view
+        const trigger = `mp_retail_view_${p.id}`;
+        // Fallback: manually call
+        return bot.handleUpdate(ctx); // Bit hacky but should work if we let telegraf handle it
     });
 
     // Réglages boutique fournisseur
@@ -352,13 +414,20 @@ function setupMarketplaceHandlers(bot) {
 
     // ======= FLOW AJOUT PRODUIT =======
 
-    bot.action('mp_add_product', async (ctx) => {
+    bot.action(['mp_add_product', 'mp_add_retail_product'], async (ctx) => {
         await ctx.answerCbQuery();
         const supplier = await getSupplierByTelegramId(String(ctx.from.id));
         if (!supplier) return safeEdit(ctx, '❌ Accès refusé.');
 
-        awaitingProductName.set(String(ctx.from.id), { supplierId: supplier.id });
-        await safeEdit(ctx, '➕ <b>Nouveau Produit</b>\n\n📛 Envoyez le <b>nom</b> du produit :', Markup.inlineKeyboard([
+        const target = ctx.callbackQuery.data === 'mp_add_retail_product' ? 'retail' : 'marketplace';
+        awaitingProductName.set(String(ctx.from.id), { 
+            supplierId: supplier.id, 
+            supplierName: supplier.name,
+            target 
+        });
+        
+        const typeStr = target === 'retail' ? 'Catalogue Bot (Partenariat)' : 'Marketplace (Gros)';
+        await safeEdit(ctx, `➕ <b>Nouveau Produit — ${typeStr}</b>\n\n📛 Envoyez le <b>nom</b> du produit :`, Markup.inlineKeyboard([
             [Markup.button.callback('❌ Annuler', 'mp_my_shop')]
         ]));
     });
@@ -502,7 +571,88 @@ function setupMarketplaceHandlers(bot) {
         ]));
     });
 
-    // Rejeter une commande
+    // ========== RETAIL ORDERS (Bot Client) ==========
+
+    bot.action(/^retail_accept_(.+)$/, async (ctx) => {
+        const orderId = ctx.match[1].trim();
+        await ctx.answerCbQuery('✅ Commande acceptée !');
+
+        const [order, supplier] = await Promise.all([
+            getOrder(orderId),
+            getSupplierByTelegramId(String(ctx.from.id))
+        ]);
+
+        if (!order) return ctx.reply("❌ Commande introuvable.");
+
+        await updateOrderStatus(orderId, 'supplier_accepted');
+
+        // Notifier l'admin
+        await notifyAdmins(null, `🏪 <b>${supplier.name}</b>\n✅ Commande <b>#${orderId.slice(-5)}</b> acceptée.\n\nLe client a été notifié.`);
+
+        // Notifier le client
+        const clientMsg = `⭐️ <b>Bonne nouvelle !</b>\n\nVotre commande <b>#${orderId.slice(-5)}</b> a été validée par notre partenaire <b>${supplier.name}</b>.\n\nElle est en cours de préparation. 📦`;
+        await sendMessageToUser(order.user_id, clientMsg);
+
+        // UI Fournisseur
+        const text = (ctx.message.text || '').replace('NOUVELLE COMMANDE', 'COMMANDE ACCEPTÉE') + `\n\n✅ <b>Statut : Préparation</b>`;
+        await safeEdit(ctx, text, Markup.inlineKeyboard([
+            [Markup.button.callback('📦 Marquer comme PRÊTE', `retail_ready_${orderId}`)],
+            [Markup.button.callback('📋 Mes Commandes', 'mp_my_orders')]
+        ]));
+    });
+
+    bot.action(/^retail_ready_(.+)$/, async (ctx) => {
+        const orderId = ctx.match[1].trim();
+        await ctx.answerCbQuery('📦 Commande prête !');
+
+        const [order, supplier] = await Promise.all([
+            getOrder(orderId),
+            getSupplierByTelegramId(String(ctx.from.id))
+        ]);
+
+        if (!order || !supplier) return ctx.reply("❌ Erreur (Commande ou Fournisseur introuvable).");
+
+        await updateOrderStatus(orderId, 'supplier_ready');
+
+        const deliveryMode = await getSupplierDeliveryMode(supplier.id);
+
+        // Notifier l'admin
+        const adminMsg = `🏪 <b>${supplier.name}</b>\n📦 Commande <b>#${orderId.slice(-5)}</b> PRÊTE !\n🚚 Mode : ${deliveryMode === 'admin' ? 'LIVREUR ADMIN' : 'LIVRAISON FOURNISSEUR'}`;
+        await notifyAdmins(null, adminMsg);
+
+        if (deliveryMode === 'admin') {
+             // Notifier les livreurs
+             const dbSettings = await getAppSettings();
+             const msgLivreur = `🆕 <b>COMMANDE PRÊTE (#${orderId.slice(-5)})</b>\n\n📍 Récupération : <b>${supplier.name}</b>\n📍 Livraison : ${order.address}\n💰 Total : <b>${order.total_price}€</b>\n\n<i>Cliquez ci-dessous pour lancer la collecte :</i>`;
+             await notifyLivreurs(null, msgLivreur, { 
+                 reply_markup: Markup.inlineKeyboard([[Markup.button.callback('🛒 Prendre la course', `take_order_${orderId}`)]]).reply_markup 
+             });
+        } else {
+             // Statut passage en "Livreur Fournisseur"
+             await updateOrderStatus(orderId, 'taken', { 
+                 livreur_name: `Interne (${supplier.name})`,
+                 livreur_id: `supplier_${supplier.id}`
+             });
+        }
+
+        const text = (ctx.message.text || '').replace('COMMANDE ACCEPTÉE', 'COMMANDE PRÊTE') + `\n\n📦 <b>Statut : Prête / En attente collecte</b>`;
+        await safeEdit(ctx, text, Markup.inlineKeyboard([[Markup.button.callback('📋 Mes Commandes', 'mp_my_orders')]]));
+    });
+
+    bot.action(/^retail_reject_(.+)$/, async (ctx) => {
+        const orderId = ctx.match[1].trim();
+        await ctx.answerCbQuery('❌ Commande refusée.');
+        
+        const order = await getOrder(orderId);
+        if (order) {
+            await updateOrderStatus(orderId, 'cancelled', { notes: 'Refusée par le fournisseur' });
+            await sendMessageToUser(order.user_id, `❌ <b>Commande annulée</b>\n\nNous sommes désolés, notre partenaire n'a pas pu valider votre commande <b>#${orderId.slice(-5)}</b>.`);
+        }
+
+        await safeEdit(ctx, `❌ <b>Commande #${orderId.slice(-5)} refusée</b>`, Markup.inlineKeyboard([[Markup.button.callback('📋 Mes Commandes', 'mp_my_orders')]]));
+    });
+
+    // Rejeter une commande (Marketplace)
     bot.action(/^mp_reject_(.+)$/, async (ctx) => {
         await ctx.answerCbQuery();
         const orderId = ctx.match[1];
@@ -650,7 +800,12 @@ function setupMarketplaceHandlers(bot) {
             }
             buttons.push(row);
         }
-        buttons.push([Markup.button.callback('🛒 Mon Panier', 'mp_admin_cart'), Markup.button.callback('◀️ Retour', 'mp_browse')]);
+        buttons.push([Markup.button.callback('🛒 Mon Panier', 'mp_admin_cart'), Markup.button.callback('📋 Mes Commandes', 'mp_admin_orders')]);
+        if (supplier.telegram_id) {
+            const targetId = supplier.telegram_id.startsWith('telegram_') ? supplier.telegram_id : `telegram_${supplier.telegram_id}`;
+            buttons.push([Markup.button.callback('💬 Contacter le fournisseur', `admin_chat_user_${targetId}`)]);
+        }
+        buttons.push([Markup.button.callback('◀️ Retour', 'mp_browse')]);
 
         await safeEdit(ctx, text, Markup.inlineKeyboard(buttons));
     });
@@ -837,7 +992,8 @@ function setupMarketplaceHandlers(bot) {
                 orderDetails += `\n💰 <b>Total : ${total.toFixed(2)}€</b>\n\n`;
                 orderDetails += `⏳ <b>Statut : EN ATTENTE</b>`;
 
-                await sendMessageToUser(`telegram_${supplier.telegram_id}`,
+                const targetId = supplier.telegram_id.startsWith('telegram_') ? supplier.telegram_id : `telegram_${supplier.telegram_id}`;
+                await sendMessageToUser(targetId,
                     orderDetails,
                     {
                         reply_markup: {
@@ -1105,10 +1261,27 @@ function setupMarketplaceHandlers(bot) {
             return true;
         } catch (e) {
             console.error('Error relaying supplier message:', e);
-            await ctx.reply(`❌ <b>Échec de l'envoi :</b> ${e.message}`);
             return true;
         }
     }
+
+    bot.action(/^admin_val_mp_(.+)$/, async (ctx) => {
+        if (!ctx.from.id) return;
+        const pId = ctx.match[1];
+        await require('../services/database').validateMarketplaceProduct(pId, true);
+        await ctx.answerCbQuery('Produit validé ✅');
+        await ctx.editMessageText(ctx.callbackQuery.message.text + '\n\n✅ <b>VALIDÉ !</b>');
+    });
+
+    bot.action(/^admin_promote_mp_(.+)$/, async (ctx) => {
+        if (!ctx.from.id) return;
+        const pId = ctx.match[1];
+        try {
+            await require('../services/database').promoteMarketplaceProduct(pId);
+            await ctx.answerCbQuery('Promu au catalogue client ! 🚀');
+            await ctx.editMessageText(ctx.callbackQuery.message.text + '\n\n🚀 <b>PROMU AU CATALOGUE !</b>');
+        } catch (e) { await ctx.answerCbQuery('Erreur : ' + e.message, { show_alert: true }); }
+    });
 
     async function handlePhotoUpload(ctx, productId) {
         try {
@@ -1231,29 +1404,74 @@ function setupMarketplaceHandlers(bot) {
 
     async function finalizeProduct(ctx, data) {
         try {
-            const product = await saveMarketplaceProduct({
-                supplier_id: data.supplierId,
-                name: data.name,
-                price: data.price,
-                stock: data.stock || 0,
-                description: data.description || '',
-                image_url: data.image_url || '',
-                category: data.category || '',
-                is_available: (data.stock || 0) > 0
-            });
+            const isRetail = data.target === 'retail'; // Nouveau flag pour partenariat
+            
+            if (isRetail) {
+                // Submission pour le catalogue principal (Retail)
+                const { saveProduct } = require('../services/database');
+                const product = await saveProduct({
+                    name: data.name,
+                    price: data.price,
+                    stock: data.stock || 0,
+                    description: data.description || '',
+                    image_url: data.image_url || '',
+                    category: data.category || '',
+                    is_available: false, // EN ATTENTE DE VALIDATION POUR RETAIL
+                    supplier_id: data.supplierId
+                });
 
-            return safeEdit(ctx, `✅ <b>Produit créé !</b>\n\n` +
-                `📛 ${esc(data.name)}\n` +
-                `💰 ${data.price}€\n` +
-                `📦 Stock : ${data.stock || 0}\n` +
-                (data.category ? `🏷 ${esc(data.category)}\n` : '') +
-                (data.image_url ? `📸 Photo : ✅\n` : '') +
-                `\n<i>Votre produit est maintenant visible dans la marketplace !</i>`,
-                Markup.inlineKeyboard([
-                    [Markup.button.callback('➕ Ajouter un autre', 'mp_add_product'), Markup.button.callback('📦 Mes Produits', 'mp_my_products')],
-                    [Markup.button.callback('◀️ Mon Magasin', 'mp_my_shop')]
-                ])
-            );
+                const adminMsg = `🤝 <b>PROPOSITION PARTENARIAT (Retail)</b>\n\n` +
+                    `🏪 Fournisseur : <b>${esc(data.supplierName || 'Inconnu')}</b>\n` +
+                    `📦 Produit : <b>${esc(data.name)}</b>\n` +
+                    `💰 Prix : <b>${data.price}€</b>\n\n` +
+                    `<i>Ce produit est masqué (is_available=false) dans le catalogue client jusqu'à votre validation DNS le dashboard.</i>`;
+
+                await notifyAdmins(bot, adminMsg, {
+                    reply_markup: {
+                        inline_keyboard: [[{ text: '⚙️ Gérer dans Dashboard', url: process.env.DASHBOARD_URL || 'https://dashboard.example.com' }]]
+                    }
+                });
+
+                return safeEdit(ctx, `✅ <b>Proposition envoyée !</b>\n\n` +
+                    `📛 ${esc(data.name)}\n` +
+                    `💰 ${data.price}€\n\n` +
+                    `⏳ <b>Votre produit a été soumis pour le catalogue client. L'administrateur doit le valider avant qu'il ne soit visible publiquement.</b>`,
+                    Markup.inlineKeyboard([
+                        [Markup.button.callback('◀️ Mon Magasin', 'mp_my_shop')]
+                    ])
+                );
+            } else {
+                // Marketplace standard : visible par défaut comme avant
+                const product = await saveMarketplaceProduct({
+                    supplier_id: data.supplierId,
+                    name: data.name,
+                    price: data.price,
+                    stock: data.stock || 0,
+                    description: data.description || '',
+                    image_url: data.image_url || '',
+                    category: data.category || '',
+                    is_available: (data.stock || 0) > 0,
+                    is_validated: true // Validé par défaut pour le gros
+                });
+
+                // Notifier l'admin par courtoisie
+                const adminMsg = `🆕 <b>NOUVEAU PRODUIT (Gros)</b>\n\n` +
+                    `🏪 Fournisseur : <b>${esc(data.supplierName || 'Inconnu')}</b>\n` +
+                    `📦 Produit : <b>${esc(data.name)}</b>\n` +
+                    `💰 Prix : <b>${data.price}€</b>`;
+                
+                await notifyAdmins(bot, adminMsg);
+
+                return safeEdit(ctx, `✅ <b>Produit créé !</b>\n\n` +
+                    `📛 ${esc(data.name)}\n` +
+                    `💰 ${data.price}€\n\n` +
+                    `📦 <i>Votre produit est maintenant visible dans la marketplace des administrateurs.</i>`,
+                    Markup.inlineKeyboard([
+                        [Markup.button.callback('➕ Ajouter un autre', 'mp_add_product'), Markup.button.callback('📦 Mes Produits', 'mp_my_products')],
+                        [Markup.button.callback('◀️ Mon Magasin', 'mp_my_shop')]
+                    ])
+                );
+            }
         } catch (e) {
             console.error('finalizeProduct error:', e);
             return safeEdit(ctx, '❌ Erreur lors de la création. Réessayez.', Markup.inlineKeyboard([

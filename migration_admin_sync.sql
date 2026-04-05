@@ -1,6 +1,6 @@
 -- ============================================================
 -- MIGRATION: FINAL SYNC TIM LE MEILLEUR IDF (v3)
--- Alligns settings with La Frappe IDF robust system
+-- Alligns settings with TIM LE MEILLEUR IDF robust system
 -- ============================================================
 
 -- 1. Ajout des colonnes de contrôle des modules dans bot_settings
