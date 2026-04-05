@@ -720,12 +720,12 @@ function setupAdminHandlers(bot) {
             try {
                 const res = await sendTelegramMessage(targetId, `👮 <b>MESSAGE DE L'ADMINISTRATION</b>\n\n${text ? `"${text}"` : (options.photo ? '📸 Photo reçue' : '🎥 Vidéo reçue')}`, options);
                 console.log(`[Admin-to-User] Send result for ${targetId}:`, res);
-                if (res && res.success) {
+                if (res) {
                     activeUserSessions.set(targetId, true);
                     return ctx.reply(`✅ <b>Message transmis au client !</b>\n\n<i>(Session ouverte : il pourra vous répondre directement)</i>`, { parse_mode: 'HTML' });
                 }
                 else {
-                    throw new Error(res?.error || "Bot could not send message");
+                    throw new Error("Bot could not send message");
                 }
             } catch (e) {
                 console.error(`[AdminChat-Error] FAILED to send to ${targetId}:`, e.message);

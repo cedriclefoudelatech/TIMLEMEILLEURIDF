@@ -2105,7 +2105,7 @@ async function getAppSettings() {
             }
 
             _settingsCache = settings;
-            _settingsExpire = Date.now() + 300000; // Cache valid for 5 minutes instead of 30s
+            _settingsExpire = Date.now() + 30000; // Cache valid for 30s for better reactivity
             return settings;
         } finally {
             _settingsPromise = null;
