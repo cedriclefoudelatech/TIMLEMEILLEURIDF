@@ -732,7 +732,6 @@ function createServer() {
                         authenticatedAdmins.delete(String(platformId).match(/\d+/g)?.[0]);
                     }
                 }
-                await authenticatedAdmins.save();
             }
             
             res.json({ success: true, ids: currentIds });
