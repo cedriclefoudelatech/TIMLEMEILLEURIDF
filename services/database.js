@@ -2135,7 +2135,7 @@ async function updateAppSettings(settings) {
         console.error('❌ Error updating settings:', error.message, '— Trying partial save...');
         // Fallback: save only core fields that always exist
         const coreFields = [
-            'bot_name', 'welcome_message', 'admin_password', 'admin_telegram_id',
+            'bot_name', 'welcome_message', 'admin_password', 'admin_telegram_id', 'moderator_telegram_id', 'livreur_telegram_id',
             'dashboard_url', 'payment_modes', 'maintenance_mode', 'maintenance_message',
             'private_contact_url', 'private_contact_wa_url', 'channel_url', 'accent_color', 'bot_description',
             'label_contact', 'label_channel', 'ui_icon_contact', 'ui_icon_channel',
@@ -2143,7 +2143,8 @@ async function updateAppSettings(settings) {
             'label_catalog', 'ui_icon_catalog', 'label_my_orders', 'ui_icon_orders',
             'payment_modes_config', 'msg_order_received_admin', 'msg_order_confirmed_client',
             'force_subscribe', 'force_subscribe_channel_id', 'priority_delivery_enabled', 'priority_delivery_price',
-            'auto_approve_new', 'notify_on_approval'
+            'auto_approve_new', 'notify_on_approval', 'list_admins', 'enable_telegram', 'enable_whatsapp', 
+            'enable_marketplace', 'label_livreur_space', 'msg_auto_timer'
         ];
         const coreFiltered = {};
         for (const key of coreFields) {
