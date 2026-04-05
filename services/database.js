@@ -1891,7 +1891,7 @@ const SETTINGS_DEFAULTS = {
     welcome_message: 'Bienvenue sur TIM LE MEILLEUR Bot ! 🚀 Votre service de livraison express.',
     welcome_message_enabled: true,
     admin_password: 'admin',
-    admin_telegram_id: '1183134641',
+    admin_telegram_id: '',
     moderator_telegram_id: '',
     dashboard_url: process.env.DASHBOARD_URL || '',
     private_contact_url: 'https://t.me/TIMLEMEILLEURx',

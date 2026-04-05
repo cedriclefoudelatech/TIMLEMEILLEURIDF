@@ -33,37 +33,49 @@ async function initAdminState() {
 }
 
 async function isAdmin(ctx) {
-    const currentUserId = String(ctx.from.id).match(/\d+/g)?.[0];
-    if (authenticatedAdmins.has(currentUserId)) return true;
+    const rawId = String(ctx?.from?.id || '');
+    if (!rawId) return false;
 
-    const settings = ctx.state.settings || (await getAppSettings()) || {};
+    const currentUserId = rawId.match(/\d+/g)?.[0];
+    if (!currentUserId) return false;
+
+    if (authenticatedAdmins.has(currentUserId)) {
+        // console.log(`[isAdmin] Authorized via session cache: ${currentUserId}`);
+        return true;
+    }
+
+    const settings = ctx.state?.settings || (await getAppSettings()) || {};
     
-    // Extract IDs from settings (can be comma-separated string or array)
-    const adminIds = String(settings.admin_telegram_id || '')
-        .match(/\d+/g) || [];
-    
-    // Also check list_admins (extra admins)
+    // Extract IDs from settings
+    const adminIds = String(settings.admin_telegram_id || '').match(/\d+/g) || [];
     const extraAdmins = (Array.isArray(settings.list_admins) ? settings.list_admins : [])
         .map(id => String(id).match(/\d+/g)?.[0])
         .filter(Boolean);
 
-    // ALWAYS include the one from .env for safety
     const envAdmin = String(process.env.ADMIN_TELEGRAM_ID || '').match(/\d+/g)?.[0];
-
     const allAdmins = [...adminIds, ...extraAdmins];
     if (envAdmin) allAdmins.push(envAdmin);
 
-    // Check by ID
+    // console.log(`[isAdmin] Checking ${currentUserId} against list: ${JSON.stringify(allAdmins)}`);
+
     if (allAdmins.includes(currentUserId)) {
-        authenticatedAdmins.set(currentUserId, true); // Auto-auth for root
+        console.log(`[isAdmin] Authorized via Settings/Env: ${currentUserId}`);
+        authenticatedAdmins.set(currentUserId, true);
         return true;
     }
 
-    // Check by DB status if available
+    // Check by DB status
     const user = ctx.state?.user || ctx.user;
     if (user && user.is_admin) {
+        console.log(`[isAdmin] Authorized via DB flag is_admin=true: ${currentUserId}`);
         authenticatedAdmins.set(currentUserId, true);
         return true;
+    }
+
+    // NOUVEAU: Si on arrive ici, l'utilisateur n'est PAS admin. 
+    // On s'assure qu'il n'est pas dans authenticatedAdmins (sécurité supplémentaire)
+    if (authenticatedAdmins.has(currentUserId)) {
+        authenticatedAdmins.delete(currentUserId);
     }
 
     return false;
