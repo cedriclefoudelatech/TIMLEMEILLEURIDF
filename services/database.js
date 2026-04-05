@@ -939,7 +939,7 @@ async function getOrder(orderId) {
 }
 
 async function getAvailableOrders(city = null) {
-    let q = supabase.from(COL_ORDERS).select('*').eq('status', 'pending');
+    let q = supabase.from(COL_ORDERS).select('*').in('status', ['pending', 'validated', 'supplier_ready', 'supplier_pending']);
     if (city && city !== 'all' && city !== 'non défini') {
         q = q.eq('city', city.toLowerCase());
     }
@@ -947,11 +947,15 @@ async function getAvailableOrders(city = null) {
     return (data || []).map(decryptOrder);
 }
 
-async function getAllOrders(limit = 1000) {
-    // We use a simple select + manual join to avoid "Missing relationship" warnings in Supabase
-    // when the Foreign Key isn't explicitly set in the schema cache.
-    const { data: rawOrders, error } = await supabase.from(COL_ORDERS)
-        .select('*')
+async function getAllOrders(limit = 1000, statusFilter = null) {
+    let q = supabase.from(COL_ORDERS).select('*');
+    
+    if (statusFilter) {
+        if (Array.isArray(statusFilter)) q = q.in('status', statusFilter);
+        else q = q.eq('status', statusFilter);
+    }
+
+    const { data: rawOrders, error } = await q
         .order('created_at', { ascending: false })
         .abortSignal(AbortSignal.timeout(DB_TIMEOUT))
         .limit(limit);

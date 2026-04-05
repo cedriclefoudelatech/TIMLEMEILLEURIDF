@@ -937,7 +937,8 @@ function setupOrderSystem(bot) {
                 text += t(user, 'label_loyalty', `🏆 Points :`) + ` <b>${user.loyalty_points || 0} pts</b>\n\n`;
             }
 
-            const activeOrders = orders.filter(o => o.status === 'pending' || o.status === 'taken');
+            const activeStatuses = ['pending', 'supplier_pending', 'supplier_accepted', 'supplier_ready', 'validated', 'taken'];
+            const activeOrders = orders.filter(o => activeStatuses.includes(o.status));
             const pastOrders = orders.filter(o => o.status === 'delivered' || o.status === 'cancelled').slice(0, 5);
             
             const buttons = [];
@@ -945,8 +946,14 @@ function setupOrderSystem(bot) {
             if (activeOrders.length > 0) {
                 text += t(user, 'msg_active_orders', `<b>🏃 Commandes en cours :</b>`) + `\n`;
                 activeOrders.forEach((o) => {
-                    const statusIcon = o.status === 'taken' ? '🚚' : '⏳';
-                    const statusLabel = o.status === 'taken' ? t(user, 'label_taken', 'En livraison') : t(user, 'label_pending', 'En attente');
+                    let statusIcon = '⏳';
+                    if (o.status === 'taken') statusIcon = '🛵';
+                    else if (o.status === 'validated' || o.status === 'supplier_ready') statusIcon = '📦';
+                    
+                    let statusLabel = t(user, 'label_pending', 'En attente');
+                    if (o.status === 'taken') statusLabel = t(user, 'label_taken', 'En livraison');
+                    else if (o.status === 'validated' || o.status === 'supplier_ready') statusLabel = t(user, 'label_ready', 'Prêt / Validé');
+                    
                     text += `${statusIcon} #${o.id.slice(-5)} - ${o.product_name} (${statusLabel})\n`;
                     buttons.push([Markup.button.callback(t(user, 'btn_manage_order', `🔍 Gérer #${o.id.slice(-5)}`, { id: o.id.slice(-5) }), `view_order_${o.id}`)]);
                 });
@@ -1464,8 +1471,9 @@ function setupOrderSystem(bot) {
         // ou le client (pour le suivi).
         const isLivreurRole = user?.is_livreur;
         
-        // Si c'est un livreur qui regarde une commande "pending", on lui montre le menu d'acceptation
-        if (isLivreurRole && (order.status === 'pending' || order.status === 'supplier_pending')) {
+        // Si c'est un livreur qui regarde une commande disponible, on lui montre le menu d'acceptation
+        const availableStatuses = ['pending', 'supplier_pending', 'validated', 'supplier_ready'];
+        if (isLivreurRole && availableStatuses.includes(order.status)) {
             await ctx.answerCbQuery();
             const text = t(user, 'msg_order_mission_details_text', `📦 <b>Détails de la mission #${orderId.slice(-5)}</b>\n\n`, { id: orderId.slice(-5) }) +
                 t(user, 'label_product', `🛒 Produit :`) + ` <b>${order.product_name}</b>\n` +
@@ -1483,8 +1491,20 @@ function setupOrderSystem(bot) {
 
         // Sinon, c'est la vue CLIENT (suivi de commande)
         await ctx.answerCbQuery();
-        let statusEmoji = o => o.status === 'pending' ? '⏳' : (o.status === 'taken' ? '🚚' : (o.status === 'delivered' ? '✅' : '❌'));
-        let statusLabel = o => o.status === 'pending' ? t(user, 'label_pending', 'En attente') : (o.status === 'taken' ? t(user, 'label_taken', 'En cours') : (o.status === 'delivered' ? t(user, 'label_delivered', 'Livrée') : t(user, 'label_cancelled', 'Annulée')));
+        let statusEmoji = o => {
+            if (o.status === 'pending' || o.status === 'supplier_pending') return '⏳';
+            if (o.status === 'validated' || o.status === 'supplier_ready') return '📦';
+            if (o.status === 'taken') return '🚚';
+            if (o.status === 'delivered') return '✅';
+            return '❌';
+        };
+        let statusLabel = o => {
+            if (o.status === 'pending' || o.status === 'supplier_pending') return t(user, 'label_pending', 'En attente');
+            if (o.status === 'validated' || o.status === 'supplier_ready') return t(user, 'label_ready', 'Prêt / Validé');
+            if (o.status === 'taken') return t(user, 'label_taken', 'En cours');
+            if (o.status === 'delivered') return t(user, 'label_delivered', 'Livrée');
+            return t(user, 'label_cancelled', 'Annulée');
+        };
 
         let text = t(user, 'msg_order_tracking', `📦 <b>Suivi Commande #${orderId.slice(-5)}</b>`, { id: orderId.slice(-5) }) + `\n\n` +
             t(user, 'label_status', `🔹 Statut :`) + ` ${statusEmoji(order)} <b>${statusLabel(order)}</b>\n` +
@@ -1497,7 +1517,8 @@ function setupOrderSystem(bot) {
         }
         
         const feedbackBtn = order.status === 'delivered' ? [Markup.button.callback(t(user, 'btn_leave_review', '⭐ Laisser un avis'), `rate_order_${orderId}`)] : [];
-        const cancelBtn = (order.status === 'pending' || order.status === 'taken' || order.status === 'supplier_pending') ? [Markup.button.callback(t(user, 'btn_cancel_order_label', '❌ Annuler la commande'), `cancel_order_client_${orderId}`)] : [];
+        const cancelableStatuses = ['pending', 'taken', 'supplier_pending', 'supplier_accepted', 'validated', 'supplier_ready'];
+        const cancelBtn = cancelableStatuses.includes(order.status) ? [Markup.button.callback(t(user, 'btn_cancel_order_label', '❌ Annuler la commande'), `cancel_order_client_${orderId}`)] : [];
         const chatBtn = (order.status === 'taken') ? [Markup.button.callback(t(user, 'btn_chat_livreur', '💬 Parler au livreur'), `chat_livreur_${orderId}`)] : [];
 
         const buttons = [];
@@ -1515,7 +1536,10 @@ function setupOrderSystem(bot) {
         const settings = ctx.state?.settings || await getAppSettings();
         const order = await getOrder(orderId);
 
-        if (!order || order.status !== 'pending') return safeEdit(ctx, settings.msg_order_not_available || '❌ Cette commande n\'est plus disponible.', Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_generic || '◀️ Retour', 'show_available_orders')]]));
+        const availableStatuses = ['pending', 'supplier_pending', 'validated', 'supplier_ready'];
+        if (!order || !availableStatuses.includes(order.status)) {
+            return safeEdit(ctx, settings.msg_order_not_available || '❌ Cette commande n\'est plus disponible.', Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_generic || '◀️ Retour', 'show_available_orders')]]));
+        }
 
         await updateOrderStatus(orderId, 'taken', {
             livreur_id: `${ctx.platform}_${ctx.from.id}`,

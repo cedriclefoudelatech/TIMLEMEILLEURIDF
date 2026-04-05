@@ -263,21 +263,45 @@ function setupAdminHandlers(bot) {
         await safeEdit(ctx, msg, Markup.inlineKeyboard([[Markup.button.callback('◀️ Retour', 'admin_menu')]]));
     });
 
-    // Commandes
-    bot.action('admin_orders', async (ctx) => {
+    // Commandes (Dernières ou filtrées)
+    bot.action(/^admin_orders(_pending|_all)?$/, async (ctx) => {
         if (!(await isAdmin(ctx))) return ctx.answerCbQuery('❌ Auth requise');
         await ctx.answerCbQuery();
-        const orders = await getAllOrders(15);
-        if (orders.length === 0) return safeEdit(ctx, '📭 Aucune commande.', Markup.inlineKeyboard([[Markup.button.callback('◀️ Retour', 'admin_menu')]]));
+        
+        const filterStr = ctx.match[1] || '_all';
+        const isPendingOnly = filterStr === '_pending';
+        
+        const statusFilter = isPendingOnly ? ['pending', 'supplier_pending', 'validated', 'supplier_ready', 'taken'] : null;
+        const orders = await getAllOrders(40, statusFilter);
+        
+        if (orders.length === 0) {
+            const msg = isPendingOnly ? '📭 Aucun commande en cours / en attente.' : '📭 Aucune commande.';
+            return safeEdit(ctx, msg, Markup.inlineKeyboard([[Markup.button.callback('◀️ Retour', 'admin_menu')]]));
+        }
 
         const buttons = orders.map(o => {
             const shortId = o.id.slice(-6);
-            const icon = o.status === 'delivered' ? '✅' : (o.status === 'pending' ? '⏳' : '❌');
+            let icon = '❓';
+            if (o.status === 'delivered') icon = '✅';
+            else if (o.status === 'pending' || o.status === 'supplier_pending') icon = '⏳';
+            else if (o.status === 'taken') icon = '🛵';
+            else if (o.status === 'validated' || o.status === 'supplier_ready') icon = '📦';
+            else if (o.status === 'cancelled') icon = '❌';
+            
             return [Markup.button.callback(`${icon} #${shortId} - ${o.total_price}€ - ${o.first_name || 'Cl'}`, `ao_v_${o.id}`)];
         });
-        buttons.push([Markup.button.callback('◀️ Retour', 'admin_menu')]);
 
-        await safeEdit(ctx, '📦 <b>Dernières Commandes</b>\nCliquez pour gérer :', Markup.inlineKeyboard(buttons));
+        // Add filter toggle button at the top
+        if (isPendingOnly) {
+            buttons.unshift([Markup.button.callback('📜 VOIR TOUTES LES COMMANDES', 'admin_orders_all')]);
+        } else {
+            buttons.unshift([Markup.button.callback('⏳ VOIR UNIQUEMENT EN ATTENTE / COURS', 'admin_orders_pending')]);
+        }
+
+        buttons.push([Markup.button.callback('◀️ Retour Menu', 'admin_menu')]);
+
+        const title = isPendingOnly ? '⏳ <b>Commandes Actives / En attente</b>' : '📦 <b>Dernières Commandes</b>';
+        await safeEdit(ctx, `${title}\nCliquez pour gérer :`, Markup.inlineKeyboard(buttons));
     });
 
     bot.action(/^ao_v_(.+)$/, async (ctx) => {
@@ -298,7 +322,7 @@ function setupAdminHandlers(bot) {
         const buttons = [
             [Markup.button.callback('🤝 ASSIGNER LIVREUR', `ao_l_${orderId}`)],
             [Markup.button.callback('✅ LIVRÉE', `ao_s_${orderId}_delivered`), Markup.button.callback('❌ ANNULÉE', `ao_s_${orderId}_cancelled`)],
-            [Markup.button.callback('◀️ Retour', 'admin_orders')]
+            [Markup.button.callback('◀️ Retour aux commandes', 'admin_orders_pending')]
         ];
         await safeEdit(ctx, msg, Markup.inlineKeyboard(buttons));
     });
