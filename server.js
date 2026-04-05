@@ -704,12 +704,17 @@ function createServer() {
 
             let currentIds = String(settings[field] || '').split(/[\s,]+/).map(id => id.trim()).filter(id => id.length > 0);
 
+            const targetPid = String(platformId).match(/\d+/g)?.[0];
             if (action === 'add') {
-                if (!currentIds.includes(String(platformId))) {
+                const alreadyExists = currentIds.some(id => String(id).match(/\d+/g)?.[0] === targetPid);
+                if (!alreadyExists) {
                     currentIds.push(String(platformId));
                 }
             } else {
-                currentIds = currentIds.filter(id => id !== String(platformId));
+                currentIds = currentIds.filter(id => {
+                    const idDigits = String(id).match(/\d+/g)?.[0];
+                    return idDigits !== targetPid;
+                });
             }
 
             const updateData = { [field]: currentIds.join(', ') };
