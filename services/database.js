@@ -1929,6 +1929,8 @@ const SETTINGS_DEFAULTS = {
     priority_delivery_price: 15,
     auto_approve_new: false,
     notify_on_approval: false,
+    list_admins: [],
+    livreur_telegram_id: '',
     
     // UI Labels & Icons
     label_catalog: 'Catalogue',
