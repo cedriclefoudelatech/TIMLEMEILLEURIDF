@@ -1186,7 +1186,8 @@ function setupOrderSystem(bot) {
                     .replace('{pay_icon}', payIcon)
                     .replace('{pay_label}', payLabel);
 
-                const badge = isFirstOrder ? `\n🔥 <b>[ NOUVEAU CLIENT ]</b> 🔥\n` : '';
+                const platformBadge = ctx.platform === 'whatsapp' ? '📱 <b>[ WHATSAPP ]</b>' : '✈️ <b>[ TELEGRAM ]</b>';
+                const badge = (isFirstOrder ? `\n🔥 <b>[ NOUVEAU CLIENT ]</b> 🔥\n` : '') + platformBadge + '\n';
                 const baseNotifAdmin = (dbSettings.msg_order_received_admin || `🚨 <b>NOUVELLE COMMANDE !</b>\n{badge}\n👤 {client_name} (@{username})\n📦 {product_list}\n📍 {address}\n💰 {total}€ ({pay_icon} {pay_label})\n🔑 ID : <code>{order_id}</code>`)
                     .replace('{badge}', badge)
                     .replace('{client_name}', esc(ctx.from.first_name))

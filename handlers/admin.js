@@ -22,6 +22,7 @@ const awaitingAdminChat = createPersistentMap('awaitingAdminChat'); // Admin ID 
 const activeAdminSessions = createPersistentMap('activeAdminSessions'); // Admin IDs in active chat mode
 const activeUserSessions = createPersistentMap('activeUserSessions'); // User IDs (format platform_id) in active chat mode
 const awaitingUserSupportReply = createPersistentMap('awaitingUserSupportReply'); // Users who just clicked "Répondre"
+const pendingSupportRequests = createPersistentMap('pendingSupportRequests'); // Unified ID -> { name, platform, lastMsg, timestamp }
 const adminSearchState = new Map(); // Admin ID -> search query or state
 
 async function initAdminState() {
@@ -30,6 +31,7 @@ async function initAdminState() {
     await activeAdminSessions.load();
     await activeUserSessions.load();
     await awaitingUserSupportReply.load();
+    await pendingSupportRequests.load();
 }
 
 async function isAdmin(ctx) {
@@ -104,10 +106,14 @@ async function showAdminMenu(ctx, isEdit = false) {
         t(user, 'label_total_ca', `Ventes totales :`) + ` <b>${stats.totalCA}€</b>\n\n` +
         t(user, 'msg_admin_choose_section', `Choisissez une section pour gérer votre bot :`);
 
+    const supportCount = pendingSupportRequests.size;
+    const supportLabel = t(user, 'btn_admin_support', '💬 Support') + (supportCount > 0 ? ` (${supportCount})` : '');
+
     const rows = [
         [Markup.button.callback(t(user, 'btn_admin_stats', '📊 Statistiques'), 'admin_stats')],
         [Markup.button.callback(t(user, 'btn_admin_orders', '📦 Commandes'), 'admin_orders'), Markup.button.callback(t(user, 'btn_admin_livreurs', '🚴 Livreurs'), 'admin_livreurs')],
         [Markup.button.callback(t(user, 'btn_admin_users', '👥 Utilisateurs'), 'admin_users'), Markup.button.callback(t(user, 'btn_admin_broadcast', '🔔 Diffusion'), 'admin_broadcast')],
+        [Markup.button.callback(supportLabel, 'admin_support_queue')],
         [Markup.button.callback(t(user, 'btn_admin_marketplace', '🏪 Marketplace'), 'mp_browse'), Markup.button.callback(t(user, 'btn_admin_settings', '⚙️ Paramètres'), 'admin_settings')],
         [Markup.button.callback(t(user, 'btn_admin_features', '✨ Guide Bot'), 'admin_features')],
         [Markup.button.callback(t(user, 'btn_quit_console', '◀️ Quitter la console'), 'main_menu')]
@@ -440,6 +446,36 @@ function setupAdminHandlers(bot) {
         await next();
     });
 
+    // Support Queue Interface
+    bot.action('admin_support_queue', async (ctx) => {
+        if (!(await isAdmin(ctx))) return ctx.answerCbQuery('❌ Accès réservé.');
+        await ctx.answerCbQuery();
+        
+        if (pendingSupportRequests.size === 0) {
+            return safeEdit(ctx, `✅ <b>Aucun message de support en attente.</b>\n\nTous vos clients ont reçu une réponse.`,
+                Markup.inlineKeyboard([[Markup.button.callback('◀️ Retour Menu', 'admin_menu')]])
+            );
+        }
+
+        const buttons = [];
+        const sortedRequests = Array.from(pendingSupportRequests.entries())
+            .sort((a, b) => b[1].timestamp - a[1].timestamp);
+
+        for (const [userId, data] of sortedRequests) {
+            const platformIcon = data.platform === 'whatsapp' ? '📱' : '✈️';
+            const timeStr = new Date(data.timestamp).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+            const preview = String(data.lastMsg || '').substring(0, 20);
+            const label = `${platformIcon} ${data.name || userId} (${timeStr})\n> ${preview}...`;
+            buttons.push([Markup.button.callback(label, `admin_chat_user_${userId}`)]);
+        }
+
+        buttons.push([Markup.button.callback('◀️ Menu Admin', 'admin_menu')]);
+
+        await safeEdit(ctx, `💬 <b>Messages de Support en Attente (${pendingSupportRequests.size})</b>\n\nCliquez sur un client pour rejoindre la discussion :`,
+            Markup.inlineKeyboard(buttons)
+        );
+    });
+
     bot.action(/^admin_user_view_(.+)$/, async (ctx) => {
         const uid = ctx.match[1];
         const u = await getUser(uid);
@@ -478,11 +514,19 @@ function setupAdminHandlers(bot) {
         awaitingAdminChat.set(adminId, targetIdString);
         activeAdminSessions.set(adminId, true);
         
+        // Remove from support queue if present
+        if (pendingSupportRequests.has(targetIdString)) {
+            pendingSupportRequests.delete(targetIdString);
+        }
+        
         await ctx.answerCbQuery();
         await cleanupUserChat(ctx); // Clean old messages before starting chat
         
         return ctx.reply(`💬 <b>CONVERSATION ACTIVE</b>\n\nVous discutez avec <code>${targetIdString}</code>.\n\nTous vos prochains messages (texte, photo, vidéo) lui seront transmis.\n\nCliquez sur le bouton ci-dessous pour <b>TERMINER</b> et reprendre le comportement normal.`,
-            Markup.inlineKeyboard([[Markup.button.callback('🛑 TERMINER LA CONVERSATION', `admin_chat_end_${targetIdString}`)]])
+            Markup.inlineKeyboard([
+                [Markup.button.callback('🛑 TERMINER LA CONVERSATION', `admin_chat_end_${targetIdString}`)],
+                [Markup.button.callback('◀️ Retour au Menu / File', 'admin_menu')]
+            ])
         );
     });
 
