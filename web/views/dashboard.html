@@ -4084,30 +4084,43 @@
         // Cache : sections déjà chargées
         const _loadedSections = {};
 
+        const _requests = {};
         async function api(path, method = 'GET', body = null, silent = false) {
-            try {
-                const opt = {
-                    method,
-                    headers: { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }
-                };
-                if (body) opt.body = JSON.stringify(body);
-                const url = '/api' + path + (path.includes('?') ? '&' : '?') + 't=' + Date.now();
-                const r = await fetch(url, opt);
-
-                if (r.status === 401) {
-                    logout();
-                    return;
-                }
-
-                if (!r.ok) {
-                    const err = await r.json();
-                    throw new Error(err.error || 'Erreur API');
-                }
-                return await r.json();
-            } catch (e) {
-                console.error('[API Error]:', e);
-                throw e;
+            // Deduplicate concurrent GET requests
+            if (method === 'GET') {
+                if (_requests[path]) return _requests[path];
             }
+
+            const fetchTask = (async () => {
+                try {
+                    const opt = {
+                        method,
+                        headers: { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }
+                    };
+                    if (body) opt.body = JSON.stringify(body);
+                    const url = '/api' + path + (path.includes('?') ? '&' : '?') + 't=' + Date.now();
+                    const r = await fetch(url, opt);
+
+                    if (r.status === 401) {
+                        logout();
+                        return;
+                    }
+
+                    if (!r.ok) {
+                        const err = await r.json();
+                        throw new Error(err.error || 'Erreur API');
+                    }
+                    return await r.json();
+                } catch (e) {
+                    console.error('[API Error]:', e);
+                    throw e;
+                } finally {
+                    delete _requests[path];
+                }
+            })();
+
+            if (method === 'GET') _requests[path] = fetchTask;
+            return await fetchTask;
         }
 
 
@@ -4604,10 +4617,9 @@
                     updateNavbarIcons();
                 }
 
-                if (id === 'overview' || id === 'insights' || (id === 'users' && !window.appStats)) {
-                    // Remove force=true to allow server-side caching
-                    const statsTask = api('/stats', 'GET', null, silent || (id !== 'overview' && id !== 'insights')).then(data => {
-                        console.log('[STATS] Received:', data);
+                // Stats are primarily needed for Overview and Insights
+                if (id === 'overview' || id === 'insights') {
+                    const statsTask = api('/stats', 'GET', null, silent).then(data => {
                         window.appStats = data;
                         if (data) {
                             if (document.getElementById('usersTotalCounter')) document.getElementById('usersTotalCounter').innerText = (data.totalUsers || 0) + ' clients';
@@ -4619,7 +4631,7 @@
                         return data;
                     }).catch(e => { console.warn("[STATS] Failed:", e); return null; });
 
-                    if (id === 'overview' || id === 'insights') await statsTask;
+                    await statsTask;
                 }
 
                 if (id === 'overview' || id === 'insights') {
@@ -7752,25 +7764,9 @@
             // 2. Main section load
             await switchSection(initSection);
 
-            // 3. Sequential preload (one by one, staggered to avoid server pressure)
-            const allSections = ['users', 'products', 'logistique', 'broadcast', 'insights', 'reviews', 'suppliers'];
-            const toPreloadList = allSections.filter(s => s !== initSection);
-            
-            async function staggeredPreload() {
-                for (const s of toPreloadList) {
-                    if (_loadedSections[s]) continue;
-                    try {
-                        // Wait for each section to load before moving to the next
-                        await loadData(s, true);
-                        _loadedSections[s] = true;
-                        // Add a small pause between heavy loads
-                        await new Promise(r => setTimeout(r, 2000));
-                    } catch (e) { console.warn(`Preload failed for ${s}:`, e); }
-                }
-            }
-            
-            // Start the preload process in the background
-            setTimeout(staggeredPreload, 1500);
+            // 3. No automatic preloading. Everything is now on-demand when clicking a tab.
+            // This massively improves initial load and saves server bandwidth.
+            console.log("Dashboard ready. Navigation is on-demand.");
         })();
     </script>
 </body>

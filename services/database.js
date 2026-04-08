@@ -16,11 +16,10 @@ const DB_TIMEOUT = 20000;
 
 function ts() { return new Date().toISOString(); }
 
-// Simple server-side cache to avoid heavy DB scans on every refresh
 const _statsCache = {
     overview: null,
     analytics: null,
-    ttl: 120000, // 2 minutes (avoid heavy scans on every reload)
+    ttl: 300000, // 5 minutes (increased for better performance)
     lastOverview: 0,
     lastAnalytics: 0
 };
@@ -1393,24 +1392,25 @@ async function getStatsOverview(force = false) {
     const totalLivreurs = totalLivreursRes.count || 0;
     const totalOrdersCount = ordersCountRes.count || 0;
 
-    // Get CA from Sum of delivered orders (fallback to global stats if too many/error)
-    let calculatedCA = 0;
-    try {
-        const { data: caData, error: caError } = await supabase.from(COL_ORDERS)
-            .select('total_price')
-            .eq('status', 'delivered')
-            .order('created_at', { ascending: false })
-            .abortSignal(AbortSignal.timeout(DB_TIMEOUT))
-            .limit(2000); 
+    // Get CA from Global Stats (much faster than summing the last 2000 orders)
+    // We only recalculate from orders if specifically forced or if global stats are missing
+    let totalCA = parseFloat(stats.total_ca || stats.global?.total_ca || 0);
 
-        if (!caError && caData) {
-            calculatedCA = caData.reduce((acc, curr) => acc + (parseFloat(curr.total_price) || 0), 0);
+    if (force || !totalCA) {
+        try {
+            const { data: caData, error: caError } = await supabase.from(COL_ORDERS)
+                .select('total_price')
+                .eq('status', 'delivered')
+                .abortSignal(AbortSignal.timeout(DB_TIMEOUT))
+                .limit(4000); 
+
+            if (!caError && caData) {
+                totalCA = caData.reduce((acc, curr) => acc + (parseFloat(curr.total_price) || 0), 0);
+            }
+        } catch (e) {
+            console.error('[STATS] CA calculation error:', e.message);
         }
-    } catch (e) {
-        console.error('[STATS] CA calculation error:', e.message);
     }
-
-    const totalCA = calculatedCA || parseFloat(stats.total_ca || stats.global?.total_ca || 0);
 
     const result = {
         totalUsers: total,
@@ -1592,11 +1592,11 @@ async function getOrderAnalytics() {
         }
     } catch(_) {}
 
-    // Fetch last 2000 orders for historical analysis (optimized fields selection for performance)
+    // Fetch last 1000 orders for historical analysis (reduced from 2000 for speed)
     const { data: ordersSnap, error } = await supabase.from(COL_ORDERS)
-        .select('id, created_at, delivered_at, total_price, status, product_name, is_priority, city, postal_code, address, livreur_name, user_id, platform, first_name, username, quantity')
+        .select('id, created_at, delivered_at, total_price, status, city, postal_code, platform, quantity') // Partial select: only what's needed for main charts
         .order('created_at', { ascending: false })
-        .limit(2000);
+        .limit(1000);
 
     if (error) {
         console.error('[DB-ANALYTICS-CRITICAL] Query failed:', error);
