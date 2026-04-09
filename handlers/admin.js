@@ -13,6 +13,10 @@ const { notifyAdmins, sendTelegramMessage } = require('../services/notifications
 const { t } = require('../services/i18n'); // <--- ADDED
 require('dotenv').config();
 
+// Helpers pour vérifier si l'utilisateur est déjà dans un flow (Commande / Marketplace)
+const getOrderSystem = () => require('./order_system');
+const getMarketplace = () => require('./supplier_marketplace');
+
 const { createPersistentMap } = require('../services/persistent_map');
 
 const authenticatedAdmins = createPersistentMap('authenticatedAdmins');
@@ -845,9 +849,12 @@ function setupAdminHandlers(bot) {
         }
 
         // 4. --- SYSTÈME DE RELAY ADMIN-CLIENT (SUPPORT) ---
-        const isSupportMessage = activeUserSessions.has(uKey) || 
-                                 awaitingUserSupportReply.has(uKey) || 
-                                 (ctx.platform === 'whatsapp' && !ctx.message?.text?.startsWith('/') && !['menu', 'catalog', 'orders'].includes(ctx.message?.text?.toLowerCase()));
+        const userId = `${ctx.platform}_${ctx.from.id}`;
+        const isBusy = getOrderSystem().hasActiveOrderState(userId) || getMarketplace().hasActiveMarketplaceState(userId);
+
+        const isSupportMessage = (activeUserSessions.has(uKey) || awaitingUserSupportReply.has(uKey) || 
+                                 (ctx.platform === 'whatsapp' && !ctx.message?.text?.startsWith('/') && !['menu', 'catalog', 'orders'].includes(ctx.message?.text?.toLowerCase())))
+                                 && !isBusy;
 
         if (isSupportMessage && !(await isAdmin(ctx))) {
             if (!activeUserSessions.has(uKey) && !awaitingUserSupportReply.has(uKey)) {

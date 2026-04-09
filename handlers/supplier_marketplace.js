@@ -1483,4 +1483,19 @@ function setupMarketplaceHandlers(bot) {
     return { handleMarketplaceText, handleMarketplacePhoto, handleMarketplaceVideo };
 }
 
-module.exports = { setupMarketplaceHandlers, initMarketplaceState, clearAllAwaitingMaps };
+module.exports = { 
+    setupMarketplaceHandlers, 
+    initMarketplaceState, 
+    clearAllAwaitingMaps,
+    hasActiveMarketplaceState: (userId) => {
+        const id = String(userId);
+        return awaitingProductName.has(id) || 
+               awaitingProductPrice.has(id) ||
+               awaitingProductDesc.has(id) || 
+               awaitingProductPhoto.has(id) ||
+               awaitingProductStock.has(id) || 
+               awaitingProductCategory.has(id) ||
+               awaitingProductEdit.has(id) || 
+               awaitingSupplierAdminChat.has(id);
+    }
+};

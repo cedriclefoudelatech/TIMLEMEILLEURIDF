@@ -2849,15 +2849,24 @@ async function checkAbandonedCarts(bot) {
     }
 }
 
-module.exports = {
-    setupOrderSystem,
-    initOrderState,
-    userCarts,
-    pendingOrders,
+module.exports = { 
+    setupOrderSystem, 
+    initOrderState, 
+    checkAbandonedCarts, 
+    userLastActivity,
     awaitingAddressDetails,
     pendingOrderConfirmation,
+    pendingOrders,
     awaitingDelayReason,
     awaitingChatReply,
-    checkAbandonedCarts,
-    userLastActivity
+    awaitingReviewText,
+    hasActiveOrderState: (userId) => {
+        const id = String(userId);
+        return awaitingAddressDetails.has(id) || 
+               pendingOrderConfirmation.has(id) || 
+               pendingOrders.has(id) || 
+               awaitingDelayReason.has(id) || 
+               awaitingChatReply.has(id) || 
+               awaitingReviewText.has(id);
+    }
 };

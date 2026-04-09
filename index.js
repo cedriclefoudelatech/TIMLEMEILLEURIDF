@@ -117,8 +117,8 @@ async function main() {
 
     // Liaison des Handlers existants au dispatcher
     setupStartHandler(dispatcher);
-    setupAdminHandlers(dispatcher);
     setupOrderSystem(dispatcher);
+    setupAdminHandlers(dispatcher);
 
     // Marketplace fournisseurs
     const { handleMarketplaceText, handleMarketplacePhoto, handleMarketplaceVideo } = setupMarketplaceHandlers(dispatcher);
