@@ -2854,6 +2854,7 @@ module.exports = {
     initOrderState, 
     checkAbandonedCarts, 
     userLastActivity,
+    userCarts,
     awaitingAddressDetails,
     pendingOrderConfirmation,
     pendingOrders,
