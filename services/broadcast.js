@@ -1,4 +1,4 @@
-const { getAllUsersForBroadcast, saveBroadcast, updateBroadcast, markUserBlocked, getPendingBroadcasts } = require('./database');
+const { getAllUsersForBroadcast, saveBroadcast, updateBroadcast, markUserBlocked, getPendingBroadcasts, claimBroadcast } = require('./database');
 const { registry } = require('../channels/ChannelRegistry');
 const { dispatcher } = require('./dispatcher');
 const fs = require('fs');
