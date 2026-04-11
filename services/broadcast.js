@@ -19,6 +19,7 @@ function debugLog(msg) {
 const CONCURRENCY_LIMIT = 10; // On augmente pour compenser les latences DB/Réseau
 const BATCH_DELAY_MS = 100; // Délai réduit entre chaque envoi individuel
 const TELEGRAM_TIMEOUT_MS = 15000; // Timeout de 15s par requête
+const GLOBAL_SEND_TIMEOUT = 30000; // Timeout de 30s par message (WApp/TG) pour le worker
 
 let _bot = null;
 function setBroadcastBot(bot) { 
@@ -303,10 +304,15 @@ async function sendToUser(user, message, unifiedMediaList = [], options = {}) {
                     dispatcher.setUserLastButtons(pid, buttons);
                 }
 
-                await channel.sendInteractive(cleanPid, message, buttons, {
-                    media_url: mediaUrl,
-                    media_type: m0.type || 'photo'
-                });
+                const safeWA = async () => {
+                    const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout Message WhatsApp')), GLOBAL_SEND_TIMEOUT));
+                    const execution = channel.sendInteractive(cleanPid, message, buttons, {
+                        media_url: mediaUrl,
+                        media_type: m0.type || 'photo'
+                    });
+                    return await Promise.race([execution, timeout]);
+                };
+                await safeWA();
             } else {
                 // WhatsApp: Chaque média s'il y en a plusieurs
                 if (unifiedMediaList.length > 1) {
@@ -320,11 +326,16 @@ async function sendToUser(user, message, unifiedMediaList = [], options = {}) {
                             if (fs.existsSync(abs)) mediaUrl = abs;
                         }
 
-                        await channel.sendMessage(cleanPid, cap, { 
-                            media_url: mediaUrl, 
-                            media_type: m.type,
-                            source: m.source || null 
-                        });
+                        const safeWA = async () => {
+                            const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout Message WhatsApp (Média)')), GLOBAL_SEND_TIMEOUT));
+                            const execution = channel.sendMessage(cleanPid, cap, { 
+                                media_url: mediaUrl, 
+                                media_type: m.type,
+                                source: m.source || null 
+                            });
+                            return await Promise.race([execution, timeout]);
+                        };
+                        await safeWA();
                         await new Promise(r => setTimeout(r, 500));
                     }
                 } else {
@@ -336,11 +347,16 @@ async function sendToUser(user, message, unifiedMediaList = [], options = {}) {
                         if (fs.existsSync(abs)) mediaUrl = abs;
                     }
 
-                    await channel.sendMessage(cleanPid, message, { 
-                        media_url: mediaUrl, 
-                        media_type: m?.type || 'photo',
-                        source: m?.source || null
-                    });
+                    const safeWA = async () => {
+                        const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout Message WhatsApp (Simple)')), GLOBAL_SEND_TIMEOUT));
+                        const execution = channel.sendMessage(cleanPid, message, { 
+                            media_url: mediaUrl, 
+                            media_type: m?.type || 'photo',
+                            source: m?.source || null
+                        });
+                        return await Promise.race([execution, timeout]);
+                    };
+                    await safeWA();
                 }
             }
             return { success: true };

@@ -146,6 +146,7 @@ class WhatsAppSessionChannel extends Channel {
             if (connection === 'close') {
                 const error = lastDisconnect?.error;
                 const statusCode = error?.output?.statusCode;
+                this.isActive = false; // Désactiver immédiatement le canal pour stopper les envois
                 waLog(`[WA] Connexion fermée. Code: ${statusCode}, Msg: ${error?.message}, Payload: ${JSON.stringify(error?.output?.payload)}`);
 
                 // Si on est en restart, ne pas reconnecter (restart() s'en charge)
@@ -160,6 +161,7 @@ class WhatsAppSessionChannel extends Channel {
                     DisconnectReason.forbidden,    // 403 - compte banni/bloqué
                     DisconnectReason.badSession,   // 500 - session corrompue
                     DisconnectReason.multideviceMismatch, // 411 - conflit appareils
+                    405, // Method Not Allowed - Souvent session expirée/invalide chez Baileys
                 ].includes(statusCode);
 
                 if (needsFreshSession) {
