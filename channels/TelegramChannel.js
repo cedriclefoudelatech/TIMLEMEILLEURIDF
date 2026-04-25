@@ -113,9 +113,20 @@ class TelegramChannel extends Channel {
         
         const launch = async (retryCount = 0) => {
             try {
+                // Nettoyage radical avant de lancer pour éviter les conflits
+                await this.bot.telegram.deleteWebhook({ drop_pending_updates: true }).catch(() => {});
+                
                 await this.bot.launch();
                 console.log('✅ [TG] Bot lancé avec succès !');
                 this.isActive = true;
+
+                // Debug messages entrants
+                this.bot.use((ctx, next) => {
+                    if (ctx.message || ctx.callbackQuery) {
+                        console.log(`[TG-DEBUG] Update reçu de ${ctx.from.id}`);
+                    }
+                    return next();
+                });
             } catch (err) {
                 if (err.message.includes('409') && retryCount < 5) {
                     console.warn(`⚠️ [TG] Conflit 409 (déjà une instance). Tentative ${retryCount + 1}/5 dans 15s...`);
