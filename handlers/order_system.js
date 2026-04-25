@@ -1075,6 +1075,7 @@ function setupOrderSystem(bot) {
         let finalProductList = productList;
         if (isPriority) finalProductList += `\n🚀 Option Livraison Prioritaire (+${priorityFee.toFixed(2)}€)`;
 
+        try {
             // DÉTERMINATION DU FOURNISSEUR (Avant création)
             const allProducts = await getProducts().catch(() => []);
             let orderSupplierId = null;
