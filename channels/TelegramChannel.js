@@ -79,7 +79,8 @@ class TelegramChannel extends Channel {
     }
 
     async start() {
-        // --- DISTRIBUTED LOCK ---
+        // --- DISTRIBUTED LOCK (Désactivé temporairement pour débloquer le démarrage) ---
+        /*
         const { claimLock, checkLock } = require('../services/database');
         const instanceId = `${process.env.RAILWAY_SERVICE_NAME || 'local'}-${process.env.RAILWAY_REPLICA_INDEX || '0'}-${process.pid}`;
         const telegramLockId = `tg_lock`;
@@ -106,8 +107,8 @@ class TelegramChannel extends Channel {
         setInterval(async () => {
             await claimLock(telegramLockId, instanceId);
         }, 60000);
+        */
 
-        console.log(`[TG-LOCK] Telegram lock claimed by ${instanceId}`);
         console.log(`[TG] Lancement du bot (${this.token.substring(0, 4)}****...)...`);
         
         const launch = async (retryCount = 0) => {
