@@ -106,7 +106,7 @@ class WhatsAppSessionChannel extends Channel {
                 keys: makeCacheableSignalKeyStore(state.keys, logger)
             },
             logger,
-            browser: ['Ubuntu', 'Chrome', '20.0.04'],
+            browser: ['Mac OS', 'Chrome', '121.0.6167.184'],
             syncFullHistory: false,
             generateHighQualityLinkPreview: false,
             getMessage: async (key) => {
@@ -165,10 +165,10 @@ class WhatsAppSessionChannel extends Channel {
                 ].includes(statusCode);
 
                 if (needsFreshSession) {
-                    waLog(`[WA] Session invalide (code ${statusCode}) — effacement Supabase et nouveau QR.`);
+                    waLog(`[WA] Session invalide (code ${statusCode}) — effacement Supabase et attente 5s avant nouveau QR.`);
                     if (this._clearSession) await this._clearSession();
                     this.isActive = false;
-                    await this.start(); // Repart avec credentials vides → génère un QR
+                    setTimeout(() => this.start(), 5000); // Délai de sécurité
                 } else if (statusCode === 440) {
                     // Conflit : une autre instance a pris la session.
                     // Backoff exponentiel pour éviter la boucle infinie de conflits.
@@ -180,8 +180,8 @@ class WhatsAppSessionChannel extends Channel {
                 } else {
                     // Reconnexion simple (timeout, perte réseau, etc.)
                     this._conflictBackoff = 5000; // reset backoff sur reconnexion normale
-                    waLog(`[WA] Reconnexion simple (code ${statusCode})...`);
-                    this.start();
+                    waLog(`[WA] Reconnexion simple (code ${statusCode}) dans 5s...`);
+                    setTimeout(() => this.start(), 5000);
                 }
             } else if (connection === 'open') {
                 waLog('✅ [WA] WhatsApp connecté avec succès !');
