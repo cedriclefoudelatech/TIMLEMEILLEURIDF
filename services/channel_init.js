@@ -7,6 +7,7 @@ async function initChannels() {
     console.log('📦 Initialisation des canaux...');
 
     // 1. Telegram
+    console.log('[Système-Env] Toutes les clés :', Object.keys(process.env).join(', '));
     const tgToken = process.env.BOT_TOKEN;
     if (tgToken) {
         console.log(`[Système] Token Telegram détecté (${tgToken.substring(0, 5)}...). Initialisation...`);
