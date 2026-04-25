@@ -117,11 +117,11 @@ function setupOrderSystem(bot) {
     // ========== CATALOGUE & COMMANDE ==========
 
     async function displayCatalog(ctx) {
-        const [products, settings] = await Promise.all([
+        const [products, user] = await Promise.all([
             getProducts(),
-            ctx.state?.settings ? Promise.resolve(ctx.state.settings) : getAppSettings()
+            ctx.state?.user || getUser(`${ctx.platform}_${ctx.from.id}`)
         ]);
-        const user = ctx.state?.user || await getUser(`${ctx.platform}_${ctx.from.id}`);
+        const settings = ctx.state?.settings; // Déjà chargé par le Dispatcher
         if (!products || products.length === 0) {
             return safeEdit(ctx, t(user, 'msg_catalog_empty', settings.msg_catalog_empty || '📭 Le catalogue est actuellement vide.'), Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_generic || '◀️ Retour', 'main_menu')]]));
         }
@@ -158,9 +158,15 @@ function setupOrderSystem(bot) {
         // Nettoyer les états marketplace pour éviter l'interception des messages
         clearAllAwaitingMaps(ctx.from.id);
         const productId = ctx.match[1];
-        const products = await getProducts();
-        const product = products.find(p => p.id === productId);
-        const settings = ctx.state?.settings || await getAppSettings();
+        
+        // --- OPTIMISATION : Parallélisation des appels DB ---
+        const [products, user] = await Promise.all([
+            getProducts(),
+            ctx.state?.user || getUser(`${ctx.platform}_${ctx.from.id}`)
+        ]);
+        
+        const product = products.find(p => String(p.id) === String(productId));
+        const settings = ctx.state?.settings; // Déjà chargé par le Dispatcher
 
         if (!product) return safeEdit(ctx, settings.msg_product_not_found || '❌ Produit non trouvé.', [Markup.button.callback(settings.btn_back_menu || '◀️ Retour Menu', 'view_catalog')]);
 
@@ -180,7 +186,6 @@ function setupOrderSystem(bot) {
             });
         }
 
-        const user = ctx.state?.user || await getUser(`${ctx.platform}_${ctx.from.id}`);
         let text = `🌟 <b>${esc(product.name)}</b> 🌟\n\n` +
             t(user, 'label_unit_price', '💰 Prix Unitaire :') + ` <b>${product.price}€</b>\n` +
             (promoText ? `${promoText}\n` : "") +
