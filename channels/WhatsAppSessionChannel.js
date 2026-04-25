@@ -34,6 +34,7 @@ class WhatsAppSessionChannel extends Channel {
         this._restarting = false;
         this._clearSession = null; // Sera défini dans start()
         this._conflictBackoff = 5000; // Backoff initial pour code 440 (ms)
+        this._failureCount = 0; // Compteur pour éviter les boucles infinies
     }
 
     static getLogs() { return waLogs; }
@@ -165,31 +166,35 @@ class WhatsAppSessionChannel extends Channel {
                 ].includes(statusCode);
 
                 if (needsFreshSession) {
-                    waLog(`[WA] Session CRITIQUE (code ${statusCode}) — Purge complète Supabase et attente 10s...`);
+                    this._failureCount++;
+                    if (this._failureCount > 5) {
+                        waLog(`[WA-CRIT] Trop d'échecs consécutifs (${this._failureCount}). Arrêt des tentatives pour protéger le serveur.`);
+                        this.isActive = false;
+                        return;
+                    }
+
+                    waLog(`[WA] Session CRITIQUE (code ${statusCode}, échec ${this._failureCount}/5) — Purge complète et attente 10s...`);
                     this.isActive = false;
                     if (this._clearSession) {
                         await this._clearSession().catch(e => waLog(`[WA-DB] Erreur purge: ${e.message}`));
                     }
-                    // On attend un peu plus pour laisser Supabase et WhatsApp respirer
                     setTimeout(() => this.start(), 10000); 
                 } else if (statusCode === 440) {
                     // Conflit : une autre instance a pris la session.
-                    // Backoff exponentiel pour éviter la boucle infinie de conflits.
                     const delay = this._conflictBackoff;
                     this._conflictBackoff = Math.min(this._conflictBackoff * 2, 60000); // max 60s
-                    waLog(`[WA] Conflit 440 (replaced) — attente ${delay}ms avant reconnexion (backoff=${this._conflictBackoff}ms)...`);
+                    waLog(`[WA] Conflit 440 — attente ${delay}ms...`);
                     this.isActive = false;
                     setTimeout(() => this.start(), delay);
                 } else {
-                    // Reconnexion simple (timeout, perte réseau, etc.)
-                    this._conflictBackoff = 5000; // reset backoff sur reconnexion normale
-                    waLog(`[WA] Reconnexion simple (code ${statusCode}) dans 5s...`);
-                    setTimeout(() => this.start(), 5000);
+                    waLog(`[WA] Reconnexion simple (code ${statusCode}) dans 10s...`);
+                    setTimeout(() => this.start(), 10000);
                 }
             } else if (connection === 'open') {
                 waLog('✅ [WA] WhatsApp connecté avec succès !');
                 this.isActive = true;
-                this._conflictBackoff = 5000; // reset backoff sur connexion réussie
+                this._failureCount = 0; // Reset sur succès
+                this._conflictBackoff = 5000;
             }
         });
 
