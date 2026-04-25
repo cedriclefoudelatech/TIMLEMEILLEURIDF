@@ -266,6 +266,26 @@ class WhatsAppSessionChannel extends Channel {
 
     }
 
+    async requestPairingCode(phoneNumber) {
+        if (!this.sock) {
+            await this.initialize();
+            await this.start();
+        }
+        
+        // Attendre que le socket soit prêt
+        let attempts = 0;
+        while (!this.sock && attempts < 10) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            attempts++;
+        }
+
+        if (!this.sock) throw new Error("Socket non initialisé");
+
+        // Baileys requestPairingCode
+        const code = await this.sock.requestPairingCode(phoneNumber);
+        return code;
+    }
+
     async stop() {
         if (this.sock) this.sock.end();
         this.isActive = false;

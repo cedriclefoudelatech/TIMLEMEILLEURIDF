@@ -12,7 +12,7 @@ function getBotForNotification(providedBot = null) {
         if (bot && bot.telegram) return bot;
     }
 
-    // 2. Fallback via le singleton partagé
+    // 2. Repli (Fallback) via le singleton partagé
     try {
         const { getBotInstance } = require('../server');
         const fallback = getBotInstance();
@@ -127,7 +127,7 @@ async function notifySuppliers(bot, cart, orderId, address, settings = null, isF
         if (!settings) settings = await getAppSettings();
         const cartItems = Array.isArray(cart) ? cart : [cart];
 
-        // Charger les produits une seule fois pour lookup
+        // Charger les produits une seule fois pour la recherche (lookup)
         let allProducts = null;
 
         for (const item of cartItems) {
@@ -157,7 +157,7 @@ async function notifySuppliers(bot, cart, orderId, address, settings = null, isF
                         `💰 Prix : ${item.price}€\n` +
                         `🔑 Commande : #${orderId.slice(-5)}`;
 
-                    console.log(`[NotifySupplier] Sending notification to supplier ${supplier.name} for ${orderType} order #${orderId.slice(-5)}`);
+                    console.log(`[NotifySupplier] Envoi de la notification au fournisseur ${supplier.name} pour la commande ${orderType} #${orderId.slice(-5)}`);
 
                     const buttons = [];
                     if (isRetail) {
@@ -172,11 +172,11 @@ async function notifySuppliers(bot, cart, orderId, address, settings = null, isF
                         }
                     }, bot)
                         .then(() => {
-                            console.log(`[NotifySupplier] ✅ Notification sent to ${supplier.name}`);
+                            console.log(`[NotifySupplier] ✅ Notification envoyée à ${supplier.name}`);
                             return markOrderSupplierNotified(orderId);
                         })
                         .catch((err) => {
-                            console.error(`[NotifySupplier] ❌ Failed to notify ${supplier.name}:`, err.message);
+                            console.error(`[NotifySupplier] ❌ Échec de la notification pour ${supplier.name} :`, err.message);
                         });
                 }
             }
@@ -218,7 +218,7 @@ async function sendMessageToUser(userId, message, options = {}, providedBot = nu
                         dispatcher.setUserLastButtons(idStr, waButtons);
                     }
                 } catch (e) {
-                    console.error('[MSG-WA] Hydrate failed:', e.message);
+                    console.error('[MSG-WA] Échec de l\'hydratation :', e.message);
                 }
                 return await wa.sendInteractive(cleanId, message, waButtons, options);
             }
@@ -266,7 +266,7 @@ async function sendMessageToUser(userId, message, options = {}, providedBot = nu
         } catch (botErr) {
             // Fallback en cas d'erreur média (URL invalide, file_id expiré)
             if (options.photo || options.video) {
-                console.warn(`[MSG-Gen] Fallback texte pur car média échoué pour ${cleanId}: ${botErr.message}`);
+                console.warn(`[MSG-Gen] Repli vers le texte pur car le média a échoué pour ${cleanId} : ${botErr.message}`);
                 sent = await realBot.telegram.sendMessage(cleanId, message || 'Fichier média (erreur de chargement)', extra);
             } else throw botErr;
         }

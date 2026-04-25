@@ -51,7 +51,7 @@ function clearAllAwaitingMaps(userId) {
     awaitingProductCategory.delete(id);
     awaitingProductEdit.delete(id);
     awaitingSupplierAdminChat.delete(id);
-    if (hadState) console.log(`[Marketplace] Cleared all awaiting maps for user ${id}`);
+    if (hadState) console.log(`[Marketplace] Nettoyage de tous les états d'attente pour l'utilisateur ${id}`);
 }
 
 async function initMarketplaceState() {
@@ -163,7 +163,7 @@ function setupMarketplaceHandlers(bot) {
         const userId = `telegram_${ctx.from.id}`;
         const user = await require('../services/database').getUser(userId);
         const supplier = await getSupplierByTelegramId(String(ctx.from.id));
-        if (!supplier) return safeEdit(ctx, '❌ DENIED');
+        if (!supplier) return safeEdit(ctx, '❌ ACCÈS REFUSÉ');
 
         const products = await getMarketplaceProducts(supplier.id);
         if (products.length === 0) {
@@ -224,7 +224,7 @@ function setupMarketplaceHandlers(bot) {
         const all = await getProducts(true); // include inactive
         const p = all.find(x => String(x.id) === String(pId));
         
-        if (!p) return safeEdit(ctx, '❌ NOT FOUND', Markup.inlineKeyboard([[Markup.button.callback(t(user, 'btn_back', '◀️ Retour'), 'mp_retail_products')]]));
+        if (!p) return safeEdit(ctx, '❌ INTROUVABLE', Markup.inlineKeyboard([[Markup.button.callback(t(user, 'btn_back', '◀️ Retour'), 'mp_retail_products')]]));
 
         const is_active = p.is_active !== false && (typeof p.stock !== 'number' || p.stock > 0);
         let text = `🛒 <b>${esc(p.name)}</b> (Catalogue Bot)\n\n`;
@@ -255,7 +255,7 @@ function setupMarketplaceHandlers(bot) {
         const handler = bot.actions.find(a => a.re instanceof RegExp && a.re.test(`mp_retail_view_${p.id}`));
         // Simplement relancer mp_retail_view
         const trigger = `mp_retail_view_${p.id}`;
-        // Fallback: manually call
+        // Repli : appel manuel
         return bot.handleUpdate(ctx); // Bit hacky but should work if we let telegraf handle it
     });
 
@@ -339,7 +339,7 @@ function setupMarketplaceHandlers(bot) {
         if (!product) return;
         await saveMarketplaceProduct({ id: product.id, is_available: !product.is_available });
         // Re-afficher le détail
-        ctx.match = [null, product.id]; // hack pour réutiliser mp_edit
+        ctx.match = [null, product.id]; // astuce pour réutiliser mp_edit
         const handler = bot.listeners?.find?.(l => l.trigger?.source === '^mp_edit_(.+)$');
         // Simplement re-trigger l'action
         return safeEdit(ctx, `${product.is_available ? '⏸' : '▶️'} Produit <b>${esc(product.name)}</b> ${product.is_available ? 'mis en pause' : 'remis en vente'}.`, Markup.inlineKeyboard([
@@ -878,7 +878,7 @@ function setupMarketplaceHandlers(bot) {
         ]));
     });
 
-    // Noop button
+    // Bouton sans opération
     bot.action('noop', async (ctx) => { await ctx.answerCbQuery(); });
 
     // Voir panier admin

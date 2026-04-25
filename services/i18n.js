@@ -1,6 +1,6 @@
 const translations = {
     en: {
-        // Main Menu & Buttons
+        // Menu Principal & Boutons
         'menu_main': '🏠 <b>Main Menu</b>',
         'btn_catalog': '🛍 Catalog',
         'btn_cart': '🛒 Cart',
@@ -14,13 +14,13 @@ const translations = {
         'btn_back': '◀️ Back',
         'btn_back_menu': '🏠 Main Menu',
 
-        // Welcome Messages
+        // Messages de Bienvenue
         'msg_welcome': '✨ <b>Welcome to {bot_name}, {first_name} !</b>',
         'msg_welcome_back': '👋 <b>Glad to see you back, {first_name} !</b>',
         'msg_access_denied': '🛑 <b>ACCESS RESTRICTED</b>\n\nTo access the bot, you must first contact the administrator.',
         'msg_language_choice': '🌐 <b>LANGUAGE CHOICE</b>\n\nSelect your preferred language:',
 
-        // Livreur (Delivery)
+        // Livreur
         'btn_avail_on': '🟢 Available',
         'btn_avail_off': '🔴 Unavailable',
         'btn_deliveries_active': '🚚 ACTIVE DELIVERIES 🔥',
@@ -31,7 +31,7 @@ const translations = {
         'msg_livreur_city': '📍 Area: <b>{city}</b>',
         'msg_livreur_status': '🔘 Status: <b>{status}</b>',
 
-        // Order System & Cart
+        // Système de Commande & Panier
         'msg_order_cart_summary': '🛒 <b>Order Summary</b>',
         'msg_order_confirmed': '✅ <b>Order Registered!</b>',
         'msg_min_order': '⚠️ <b>Minimum order not reached</b>',
@@ -47,7 +47,7 @@ const translations = {
         'payment_card': 'Credit Card',
         'payment_crypto': 'Cryptocurrency',
 
-        // New Menu Items
+        // Nouveaux Éléments de Menu
         'msg_client_mode': '🛒 <b>Client Mode</b>\n\nYou can now order as a normal client.',
         'msg_help_center': '❓ <b>HELP CENTER</b>\n\nHow can we help you?',
         'btn_where_is_order': '⏳ Where is my order?',
@@ -55,7 +55,7 @@ const translations = {
         'msg_chat_active': '💬 <b>ACTIVE CONVERSATION</b>\n\nYou are talking to an admin.',
         'btn_end_chat': '🛑 END CONVERSATION',
 
-        // Livreur Status
+        // Statut Livreur
         'label_available': 'AVAILABLE',
         'label_unavailable': 'UNAVAILABLE',
         'btn_active_deliveries_label': '🚚 MY ACTIVE DELIVERIES 🔥',
@@ -64,7 +64,7 @@ const translations = {
         'btn_history_orders_label': '📈 History',
         'btn_client_mode_label': '🛍 Client Mode',
 
-        // Catalog & Qty
+        // Catalogue & Quantité
         'msg_catalog_choice': 'Choose a product:',
         'label_unit_price': 'Unit Price:',
         'label_choose_qty': 'Choose your quantity:',
@@ -96,7 +96,7 @@ const translations = {
         'btn_back_cart_label': '◀️ Back to Cart',
         'btn_cancel_order_label': '❌ Cancel Order',
 
-        // Scheduling
+        // Planification
         'msg_when_delivery': '🕒 <b>When do you want to be delivered?</b>\n\nChoose if you want to be delivered as soon as possible or schedule a specific time.',
         'btn_priority_delivery': '🚀 Priority Delivery (+{price}€)',
         'btn_asap': '🏃 As soon as possible',
@@ -109,7 +109,7 @@ const translations = {
         'msg_delivery_details': '🏢 <b>Delivery Details (Optional)</b>\n\nIndicate your <b>door code, building code, floor, apartment number</b> or any useful info for the courier.\n\nOtherwise, click the button below:',
         'btn_modify_address': '◀️ Modify address',
 
-        // Orders History
+        // Historique des Commandes
         'msg_my_orders': '📦 <b>My Orders</b>',
         'label_profile': '👤 Profile:',
         'label_wallet': '💰 Wallet:',
@@ -122,7 +122,7 @@ const translations = {
         'label_pending': '⏳ Pending',
         'btn_manage_order': '🔍 Manage #{id}',
 
-        // Order Summary & Payment
+        // Résumé de Commande & Paiement
         'msg_order_cart_summary': '🛒 <b>Order Summary</b>',
         'label_address': '📍 Address:',
         'label_scheduled_for': '🕒 Scheduled for:',
@@ -134,7 +134,7 @@ const translations = {
         'msg_confirm_order': 'Do you confirm the order?',
         'btn_confirm_order_pm': '✅ Confirm order ({label})',
 
-        // Courier (Livreur) System
+        // Système Livreur
         'msg_delivery_welcome': '🚴 <b>Welcome to the delivery team!</b>\n\nYou are now registered as a courier.\n\n<b>Use the menu below to manage your deliveries:</b>',
         'btn_livreur_menu_back': '◀️ Courier Menu',
         'msg_live_tracking': '<b>Live Tracking</b>\n\nFor the customer to follow your arrival:\n\n1. Click on the paperclip (📎) or (+) in this conversation\n2. Select <b>Location</b> or <b>Position</b>\n3. Choose <b>Share my live location</b> (Live Location)\n4. Select the duration (e.g., 1 hour)\n\nThe bot will automatically detect your movement to inform the customer.',
@@ -162,7 +162,7 @@ const translations = {
         'msg_order_notif_livreur_template': '🆕 <b>NEW ORDER!</b>\n\n📦 {product_list}\n📍 {address}\n{scheduled}\n💰 <b>{total}€ ({pay_icon} {pay_label})</b>',
         'msg_order_received_admin_template': '🚨 <b>NEW ORDER!</b>\n{badge}\n👤 {client_name} (@{username})\n📦 {product_list}\n📍 {address}\n💰 {total}€ ({pay_icon} {pay_label})\n🔑 ID : <code>{order_id}</code>',
 
-        // Marketplace & Supplier
+        // Marketplace & Fournisseur
         'label_my_shop': '🏪 <b>My Shop</b>',
         'label_marketplace_products': '📦 Marketplace Products',
         'label_retail_bot_products': '🛒 Bot Client Products',
@@ -198,7 +198,7 @@ const translations = {
         'btn_back_list': '◀️ Back to List',
         'btn_shop_home': '🏠 Shop Menu',
 
-        // Admin Console
+        // Console Admin
         'label_admin_console': '🛠 <b>Telegram Administration Console</b>',
         'msg_admin_welcome': 'Welcome to your integrated manager.',
         'btn_admin_stats': '📊 Statistics',
@@ -211,14 +211,14 @@ const translations = {
         'btn_admin_features': '✨ Bot Guide',
         'btn_quit_console': '◀️ Exit Console',
 
-        // Admin extra
+        // Admin supplémentaire
         'label_total_users': 'Users:',
         'label_total_ca': 'Total Sales:',
         'msg_admin_choose_section': 'Choose a section to manage your bot:',
         'btn_livreur_settings': '⚙️ Settings',
         'btn_back_quick_menu': '◀️ Menu',
 
-        // Supplier/Marketplace extra
+        // Fournisseur/Marketplace supplémentaire
         'label_orders_plural': 'order(s)',
         'label_pickup': 'Pickup',
         'label_delivery': 'Delivery',
@@ -234,7 +234,7 @@ const translations = {
         'btn_help_chat': '💬 Chat with an admin',
         'btn_faq': '❓ FAQ',
 
-        // Order management
+        // Gestion des commandes
         'msg_order_detail': '📦 <b>Order #{id}</b>',
         'label_status': '🔘 Status:',
         'label_payment': '💳 Payment:',
@@ -246,7 +246,7 @@ const translations = {
         'btn_yes_cancel': '✅ Yes, cancel',
         'btn_no_cancel': '❌ No, keep',
 
-        // User settings
+        // Réglages utilisateur
         'msg_settings': '⚙️ <b>MY SETTINGS</b>',
         'btn_change_lang': '🌐 Change Language',
         'btn_saved_addresses': '📍 My Addresses',
@@ -254,15 +254,15 @@ const translations = {
         'label_referral_code': '🎁 Your code: <code>{code}</code>',
         'msg_referral_info': '👥 <b>REFERRAL PROGRAM</b>\n\nShare your code and earn rewards for each friend who joins!',
 
-        // Catalog empty / not found
+        // Catalogue vide / non trouvé
         'msg_catalog_empty': '📭 The catalog is currently empty.',
         'msg_product_not_found': '❌ Product not found.',
 
-        // Address selection
+        // Sélection d'adresse
         'label_use_address': '📌 {address}',
         'btn_enter_new_address': '✏️ Enter new address',
 
-        // Livreur delivery actions
+        // Actions de livraison livreur
         'btn_start_delivery': '🚀 Start Delivery',
         'btn_finish_delivery': '✅ Mark as Delivered',
         'btn_contact_client': '📱 Contact Client',
@@ -271,12 +271,12 @@ const translations = {
         'msg_delivery_finished': '✅ <b>Delivery marked as complete.</b>',
     },
     fr: {
-        // Defaults to settings, but can be used as fallback
+        // Par défaut sur les paramètres, mais peut être utilisé comme repli
     }
 };
 
 function t(ctxOrUser, key, defaultText = null, variables = {}) {
-    // Determine the user object from ctx or direct object
+    // Déterminer l'objet utilisateur à partir du contexte ou de l'objet direct
     const user = (ctxOrUser && ctxOrUser.state && ctxOrUser.state.user) ? ctxOrUser.state.user : ctxOrUser;
     const lang = user?.language_code || user?.data?.language || 'fr';
     

@@ -3444,6 +3444,25 @@
                             <span class="switch-slider"></span>
                         </label>
                     </div>
+                    <div class="card" style="grid-column: span 2; margin-top: 20px; padding: 25px; border-left: 4px solid #25D366; background: rgba(37, 211, 102, 0.05);">
+                        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:20px;">
+                            <div>
+                                <h4 style="color:#25D366; margin-bottom:5px;">🔗 Connexion WhatsApp</h4>
+                                <p style="font-size:13px; opacity:0.8;">Utilisez l'une des méthodes ci-dessous pour connecter votre bot WhatsApp.</p>
+                            </div>
+                            <div style="display:flex; gap:10px;">
+                                <a href="#" onclick="window.open('/whatsapp-qr', '_blank')" class="btn btn-sm" style="background:#25D366; color:#000;">
+                                    <span>📸 Scan QR Code</span>
+                                </a>
+                                <a href="#" onclick="window.open('/wa-pairing?token=' + localStorage.getItem('admin_token'), '_blank')" class="btn btn-sm" style="background:#fff; color:#000;">
+                                    <span>🔢 Code d'appairage</span>
+                                </a>
+                                <a href="#" onclick="if(confirm('Voulez-vous vraiment réinitialiser la session WhatsApp ?')){ window.location='/wa-restart?token=' + localStorage.getItem('admin_token') }" class="btn btn-sm btn-outline">
+                                    <span>🔄 Reset Session</span>
+                                </a>
+                            </div>
+                        </div>
+                    </div>
                     <div class="switch-row">
                         <div class="flex align-center gap-10">
                             <span style="font-size:20px;">🏪</span>

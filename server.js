@@ -33,7 +33,7 @@ function debugLog(msg) {
     console.log(msg);
 }
 
-// configuration handled in index.js
+// La configuration est gérée dans index.js
 
 const { dispatcher } = require('./services/dispatcher');
 const { registry } = require('./channels/ChannelRegistry');
@@ -69,18 +69,18 @@ const loginLimiter = rateLimit({
 function createServer() {
     const app = express();
     
-    // Simple memory cache for analytics (2 min)
+    // Cache mémoire simple pour les analyses (2 min)
     let _analyticsCache = null;
     let _lastAnalyticsUpdate = 0;
     const ANALYTICS_CACHE_TTL = 120000; // 2 minutes
 
-    // Log all requests for debugging
+    // Journalisation de toutes les requêtes pour le débogage
     app.use((req, res, next) => {
         console.log(`[HTTP] ${req.method} ${req.url} (from ${req.ip})`);
         next();
     });
 
-    console.log(`[System] Initializing server on port: ${process.env.PORT || 3000}`);
+    console.log(`[Système] Initialisation du serveur sur le port : ${process.env.PORT || 3000}`);
 
     app.use(cors());
     app.use(express.json({ limit: '50mb' }));
@@ -132,7 +132,7 @@ function createServer() {
             }
         } catch (_) {}
 
-        console.warn(`[AUTH] Accès refusé — token invalide (IP: ${req.ip})`);
+        console.warn(`[AUTH] Accès refusé — jeton invalide (IP: ${req.ip})`);
         res.status(401).json({ error: 'Non autorisé' });
     }
 
@@ -146,7 +146,7 @@ function createServer() {
         });
     });
 
-    // QR Code WhatsApp - accessible via navigateur pour scanner
+    // QR Code WhatsApp - accessible via navigateur pour le scan
     app.get('/whatsapp-qr', (req, res) => {
         const qrPath = path.join(process.cwd(), 'whatsapp_qr.png');
         if (fs.existsSync(qrPath)) {
@@ -158,7 +158,7 @@ function createServer() {
         }
     });
 
-    // WhatsApp restart - nettoie la session et relance le QR
+    // Redémarrage WhatsApp - nettoie la session et relance le QR
     app.get('/wa-restart', authMiddleware, async (req, res) => {
         try {
             const waSession = registry.query('whatsapp');
@@ -173,13 +173,83 @@ function createServer() {
         }
     });
 
-    // WhatsApp connection logs - debug en live
+    // Journaux de connexion WhatsApp - débogage en direct
     app.get('/wa-logs', authMiddleware, (req, res) => {
         const { waLogs } = require('./services/wa_log_shared');
         const logs = waLogs;
         res.setHeader('Content-Type', 'text/html');
         res.setHeader('Cache-Control', 'no-cache');
         res.send(`<html><head><meta http-equiv="refresh" content="3"><style>body{background:#111;color:#0f0;font-family:monospace;padding:20px;font-size:13px}pre{white-space:pre-wrap}</style></head><body><h2 style="color:#fff">WhatsApp Logs (auto-refresh 3s)</h2><pre>${logs.join('\n') || 'Aucun log encore...'}</pre></body></html>`);
+    });
+    
+    // Code d'appairage WhatsApp - alternative au QR
+    app.get('/wa-pairing', authMiddleware, async (req, res) => {
+        try {
+            const phoneNumber = req.query.phone || process.env.WHATSAPP_PAIRING_NUMBER;
+            if (!phoneNumber) {
+                return res.status(400).send('Numéro de téléphone manquant. Utilisez ?phone=337XXXXXXXX');
+            }
+            
+            const waSession = registry.query('whatsapp');
+            if (waSession && waSession.requestPairingCode) {
+                const code = await waSession.requestPairingCode(phoneNumber);
+                res.send(`<html><body style="background:#111;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;flex-direction:column">
+                    <div style="text-align:center;background:#222;padding:40px;border-radius:20px;box-shadow:0 10px 30px rgba(0,0,0,0.5)">
+                        <h1 style="color:#25D366">Code d'appairage WhatsApp</h1>
+                        <p style="opacity:0.8">Numéro : <b>${phoneNumber}</b></p>
+                        <div style="font-size:64px;font-family:monospace;letter-spacing:10px;margin:30px 0;background:#000;padding:20px;border-radius:10px;color:#0f0;border:2px solid #25D366">${code}</div>
+                        <p style="font-size:14px;opacity:0.6">Entrez ce code sur votre téléphone dans :<br>Appareils connectés > Connecter un appareil > Se connecter avec le numéro de téléphone</p>
+                        <button onclick="location.reload()" style="margin-top:20px;padding:10px 20px;background:#25D366;border:none;border-radius:5px;color:#000;font-weight:bold;cursor:pointer">Nouveau code</button>
+                        <br><br>
+                        <a href="/dashboard" style="color:#25D366;text-decoration:none">Retour au Dashboard</a>
+                    </div>
+                </body></html>`);
+            } else {
+                res.status(404).send('WhatsApp Session channel not found or method not implemented');
+            }
+        } catch (e) {
+            res.status(500).send('<html><body style="background:#111;color:#f44;font-family:sans-serif;text-align:center;padding:50px"><h1>Erreur</h1><p>' + e.message + '</p><a href="/dashboard" style="color:#fff">Retour</a></body></html>');
+        }
+    });
+
+    // Page de connexion publique pour le client (autonome)
+    app.get('/wa-connect', async (req, res) => {
+        try {
+            const phoneNumber = process.env.WHATSAPP_PAIRING_NUMBER;
+            if (!phoneNumber) {
+                return res.status(400).send('Numéro de couplage non configuré sur le serveur.');
+            }
+            
+            const waSession = registry.query('whatsapp');
+            if (waSession && waSession.requestPairingCode) {
+                const code = await waSession.requestPairingCode(phoneNumber);
+                res.send(`<html><head><title>Connexion WhatsApp</title><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+                <body style="background:#0f0f0f;color:#fff;font-family:-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;padding:20px;box-sizing:border-box;">
+                    <div style="text-align:center;background:#1a1a1a;padding:40px;border-radius:30px;box-shadow:0 20px 50px rgba(0,0,0,0.8);max-width:400px;width:100%;border:1px solid rgba(37,211,102,0.2)">
+                        <div style="font-size:50px;margin-bottom:20px;">📱</div>
+                        <h1 style="color:#25D366;font-size:24px;margin-bottom:10px;">Connectez votre WhatsApp</h1>
+                        <p style="opacity:0.7;font-size:14px;margin-bottom:30px;">Numéro détecté : <b style="color:#fff">${phoneNumber}</b></p>
+                        
+                        <div style="font-size:48px;font-family:monospace;letter-spacing:8px;margin-bottom:30px;background:#000;padding:25px;border-radius:15px;color:#25D366;border:2px solid #25D366;box-shadow:0 0 20px rgba(37,211,102,0.2)">${code}</div>
+                        
+                        <div style="text-align:left;font-size:13px;opacity:0.8;line-height:1.6;background:rgba(255,255,255,0.03);padding:20px;border-radius:15px;">
+                            <b style="color:#25D366">Instructions :</b><br>
+                            1. Ouvrez <b>WhatsApp</b> sur votre téléphone<br>
+                            2. Menu > <b>Appareils connectés</b><br>
+                            3. <b>Connecter un appareil</b><br>
+                            4. Cliquez sur <b>"Se connecter avec le numéro de téléphone"</b> en bas<br>
+                            5. Entrez le code ci-dessus
+                        </div>
+                        
+                        <button onclick="location.reload()" style="margin-top:30px;width:100%;padding:15px;background:#25D366;border:none;border-radius:15px;color:#000;font-weight:bold;font-size:16px;cursor:pointer;transition:0.3s" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'">Nouveau code</button>
+                    </div>
+                </body></html>`);
+            } else {
+                res.status(404).send('Service WhatsApp indisponible.');
+            }
+        } catch (e) {
+            res.status(500).send('Erreur: ' + e.message);
+        }
     });
 
     // ========== Static Pages ==========
@@ -245,7 +315,7 @@ function createServer() {
         }
     });
 
-    // Cache for stats overview (1 min)
+    // Cache pour l'aperçu des statistiques (1 min)
     let _statsOverviewCache = null;
     let _lastStatsUpdate = 0;
     const STATS_CACHE_TTL = 60000; // 1 minute
@@ -448,7 +518,7 @@ function createServer() {
                     const settings = await getAppSettings();
                     const msg = settings?.msg_auto_timer || '🔥 <b>Le catalogue est à jour !</b>';
                     
-                    // On broadcast à tous les utilisateurs
+                    // On diffuse à tous les utilisateurs
                     broadcastMessage('users', msg).catch(err => {
                         console.error('[Auto-Notif] Broadcast failed:', err.message);
                     });
@@ -630,7 +700,7 @@ function createServer() {
             const logPath = path.join(process.cwd(), 'debug.log');
             if (!fs.existsSync(logPath)) return res.send('Aucun log trouvé.');
             
-            // Read last 1000 lines only for performance
+            // Lire uniquement les 1000 dernières lignes pour la performance
             const content = fs.readFileSync(logPath, 'utf8');
             const lines = content.split('\n');
             const lastLines = lines.slice(-1000).join('\n');
@@ -682,11 +752,11 @@ function createServer() {
 
     app.post('/api/admin/nuke', authMiddleware, async (req, res) => {
         try {
-            debugLog(`[ADMIN] NUKE DATABASE REQUESTED BY ${req.user?.platform_id || 'unidentified'}`);
+            debugLog(`[ADMIN] RÉINITIALISATION TOTALE DE LA BASE DE DONNÉES DEMANDÉE PAR ${req.user?.platform_id || 'non identifié'}`);
             await nukeDatabase();
             res.json({ success: true, message: 'Base de données réinitialisée.' });
         } catch (e) {
-            debugLog(`[ADMIN-FATAL] Nuke failed: ${e.message}`);
+            debugLog(`[ADMIN-FATAL] Échec de la réinitialisation (nuke) : ${e.message}`);
             res.status(500).json({ error: e.message });
         }
     });
@@ -719,7 +789,7 @@ function createServer() {
 
             const updateData = { [field]: currentIds.join(', ') };
 
-            // Nettoyage supplémentaire pour les admins (retrait de list_admins aussi)
+            // Nettoyage supplémentaire pour les administrateurs (retrait de list_admins aussi)
             if (role === 'admin' && action === 'remove') {
                 let listAdmins = Array.isArray(settings.list_admins) ? settings.list_admins : [];
                 const pid = String(platformId);
@@ -744,10 +814,10 @@ function createServer() {
             // On tente la mise à jour massive sur les correspondances de platform_id
             const { data: matched, error: updErr } = await supabase.from(COL_USERS).update(userUpdateObj).eq('platform_id', String(platformId)).select('id');
             
-            if (updErr) console.error(`[Promote] DB error updating user ${platformId}:`, updErr.message);
+            if (updErr) console.error(`[Promote] Erreur DB lors de la mise à jour de l'utilisateur ${platformId} :`, updErr.message);
 
             if (matched && matched.length > 0) {
-                console.log(`[Promote] User ${platformId} updated in DB (${matched.length} rows). Role: ${role}, Action: ${action}`);
+                console.log(`[Promote] Utilisateur ${platformId} mis à jour dans la base (${matched.length} lignes). Rôle: ${role}, Action: ${action}`);
                 for (const u of matched) {
                     _userCache?.delete(u.id);
                 }
@@ -756,11 +826,11 @@ function createServer() {
                     const cleanId = String(platformId).match(/\d+/g)?.[0];
                     if (cleanId) {
                         const had = authenticatedAdmins.delete(cleanId);
-                        console.log(`[Promote] Removed ${cleanId} from authenticatedAdmins session map: ${had}`);
+                        console.log(`[Promote] ${cleanId} retiré de la carte de session authenticatedAdmins : ${had}`);
                     }
                 }
             } else {
-                console.log(`[Promote] No user found with platform_id ${platformId} in DB to update flags.`);
+                console.log(`[Promote] Aucun utilisateur trouvé avec platform_id ${platformId} en base pour mettre à jour les drapeaux.`);
                 // On tente quand même de virer de la session au cas où (fallback ID pur)
                 if (role === 'admin' && action === 'remove') {
                     const cleanId = String(platformId).match(/\d+/g)?.[0];
@@ -801,7 +871,7 @@ function createServer() {
                 }
             });
             res.json(livreurs);
-        } catch (e) { console.error('Livreurs API error:', e); res.status(500).json({ error: e.message }); }
+        } catch (e) { console.error('Erreur API Livreurs :', e); res.status(500).json({ error: e.message }); }
     });
 
     app.get('/api/livreurs/:id/history', authMiddleware, async (req, res) => {
@@ -809,7 +879,7 @@ function createServer() {
             const history = await getDetailedLivreurActivity(req.params.id);
             res.json(history);
         } catch (e) {
-            console.error('Livreur history error:', e);
+            console.error('Erreur historique livreur :', e);
             res.status(500).json({ error: e.message });
         }
     });
@@ -828,7 +898,7 @@ function createServer() {
             await updateAppSettings(updates);
             res.json({ success: true });
         } catch (e) {
-            console.error('❌ Settings update error:', e);
+            console.error('❌ Erreur mise à jour paramètres :', e);
             res.status(500).json({ error: e.message || 'Erreur serveur' });
         }
     });
@@ -919,7 +989,7 @@ function createServer() {
 
             res.json({ success: true });
         } catch (e) {
-            console.error('Order Status API error:', e);
+            console.error('Erreur API statut commande :', e);
             res.status(500).json({ error: 'Erreur serveur' });
         }
     });
@@ -944,7 +1014,7 @@ function createServer() {
             }
             res.json({ success: true });
         } catch (e) {
-            console.error('Order Assign API error:', e);
+            console.error('Erreur API assignation commande :', e);
             res.status(500).json({ error: 'Erreur serveur' });
         }
     });
@@ -1099,7 +1169,7 @@ function createServer() {
             res.json(products); 
         }
         catch (e) { 
-            console.error('[API] Marketplace error:', e.message);
+            console.error('[API] Erreur Marketplace :', e.message);
             res.status(500).json({ error: e.message }); 
         }
     });
@@ -1183,7 +1253,7 @@ function createServer() {
         try {
             const result = await createMarketplaceOrder(req.body);
             
-            // Notify Supplier via Telegram bot
+            // Notifier le fournisseur via le bot Telegram
             const bot = getBotInstance();
             if (bot && req.body.supplier_id) {
                 const { getSupplier } = require('./services/database');
@@ -1200,7 +1270,7 @@ function createServer() {
                             ]
                         }
                     }).catch(err => {
-                        console.error('[Marketplace Notif] Error notifying supplier:', err.message);
+                        console.error('[Marketplace Notif] Erreur lors de la notification du fournisseur :', err.message);
                     });
                 }
             }
@@ -1223,7 +1293,7 @@ function createServer() {
         res.status(404).json({ error: 'Route API non trouvée' });
     });
 
-    // Global error handler for Express
+    // Gestionnaire d'erreurs global pour Express
     app.use((err, req, res, next) => {
         console.error('❌ [EXPRESS ERROR]', err);
         res.status(500).json({ error: 'Erreur interne du serveur' });

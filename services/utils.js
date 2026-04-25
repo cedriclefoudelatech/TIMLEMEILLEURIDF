@@ -49,7 +49,7 @@ async function safeEdit(ctx, text, opts = {}) {
     const chatId = ctx.chat?.id;
 
     if (!chatId) {
-        console.error('[SAFE-EDIT] No chat ID available');
+        console.error('[SAFE-EDIT] Aucun ID de chat disponible');
         return;
     }
 
@@ -125,7 +125,7 @@ async function safeEdit(ctx, text, opts = {}) {
     if (video && typeof video === 'string' && !video.startsWith('http') && !video.startsWith('data:')) {
          const settings = ctx.state?.settings || {};
          const baseUrl = (settings.dashboard_url || '').replace(/\/$/, '');
-         if (!video.includes('/') && !video.includes('.')) { /* file_id */ }
+         if (!video.includes('/') && !video.includes('.')) { /* identifiant_fichier */ }
          else {
              const relativePath = video.startsWith('/public/') ? video.replace('/public/', 'web/public/') : video;
              const absolutePath = path.resolve(process.cwd(), relativePath.startsWith('/') ? relativePath.substring(1) : relativePath);
@@ -215,19 +215,19 @@ async function safeEdit(ctx, text, opts = {}) {
                     return;
                 } catch (e) {
                     if (String(e.description || '').includes('not modified')) return;
-                    // Si l'erreur est liée au média (URL invalide, 0 bytes, etc.), fallback texte pur
+                    // Si l'erreur est liée au média (URL invalide, 0 octets, etc.), repli texte pur
                     const errMsg = String(e.description || e.message || '');
                     if (errMsg.includes('wrong type') || errMsg.includes('wrong file') || errMsg.includes('WEBPAGE_MEDIA_EMPTY') || errMsg.includes('failed to get HTTP URL content')) {
-                        console.warn('[SAFE-EDIT] Media URL invalide, fallback texte pur:', errMsg);
+                        console.warn('[SAFE-EDIT] URL Média invalide, repli texte pur :', errMsg);
                         photo = null; video = null;
-                        // On est dans un message media, on ne peut pas edit en texte → delete + send texte
+                        // On est dans un message média, on ne peut pas modifier en texte → suppression + envoi texte
                     } else {
-                        console.warn('[SAFE-EDIT] Edit failed, fallback to send:', e.message);
+                        console.warn('[SAFE-EDIT] Échec de la modification, repli sur l\'envoi :', e.message);
                     }
                 }
             }
 
-            // CAS 2 : Type différent (texte→media ou media→texte) → Delete ancien + Send nouveau
+            // CAS 2 : Type différent (texte→média ou média→texte) → Suppression ancien + Envoi nouveau
             let newMsg;
             try {
                 if (photo || video) {
@@ -235,7 +235,7 @@ async function safeEdit(ctx, text, opts = {}) {
                     else newMsg = await ctx.replyWithVideo(video, { caption: text, ...extra });
                     // Le Dispatcher retourne { success: false } au lieu de throw — détecter ça
                     if (newMsg && newMsg.success === false && !newMsg.message_id && !newMsg.messageId) {
-                        console.warn(`[SAFE-EDIT] Media retourné success:false, fallback texte`);
+                        console.warn(`[SAFE-EDIT] Média a retourné succès:false, repli texte`);
                         photo = null; video = null;
                         newMsg = await ctx.replyWithHTML(text, extra);
                     }
@@ -243,8 +243,8 @@ async function safeEdit(ctx, text, opts = {}) {
                     newMsg = await ctx.replyWithHTML(text, extra);
                 }
             } catch (err) {
-                console.error(`[SAFE-EDIT] Send media failed (photo=${photo ? 'yes' : 'no'}, video=${video ? 'yes' : 'no'}):`, err.message);
-                // Fallback texte pur — le produit s'affiche quand même sans image
+                console.error(`[SAFE-EDIT] Échec de l'envoi du média (photo=${photo ? 'oui' : 'non'}, vidéo=${video ? 'oui' : 'non'}) :`, err.message);
+                // Repli texte pur — le produit s'affiche quand même sans image
                 photo = null; video = null;
                 newMsg = await ctx.replyWithHTML(text, extra);
             }
@@ -263,7 +263,7 @@ async function safeEdit(ctx, text, opts = {}) {
 
         // ═══════════════════════════════════════════════════
         // B. PAS DE CALLBACK (premier envoi, ou WhatsApp)
-        //    → Send nouveau + supprimer l'ancien menu
+        //    → Envoi nouveau + suppression de l'ancien menu
         // ═══════════════════════════════════════════════════
         let newMsg;
         if (photo || video) {
@@ -274,8 +274,8 @@ async function safeEdit(ctx, text, opts = {}) {
                     newMsg = await ctx.replyWithHTML(text, extra);
                 }
             } catch (err) {
-                console.error(`[SAFE-EDIT] Media failed (photo=${photo ? 'yes' : 'no'}, video=${video ? 'yes' : 'no'}):`, err.message);
-                // Fallback texte pur
+                console.error(`[SAFE-EDIT] Échec du média (photo=${photo ? 'oui' : 'non'}, vidéo=${video ? 'oui' : 'non'}) :`, err.message);
+                // Repli texte pur
                 photo = null; video = null;
                 newMsg = await ctx.replyWithHTML(text, extra);
             }
@@ -334,7 +334,7 @@ async function cleanupUserChat(ctx, keepId = null) {
 
         const toDelete = tracked.filter(id => String(id) !== String(keepId));
         if (toDelete.length > 0) {
-            // Delete batches of 10 to avoid hitting limits or rate limit
+            // Supprimer par lots de 10 pour éviter les limites de débit
             for (let i = 0; i < toDelete.length; i += 10) {
                 const batch = toDelete.slice(i, i + 10);
                 await Promise.allSettled(batch.map(id => {
@@ -343,10 +343,10 @@ async function cleanupUserChat(ctx, keepId = null) {
                 }));
             }
         }
-        // Update cache to only keep the protected one
+        // Mettre à jour le cache pour ne garder que celui qui est protégé
         _trackedCache.set(userId, keepId ? [keepId] : []);
         
-        // Clear from DB too
+        // Effacer également de la DB
         const { supabase, COL_USERS } = require('./database');
         try {
             await supabase.from(COL_USERS).update({ tracked_messages: keepId ? [keepId] : [] }).eq('id', userId);

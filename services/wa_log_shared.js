@@ -1,4 +1,4 @@
-// Shared circular log buffer accessible by both WhatsAppSessionChannel and Dispatcher
+// Tampon de log circulaire partagé accessible par WhatsAppSessionChannel et le Dispatcher
 const waLogs = [];
 
 function waLog(msg) {

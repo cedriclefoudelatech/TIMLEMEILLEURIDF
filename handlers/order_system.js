@@ -29,8 +29,8 @@ const awaitingReviewText = createPersistentMap('awaitingReview');
 const userLastActivity = new Map();
 
 /**
- * Helper to extract a single valid media URL from product data.
- * Handles JSON arrays, plain strings, and trims whitespace.
+ * Assistant pour extraire une seule URL média valide à partir des données du produit.
+ * Gère les tableaux JSON, les chaînes simples et supprime les espaces inutiles en début/fin.
  */
 function getMediaUrl(product) {
     const all = getAllMediaUrls(product);
@@ -50,7 +50,7 @@ function getAllMediaUrls(product) {
         if (raw.startsWith('"') && raw.endsWith('"')) raw = raw.substring(1, raw.length - 1);
     }
 
-    // Handle JSON array format: [{"url":"...", "type":"photo"}, ...]
+    // Gérer le format de tableau JSON : [{"url":"...", "type":"photo"}, ...]
     if (typeof raw === 'string' && raw.startsWith('[') && raw.endsWith(']')) {
         try {
             const arr = JSON.parse(raw);
@@ -63,7 +63,7 @@ function getAllMediaUrls(product) {
         } catch (e) { }
     }
 
-    // Handle single JSON object format
+    // Gérer le format d'objet JSON unique
     if (typeof raw === 'string' && raw.startsWith('{') && raw.endsWith('}')) {
         try {
             const obj = JSON.parse(raw);
@@ -72,7 +72,7 @@ function getAllMediaUrls(product) {
         } catch (e) {}
     }
 
-    // Plain URL string
+    // Chaîne d'URL simple
     return raw ? [{ url: raw, type: 'photo' }] : [];
 }
 
@@ -111,7 +111,7 @@ function setupOrderSystem(bot) {
                     `👏 <b>Félicitations !</b>\n\nUn client a laissé une note pour votre livraison :\n\n${stars}\n"<i>${text}</i>"`
                 );
             }
-        } catch (e) { console.error("Error notifying feedback:", e); }
+        } catch (e) { console.error("Erreur lors de la notification du feedback :", e); }
     }
 
     // ========== CATALOGUE & COMMANDE ==========
@@ -316,7 +316,7 @@ function setupOrderSystem(bot) {
         let cart = userCarts.get(userId) || [];
         cart.push(pending);
         userCarts.set(userId, cart);
-        userLastActivity.set(userId, Date.now()); // Update activity
+        userLastActivity.set(userId, Date.now()); // Mise à jour de l'activité
         pendingOrders.delete(userId);
 
         const products = await getProducts();
@@ -397,7 +397,7 @@ function setupOrderSystem(bot) {
         try {
             await displayCatalog(ctx);
         } catch (e) {
-            console.error('Error displaying catalog after clear:', e.message);
+            console.error('Erreur lors de l\'affichage du catalogue après effacement :', e.message);
             await safeEdit(ctx, settings.msg_cart_cleared || '✅ Panier vidé !', Markup.inlineKeyboard([[Markup.button.callback('🛍️ Voir le Catalogue', 'view_catalog')], [Markup.button.callback(settings.btn_back_quick_menu || '◀️ Menu', 'main_menu')]]));
         }
     });
@@ -414,7 +414,7 @@ function setupOrderSystem(bot) {
         const settings = ctx.state?.settings || await getAppSettings();
         if (cart.length === 0) return safeEdit(ctx, t(user, 'msg_cart_empty', settings.msg_cart_empty || "📭 Votre panier est vide."), Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_quick_menu || '◀️ Menu', 'main_menu')]]));
 
-        // settings already defined above
+        // Paramètres déjà définis plus haut
         const minOrder = settings.fidelity_min_spend || 50;
         let total = cart.reduce((acc, item) => acc + parseFloat(item.totalPrice), 0);
 
@@ -523,7 +523,7 @@ function setupOrderSystem(bot) {
     async function askUnit(ctx, product, qty) {
         const settings = (ctx.state?.settings || await getAppSettings());
         const unit = product.unit;
-        // Support comma and remove non-numeric chars for baseVal calculation
+        // Supporte la virgule et supprime les caractères non numériques pour le calcul de baseVal
         const cleanUnitVal = String(product.unit_value || '1').replace(',', '.');
         const baseVal = parseFloat(cleanUnitVal) || 1;
         const text = `⚖️ <b>Sélecton du format pour ${product.name}</b>\n\n` +
@@ -615,7 +615,7 @@ function setupOrderSystem(bot) {
         if (!ctx.message.text || ctx.message.text.startsWith('/')) return next();
         const addrState = awaitingAddressDetails.get(userId);
 
-        // Step 1: Address Validation -> Suite vers SCHEDULING
+        // Étape 1 : Validation de l'adresse -> Suite vers la PLANIFICATION
         if (addrState && addrState.step === 1) {
             const addr = ctx.message.text.trim();
             // Sur WhatsApp, un nombre (1, 2, 10, etc.) = raccourci menu numérique → laisser passer
@@ -665,7 +665,7 @@ function setupOrderSystem(bot) {
             return await askScheduling(ctx);
         }
 
-        // Step 2: Details Capture -> FINALISATION
+        // Étape 2 : Capture des détails -> FINALISATION
         if (addrState && addrState.step === 2 && !addrState.finalized) {
             const details = ctx.message.text.trim();
             addrState.address += ` (Infos : ${details})`;
@@ -972,7 +972,7 @@ function setupOrderSystem(bot) {
             buttons.push([Markup.button.callback(t(user, 'btn_back_menu', settings.btn_back_quick_menu || '◀️ Menu'), 'main_menu')]);
             await safeEdit(ctx, text, Markup.inlineKeyboard(buttons));
         } catch (e) {
-            console.error('Error fetching user orders:', e);
+            console.error('Erreur lors de la récupération des commandes de l\'utilisateur :', e);
             await safeEdit(ctx, '❌ Error.', Markup.inlineKeyboard([[Markup.button.callback('◀️ Menu', 'main_menu')]]));
         }
     }
@@ -1205,16 +1205,16 @@ function setupOrderSystem(bot) {
                 ]).reply_markup;
 
                 // Envois réels
-                notifyAdmins(bot, baseNotifAdmin, { reply_markup: adminBtns }).catch(e => console.error("Admin Notif Error:", e.message));
+                notifyAdmins(bot, baseNotifAdmin, { reply_markup: adminBtns }).catch(e => console.error("Erreur de notification Admin :", e.message));
                 
                 // SI FOURNISSEUR -> ON ATTEND SON FEU VERT (Pas de notif livreur immédiate)
                 if (orderSupplierId) {
-                    notifySuppliers(bot, cart, order.id, pending.address, dbSettings, isFirstOrder).catch(e => console.error("Supplier Notif Error:", e.message));
+                    notifySuppliers(bot, cart, order.id, pending.address, dbSettings, isFirstOrder).catch(e => console.error("Erreur de notification Fournisseur :", e.message));
                 } else {
-                    notifyLivreurs(bot, baseNotifLivreur, { reply_markup: Markup.inlineKeyboard([[Markup.button.callback('📦 Voir Commandes', 'show_available_orders')]]).reply_markup }).catch(e => console.error("Livreur Notif Error:", e.message));
+                    notifyLivreurs(bot, baseNotifLivreur, { reply_markup: Markup.inlineKeyboard([[Markup.button.callback('📦 Voir Commandes', 'show_available_orders')]]).reply_markup }).catch(e => console.error("Erreur de notification Livreur :", e.message));
                 }
 
-            })().catch(e => console.error("Background processing crash:", e.message));
+            })().catch(e => console.error("Crash du traitement en arrière-plan :", e.message));
 
         } catch (err) {
             console.error(`[Checkout] Erreur fatale pour ${userId}:`, err.message);
@@ -1300,7 +1300,7 @@ function setupOrderSystem(bot) {
         const keyboard = await getLivreurMenuKeyboard(ctx, settings, user || { is_available: isAvailable, data: { is_available: isAvailable } });
         await safeEdit(ctx, text, keyboard);
 
-        // 5. Cleanup bouton "Démarrer"
+        // 5. Nettoyage du bouton "Démarrer"
         ctx.telegram.setChatMenuButton(ctx.chat.id, { type: 'commands' }).catch(() => { });
 
         // 6. Relayer à l'admin
@@ -1323,7 +1323,7 @@ function setupOrderSystem(bot) {
         const userId = `${ctx.platform}_${ctx.from.id}`;
         await supabase.from(COL_USERS).update({ is_livreur: false, is_available: false, updated_at: ts() }).eq('id', userId);
         
-        // Invalider cache
+        // Invalider le cache
         if (_userCache) _userCache.delete(userId);
 
         await safeEdit(ctx, '✅ <b>Profil désactivé avec succès.</b>\nVous ne faites plus partie de l\'équipe de livraison.', Markup.inlineKeyboard([
@@ -1466,7 +1466,7 @@ function setupOrderSystem(bot) {
         const order = await getOrder(orderId);
         const settings = ctx.state?.settings || await getAppSettings();
         
-        if (!order) return ctx.answerCbQuery('❌ NO ORDER');
+        if (!order) return ctx.answerCbQuery('❌ AUCUNE COMMANDE');
 
         // On vérifie si l'appelant est le livreur (pour le menu de prise en charge) 
         // ou le client (pour le suivi).
@@ -1826,7 +1826,7 @@ function setupOrderSystem(bot) {
         );
     });
 
-    // --- New Review System ---
+    // --- Nouveau Système d'Avis ---
     bot.action('leave_review', async (ctx) => {
         const settings = ctx.state?.settings || await getAppSettings();
         await ctx.answerCbQuery();
@@ -1877,7 +1877,7 @@ function setupOrderSystem(bot) {
                     return await uploadMediaFromUrl(link.href, `rev_${Date.now()}${ext}`);
                 }
             } catch (e) {
-                console.warn('[REVIEW-MEDIA-TG] Upload failed, using file_id:', e.message);
+                console.warn('[REVIEW-MEDIA-TG] Échec du téléchargement, utilisation de file_id :', e.message);
                 const mediaArr = Array.isArray(mediaItem) ? mediaItem : [mediaItem];
                 return mediaArr[mediaArr.length - 1]?.file_id || null;
             }
@@ -1918,7 +1918,7 @@ function setupOrderSystem(bot) {
         }
     });
 
-    // Hint button — just tells user to send a photo/video directly
+    // Bouton d'indice — indique simplement à l'utilisateur d'envoyer une photo/vidéo directement
     bot.action('review_add_media_hint', async (ctx) => {
         await ctx.answerCbQuery('📸 Envoyez une photo ou vidéo directement dans le chat !', { show_alert: true });
     });
@@ -1957,7 +1957,7 @@ function setupOrderSystem(bot) {
         });
     });
 
-    // State for review pagination
+    // État pour la pagination des avis
     const reviewPagination = new Map();
 
     bot.action(/^view_reviews(?:_(\d+))?$/, async (ctx) => {
@@ -1981,7 +1981,7 @@ function setupOrderSystem(bot) {
             `${stars}\n"<i>${esc(r.text) || 'Sans commentaire'}</i>"\n\n` +
             `👤 <b>Client de la famille</b> - ${date}`;
 
-        // Photo/Video resolution
+        // Résolution Photo/Vidéo
         let photo = r.photo_file_id || null;
         let video = null;
         if (!photo) {
@@ -2059,7 +2059,7 @@ function setupOrderSystem(bot) {
                     }
                 }
             } catch (e) {
-                console.error("Error parsing media URLs for broadcast:", e);
+                console.error("Erreur lors de l'analyse des URLs média pour la diffusion :", e);
             }
         }
 
@@ -2142,7 +2142,7 @@ function setupOrderSystem(bot) {
                             finalMediaUrls.push(permanentUrl);
                         }
                     } catch (e) {
-                        console.error('[WA-REVIEW] Media processing failed:', e.message);
+                        console.error('[WA-REVIEW] Échec du traitement du média :', e.message);
                     }
                 } else if (ctx.telegram) {
                     try {
@@ -2151,7 +2151,7 @@ function setupOrderSystem(bot) {
                         const permanentUrl = await uploadMediaFromUrl(link.href, fileName);
                         finalMediaUrls.push(permanentUrl);
                     } catch (e) {
-                        console.warn('[REVIEW] Upload to storage failed, using file_id:', e.message);
+                        console.warn('[REVIEW] Échec du téléchargement vers le stockage, utilisation de file_id :', e.message);
                         finalMediaUrls.push(media.file_id || media); 
                     }
                 }
@@ -2178,7 +2178,7 @@ function setupOrderSystem(bot) {
             return;
         }
 
-        // 2. Generic Review (Not tied to order, or from main menu) — Multi-step flow
+        // 2. Avis générique (non lié à une commande, ou depuis le menu principal) — flux multi-étapes
         if (awaitingReviewText.has(userId)) {
             const data = awaitingReviewText.get(userId);
             const photo = ctx.message.photo ? (Array.isArray(ctx.message.photo) ? ctx.message.photo[ctx.message.photo.length - 1] : ctx.message.photo) : null;
@@ -2234,7 +2234,7 @@ function setupOrderSystem(bot) {
                 }
             }
 
-            // Finalise: save review with all accumulated data
+            // Finaliser : enregistrer l'avis avec toutes les données accumulées
             awaitingReviewText.delete(userId);
             const { saveReview: saveReviewFn, getAppSettings: getAppSettingsFn } = require('../services/database');
             const reviewSettings = await getAppSettingsFn();
@@ -2290,7 +2290,7 @@ function setupOrderSystem(bot) {
                                 ])
                             }
                         ).catch(err => {
-                            console.error(`❌ Send delay report failed to ${targetId}:`, err.message);
+                            console.error(`❌ Échec de l'envoi du rapport de retard à ${targetId} :`, err.message);
                             throw err;
                         });
 
@@ -2304,7 +2304,7 @@ function setupOrderSystem(bot) {
                 return;
             }
         } catch (errDelay) {
-            console.error("❌ CRITICAL DELAY RELAY ERROR:", errDelay);
+            console.error("❌ ERREUR CRITIQUE DE RELAYAGE DE CHAT :", errDelay);
             await ctx.reply(`⚠️ Échec de l'envoi du retard : ${errDelay.message || 'Erreur inconnue'}.`).catch(() => { });
             return;
         }
@@ -2363,7 +2363,7 @@ function setupOrderSystem(bot) {
                 return;
             }
         } catch (errChat) {
-            console.error("❌ CRITICAL CHAT RELAY ERROR:", errChat);
+            console.error("❌ ERREUR CRITIQUE DE RELAYAGE DE CHAT :", errChat);
             await ctx.reply(`⚠️ Échec de l'envoi : ${errChat.message || 'Erreur inconnue'}.`).catch(() => { });
             return;
         }
@@ -2584,7 +2584,7 @@ function setupOrderSystem(bot) {
             let totalEarned = 0;
 
             deliveries.forEach((d, i) => {
-                // Parsing date Supabase simple
+                // Analyse simple de la date Supabase
                 const dateStr = d.created_at ? new Date(d.created_at).toLocaleDateString('fr-FR') : 'Date inconnue';
                 text += `${i + 1}. #${d.id.slice(-5)} - ${d.product_name} (${d.total_price}€)\n` +
                     `📅 ${dateStr} - 📍 ${(d.address || 'N/A').substring(0, 20)}...\n\n`;
@@ -2608,7 +2608,7 @@ function setupOrderSystem(bot) {
 
             await updateLivreurPosition(docId, city);
 
-            // Nettoyage input
+            // Nettoyage de l'entrée
             await ctx.deleteMessage().catch(() => { });
 
             const settings = (ctx.state?.settings || await getAppSettings());
@@ -2628,7 +2628,7 @@ function setupOrderSystem(bot) {
     });
 
     bot.on('message', async (ctx, next) => {
-        // Abandoned cart activity update
+        // Mise à jour de l'activité du panier abandonné
         const userId = `${ctx.platform}_${ctx.from.id}`;
         if (userCarts.has(userId)) {
             userLastActivity.set(userId, Date.now());

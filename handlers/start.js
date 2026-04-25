@@ -50,19 +50,19 @@ function setupStartHandler(bot) {
         const { supabase, COL_USERS, clearUserCache } = require('../services/database');
         const docId = `${ctx.platform}_${ctx.from.id}`;
         
-        // 1. Patch state immediately so the menu renders in the new language now
+        // 1. Mettre à jour l'état immédiatement pour que le menu s'affiche dans la nouvelle langue
         if (!ctx.state.user) ctx.state.user = {};
         if (!ctx.state.user.data) ctx.state.user.data = {};
         ctx.state.user.data.language = lang;
         ctx.state.user.language_code = lang;
 
-        // 2. Persist to DB (awaited so cache is cleared after write, not before)
+        // 2. Persister en base de données (attendu pour que le cache soit vidé après l'écriture)
         await supabase.from(COL_USERS).update({ 
             language_code: lang, 
             data: { ...(ctx.state.user.data), language: lang } 
         }).eq('id', docId);
         
-        // 3. Bust cache AFTER the write completes
+        // 3. Vider le cache après la fin de l'écriture
         clearUserCache(docId);
 
         const msg = lang === 'fr' ? '✅ Langue réglée sur Français !' : '✅ Language set to English!';
@@ -262,7 +262,7 @@ function setupStartHandler(bot) {
                 return ctx.reply('❌ Vous n\'êtes pas encore abonné au canal. Veuillez cliquer sur "Rejoindre le Canal" puis réessayer.', { parse_mode: 'HTML' });
             } else {
                 ctx.reply('✅ Abonnement vérifié avec succès !', { parse_mode: 'HTML' });
-                // Simulate a /start command to re-evaluate the user logic
+                // Simuler une commande /start pour réévaluer la logique utilisateur
                 return bot.handleUpdate({ ...ctx.update, message: { text: '/start', from: ctx.from } });
             }
         }
@@ -416,16 +416,16 @@ async function showMainMenu(ctx) {
     // Nettoyer les états marketplace
     clearAllAwaitingMaps(ctx.from.id);
     const settings = await getAppSettings();
-    // Use already-patched ctx.state.user if available (e.g. right after language change),
-    // otherwise fetch fresh from DB.
+    // Utiliser ctx.state.user déjà corrigé si disponible (ex: juste après un changement de langue),
+    // sinon récupérer les données fraîches de la DB.
     const freshUser = await getUser(userId);
-    // Merge: prefer freshUser data but keep in-memory language if it was just changed
+    // Fusion : préférer les données de freshUser mais garder la langue en mémoire si elle vient d'être changée
     let user = freshUser;
     if (user && ctx.state.user?.language_code && ctx.state.user.language_code !== user.language_code) {
         // In-memory language is newer (race condition guard)
         user = { ...user, language_code: ctx.state.user.language_code, data: { ...(user.data || {}), language: ctx.state.user.language_code } };
     }
-    if (user) ctx.state.user = user; // Ensure ctx.state.user is up-to-date for t()
+    if (user) ctx.state.user = user; // S'assurer que ctx.state.user est à jour pour t()
     
     // Anti-blocage unapproved en retour menu
     const isApproved = (user && user.is_approved !== false) || (await isAdmin(ctx));

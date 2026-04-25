@@ -46,13 +46,13 @@ async function isAdmin(ctx) {
     if (!currentUserId) return false;
 
     if (authenticatedAdmins.has(currentUserId)) {
-        // console.log(`[isAdmin] Authorized via session cache: ${currentUserId}`);
+        // console.log(`[isAdmin] Autorisé via le cache de session : ${currentUserId}`);
         return true;
     }
 
     const settings = ctx.state?.settings || (await getAppSettings()) || {};
     
-    // Extract IDs from settings
+    // Extraire les IDs des paramètres
     const adminIds = String(settings.admin_telegram_id || '').match(/\d+/g) || [];
     const extraAdmins = (Array.isArray(settings.list_admins) ? settings.list_admins : [])
         .map(id => String(id).match(/\d+/g)?.[0])
@@ -62,10 +62,10 @@ async function isAdmin(ctx) {
     const allAdmins = [...adminIds, ...extraAdmins];
     if (envAdmin) allAdmins.push(envAdmin);
 
-    // console.log(`[isAdmin] Checking ${currentUserId} against list: ${JSON.stringify(allAdmins)}`);
+    // console.log(`[isAdmin] Vérification de ${currentUserId} par rapport à la liste : ${JSON.stringify(allAdmins)}`);
 
     if (allAdmins.includes(currentUserId)) {
-        console.log(`[isAdmin] Authorized via Settings/Env: ${currentUserId}`);
+        console.log(`[isAdmin] Autorisé via Paramètres/Env : ${currentUserId}`);
         authenticatedAdmins.set(currentUserId, true);
         return true;
     }
@@ -73,7 +73,7 @@ async function isAdmin(ctx) {
     // Check by DB status
     const user = ctx.state?.user || ctx.user;
     if (user && user.is_admin) {
-        console.log(`[isAdmin] Authorized via DB flag is_admin=true: ${currentUserId}`);
+        console.log(`[isAdmin] Autorisé via le drapeau DB is_admin=true : ${currentUserId}`);
         authenticatedAdmins.set(currentUserId, true);
         return true;
     }
@@ -208,7 +208,7 @@ function setupAdminHandlers(bot) {
         const settings = ctx.state.settings || {};
         const rootAdminIds = String(settings.admin_telegram_id || '').match(/\d+/g) || [];
 
-        // Root admins or already authenticated admins get in directly
+        // Les administrateurs racine ou déjà authentifiés entrent directement
         const adminKey = String(ctx.from.id).match(/\d+/g)?.[0] || String(ctx.from.id);
         if (rootAdminIds.includes(adminKey) || authenticatedAdmins.has(adminKey)) {
             await ctx.answerCbQuery();
@@ -301,7 +301,7 @@ function setupAdminHandlers(bot) {
             return [Markup.button.callback(`${icon} #${shortId} - ${o.total_price}€ - ${o.first_name || 'Cl'}`, `ao_v_${o.id}`)];
         });
 
-        // Add filter toggle button at the top
+        // Ajouter le bouton de bascule du filtre en haut
         if (isPendingOnly) {
             buttons.unshift([Markup.button.callback('📜 VOIR TOUTES LES COMMANDES', 'admin_orders_all')]);
         } else {
@@ -391,7 +391,7 @@ function setupAdminHandlers(bot) {
     // Gestion des Utilisateurs
     bot.action('admin_users', async (ctx) => {
         await ctx.answerCbQuery().catch(() => {});
-        // Optimisation: searchUsers('') with limit for "Derniers inscrits" view
+        // Optimisation : searchUsers('') avec limite pour la vue "Derniers inscrits"
         const users = await searchUsers('', 'active'); 
         const buttons = users.slice(0, 10).map(u => [Markup.button.callback(`👤 ${u.first_name} (@${u.username || '?'})`, `admin_user_view_${u.id}`)]);
         
@@ -431,12 +431,12 @@ function setupAdminHandlers(bot) {
     bot.on('text', async (ctx, next) => {
         const adminId = String(ctx.from.id);
         if (adminSearchState.has(adminId)) {
-            console.log(`[AdminSearch] Logic triggered for ${adminId} | Query: "${ctx.message.text}"`);
+            console.log(`[AdminSearch] Logique déclenchée pour ${adminId} | Requête : "${ctx.message.text}"`);
             adminSearchState.delete(adminId);
             const query = ctx.message.text.trim();
             try {
                 const users = await searchUsers(query);
-                console.log(`[AdminSearch] Found ${users.length} users for "${query}"`);
+                console.log(`[AdminSearch] ${users.length} utilisateurs trouvés pour "${query}"`);
                 if (users.length === 0) return ctx.reply('❌ Aucun utilisateur trouvé.');
 
                 const buttons = users.map(u => [Markup.button.callback(`👤 ${u.first_name} (@${u.username || '?'})`, `admin_user_view_${u.id}`)]);
@@ -450,7 +450,7 @@ function setupAdminHandlers(bot) {
         await next();
     });
 
-    // Support Queue Interface
+    // Interface de la file d'attente du support
     bot.action('admin_support_queue', async (ctx) => {
         if (!(await isAdmin(ctx))) return ctx.answerCbQuery('❌ Accès réservé.');
         await ctx.answerCbQuery();
@@ -518,13 +518,13 @@ function setupAdminHandlers(bot) {
         awaitingAdminChat.set(adminId, targetIdString);
         activeAdminSessions.set(adminId, true);
         
-        // Remove from support queue if present
+        // Retirer de la file d'attente du support si présent
         if (pendingSupportRequests.has(targetIdString)) {
             pendingSupportRequests.delete(targetIdString);
         }
         
         await ctx.answerCbQuery();
-        await cleanupUserChat(ctx); // Clean old messages before starting chat
+        await cleanupUserChat(ctx); // Nettoyer les anciens messages avant de commencer la discussion
         
         return ctx.reply(`💬 <b>CONVERSATION ACTIVE</b>\n\nVous discutez avec <code>${targetIdString}</code>.\n\nTous vos prochains messages (texte, photo, vidéo) lui seront transmis.\n\nCliquez sur le bouton ci-dessous pour <b>TERMINER</b> et reprendre le comportement normal.`,
             Markup.inlineKeyboard([
@@ -544,7 +544,7 @@ function setupAdminHandlers(bot) {
         // Notifier le client
         await sendTelegramMessage(targetIdString, `🏁 <b>L'administrateur a mis fin à la discussion.</b>\n\nLe bot reprend son fonctionnement normal. Tapez /start pour voir le menu.`);
         
-        await cleanupUserChat(ctx); // Cleanup before returning to menu
+        await cleanupUserChat(ctx); // Nettoyage avant de retourner au menu
         return showAdminMenu(ctx, true);
     });
 
@@ -646,7 +646,7 @@ function setupAdminHandlers(bot) {
             const { sendMessageToUser } = require('../services/notifications');
             
             const newStatus = !u.is_livreur;
-            // setLivreurStatus handles cache clearing
+            // setLivreurStatus gère le vidage du cache
             await setLivreurStatus(u.platform_id, u.platform, newStatus);
             
             await ctx.answerCbQuery(`✅ Changé !`);
@@ -724,7 +724,7 @@ function setupAdminHandlers(bot) {
         if (p) {
             await saveProduct({ ...p, is_active: !p.is_active });
             await ctx.answerCbQuery(`✅ ${p.name} est maintenant ${!p.is_active ? 'Actif' : 'Inactif'}`);
-            // Refresh
+            // Rafraîchissement
             const updated = await getProducts();
             const buttons = updated.map(up => [Markup.button.callback(`${up.is_active ? '🟢' : '🔴'} ${up.name} - ${up.price}€`, `admin_prod_toggle_${up.id}`)]);
             buttons.push([Markup.button.callback('◀️ Retour', 'admin_menu')]);
@@ -732,7 +732,7 @@ function setupAdminHandlers(bot) {
         }
     });
 
-    // Broadcast — inline prompt
+    // Diffusion — prompt en ligne
     const pendingBroadcasts = new Set();
 
     bot.action('admin_broadcast', async (ctx) => {
@@ -753,7 +753,7 @@ function setupAdminHandlers(bot) {
         const adminId = uId; // Pour la lisibilité côté admin
         const uKey = ctx.platform === 'whatsapp' ? `whatsapp_${uId}` : `telegram_${uId}`;
 
-        // DEBUG LOG
+        // JOURNAL DE DÉBOGAGE
         const isRelayActive = awaitingAdminChat.has(adminId);
         const isUserSession = activeUserSessions.has(uKey) || awaitingUserSupportReply.has(uKey);
         if (isRelayActive || isUserSession || ctx.platform === 'whatsapp') {
@@ -763,7 +763,7 @@ function setupAdminHandlers(bot) {
         // 1. PRIORITÉ : Conversation Active (Admin -> User)
         if (awaitingAdminChat.has(adminId) && (await isAdmin(ctx))) {
             const targetId = awaitingAdminChat.get(adminId);
-            console.log(`[Admin-to-User] Relay triggered from admin ${adminId} to ${targetId}`);
+            console.log(`[Admin-to-User] Relais déclenché de l'admin ${adminId} vers ${targetId}`);
             
             if (ctx.message.text === '/stopchat' || ctx.message.text === '/end') {
                 awaitingAdminChat.delete(adminId);
@@ -791,7 +791,7 @@ function setupAdminHandlers(bot) {
 
             try {
                 const res = await sendTelegramMessage(targetId, `👮 <b>MESSAGE DE L'ADMINISTRATION</b>\n\n${text ? `"${text}"` : (options.photo ? '📸 Photo reçue' : '🎥 Vidéo reçue')}`, options);
-                console.log(`[Admin-to-User] Send result for ${targetId}:`, res);
+                console.log(`[Admin-to-User] Résultat de l'envoi pour ${targetId} :`, res);
                 if (res) {
                     activeUserSessions.set(targetId, true);
                     return ctx.reply(`✅ <b>Message transmis au client !</b>\n\n<i>(Session ouverte : il pourra vous répondre directement)</i>`, { parse_mode: 'HTML' });
@@ -800,15 +800,15 @@ function setupAdminHandlers(bot) {
                     throw new Error("Bot could not send message");
                 }
             } catch (e) {
-                console.error(`[AdminChat-Error] FAILED to send to ${targetId}:`, e.message);
+                console.error(`[AdminChat-Error] ÉCHEC de l'envoi vers ${targetId} :`, e.message);
                 return ctx.reply(`❌ <b>Échec de l'envoi :</b> ${e.message}`, { parse_mode: 'HTML' });
             }
         }
 
-        // 2. Broadcast Logic (Only if not in chat)
+        // 2. Logique de diffusion (uniquement si hors discussion)
         if (pendingBroadcasts.has(ctx.from.id) && (await isAdmin(ctx))) {
             pendingBroadcasts.delete(ctx.from.id);
-            console.log(`[AdminBroadcast] Triggered by ${adminId}`);
+            console.log(`[AdminBroadcast] Déclenché par ${adminId}`);
             
             const message = ctx.message.text || ctx.message.caption || '';
             const options = {};
@@ -859,7 +859,7 @@ function setupAdminHandlers(bot) {
         if (isSupportMessage && !(await isAdmin(ctx))) {
             if (!activeUserSessions.has(uKey) && !awaitingUserSupportReply.has(uKey)) {
                 activeUserSessions.set(uKey, true);
-                console.log(`[Admin-Relay] Auto-start support pour ${uKey}`);
+                console.log(`[Admin-Relay] Démarrage automatique du support pour ${uKey}`);
             }
 
             const text = ctx.message.text || ctx.message.caption || '';
@@ -887,7 +887,7 @@ function setupAdminHandlers(bot) {
                 }
                 return;
             } catch (e) {
-                console.error(`[Admin-Relay-Error] FAILED to relay from ${uKey}:`, e.message);
+                console.error(`[Admin-Relay-Error] ÉCHEC du relais depuis ${uKey} :`, e.message);
                 return ctx.reply(`❌ <b>Échec de transmission :</b> ${e.message}`);
             }
         }
@@ -1021,7 +1021,7 @@ function setupAdminHandlers(bot) {
         return bot.handleUpdate({ ...ctx.update, callback_query: { ...ctx.callbackQuery, data: 'admin_manage_list' } });
     });
 
-    // Handler texte pour ADD ADMIN
+    // Gestionnaire de texte pour l'ajout d'administrateur
     const pendingAdminAdd = new Map();
     bot.on('text', async (ctx, next) => {
         if (pendingAdminAdd.has(ctx.from.id)) {
@@ -1050,7 +1050,7 @@ function setupAdminHandlers(bot) {
             if (field.endsWith('_url') && !val.startsWith('http')) {
                 val = 'https://' + val.replace(/^@/, 't.me/');
             }
-            const newVal = val; // Use the processed 'val'
+            const newVal = val; // Utiliser la valeur traitée 'val'
             await updateAppSettings({ [field]: newVal });
             await ctx.reply(`✅ <b>${field}</b> mis à jour !`, { parse_mode: 'HTML' });
             await notifyAdmins(bot, `⚙️ <b>PARAMÈTRE MIS À JOUR</b>\n\nClé : <code>${field}</code>\nPar : ${ctx.from.first_name}`);
@@ -1063,7 +1063,7 @@ function setupAdminHandlers(bot) {
     });
 
 
-    // On-onglet des fonctionnalités (Menu principal)
+    // Sous-onglet des fonctionnalités (Menu principal)
     bot.action('admin_features', async (ctx) => {
         await ctx.answerCbQuery();
         const msg = `✨ <b>GUIDE DES FONCTIONNALITÉS</b>\n\n` +

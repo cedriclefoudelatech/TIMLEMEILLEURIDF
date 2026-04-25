@@ -1,4 +1,4 @@
-// PersistentMap - Map wrapper that persists state to Supabase bot_state table
+// PersistentMap - Enveloppe de Map qui persiste l'état dans la table bot_state de Supabase
 const TABLE = 'bot_state';
 const db = () => require('../config/supabase').supabase.from(TABLE);
 
@@ -15,13 +15,13 @@ function createPersistentMap(namespace) {
 
             if (op === 'SET') {
                 const { error } = await db().upsert(payload, { onConflict: 'id' });
-                if (error) console.error(`[State] ${namespace} ${op} DB Error for ${k}:`, error.message);
+                if (error) console.error(`[State] ${namespace} ${op} Erreur DB pour ${k} :`, error.message);
             } else if (op === 'DEL') {
                 const { error } = await db().delete().eq('id', rid(k));
-                if (error) console.error(`[State] ${namespace} ${op} DB Error for ${k}:`, error.message);
+                if (error) console.error(`[State] ${namespace} ${op} Erreur DB pour ${k} :`, error.message);
             }
         } catch (e) {
-            console.error(`[State] ${namespace} ${op} Exception for ${k}:`, e.message);
+            console.error(`[State] ${namespace} ${op} Exception pour ${k} :`, e.message);
         }
     };
 
@@ -43,7 +43,7 @@ function createPersistentMap(namespace) {
         clear() { 
             mem.clear(); 
             db().delete().eq('namespace', namespace).then(({error}) => {
-                if (error) console.error(`[State] ${namespace} CLEAR DB Error:`, error.message);
+                if (error) console.error(`[State] ${namespace} Erreur CLEAR DB :`, error.message);
             });
         },
         keys: () => mem.keys(), 
@@ -55,13 +55,13 @@ function createPersistentMap(namespace) {
         async load() {
             try {
                 const now = Date.now();
-                // Attempt load with retry logic or at least timeout
+                // Tentative de chargement avec logique de réessai ou au moins un délai d'attente
                 const { data, error } = await db()
                     .select('user_key, value')
                     .eq('namespace', namespace);
                 
                 if (error) { 
-                    console.warn(`[State] ${namespace} load error: ${error.message}`); 
+                    console.warn(`[State] ${namespace} erreur de chargement : ${error.message}`); 
                     live = true;
                     return; 
                 }

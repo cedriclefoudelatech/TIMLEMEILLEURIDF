@@ -43,10 +43,10 @@ class Dispatcher {
     setUserLastButtons(userId, buttons) {
         const id = this._normalizeId(userId);
         if (buttons && buttons.length > 0) {
-            console.log(`[Dispatcher] setLastButtons for ${id}: ${JSON.stringify(buttons.map(b => b.id || (b.web_app ? 'WebApp' : 'Text')))}`);
+            console.log(`[Dispatcher] setLastButtons pour ${id} : ${JSON.stringify(buttons.map(b => b.id || (b.web_app ? 'WebApp' : 'Texte')))}`);
             this.userLastButtons.set(id, buttons);
         } else {
-            console.log(`[Dispatcher] Clearing buttons for ${id}`);
+            console.log(`[Dispatcher] Effacement des boutons pour ${id}`);
             this.userLastButtons.delete(id);
         }
     }
@@ -68,7 +68,7 @@ class Dispatcher {
         // 0. Dé-duplication (Baileys envoie parfois plusieurs fois le même message)
         const msgId = msg.message_id || msg.rawId;
         if (msgId && this.processedMessages.has(msgId)) {
-            console.log(`[Dispatcher] Ignored duplicate message: ${msgId}`);
+            console.log(`[Dispatcher] Message en double ignoré : ${msgId}`);
             return;
         }
         if (msgId) {
@@ -117,7 +117,7 @@ class Dispatcher {
                 msg._isNewUser = isNew;
             }
         } catch (e) {
-            console.error(`[Dispatcher] Auto-reg failed: ${e.message}`);
+            console.error(`[Dispatcher] L'auto-enregistrement a échoué : ${e.message}`);
         }
 
         // Uniformisation du contexte
@@ -159,7 +159,7 @@ class Dispatcher {
                         
                         // Si message texte sur WhatsApp/Telegram non approuvé -> redirection vers /start (via command handler)
                         if (this.commands.has('start')) {
-                            console.log(`[Dispatcher] Redirection user non-approuvé ${ctx.from.id} vers /start`);
+                            console.log(`[Dispatcher] Redirection de l'utilisateur non approuvé ${ctx.from.id} vers /start`);
                             return await this.commands.get('start')(ctx);
                         }
                         return; // Bloquer
@@ -289,7 +289,7 @@ class Dispatcher {
                         const tgBot = tgCh?.getBotInstance?.();
                         if (tgBot) return tgBot.telegram.getFileLink(fileId);
                     }
-                    throw new Error('getFileLink not available for this platform');
+                    throw new Error('getFileLink n\'est pas disponible pour cette plateforme');
                 }
             },
 
@@ -301,7 +301,7 @@ class Dispatcher {
                 }
                 const options = this._convertExtra(extra);
                 if (options.buttons) this.setUserLastButtons(userId, options.buttons);
-                else if (channel.type === 'whatsapp') this.setUserLastButtons(userId, null); // Clear if no buttons
+                else if (channel.type === 'whatsapp') this.setUserLastButtons(userId, null); // Effacer si aucun bouton
                 
                 // Cleanup auto pour WA
                 if (channel.type === 'whatsapp') {
@@ -332,7 +332,7 @@ class Dispatcher {
                     const sentIds = res.sentIds || (res.messageId ? [res.messageId] : []);
                     if (sentIds.length > 0) {
                         this.userLastMessageIds.set(userId, sentIds);
-                        console.log(`[WA-Stored] IDs stockés pour ${userId}:`, sentIds);
+                        console.log(`[WA-Stored] IDs stockés pour ${userId} :`, sentIds);
                     }
                 }
                 const trackId = res?.message_id || res?.messageId || (res?.sentIds ? res.sentIds[0] : null);
@@ -425,7 +425,7 @@ class Dispatcher {
                         try {
                             return await tgBot.telegram.editMessageText(userId, ctx.callbackQuery.message.message_id, null, text, { parse_mode: 'HTML', ...extra });
                         } catch (e) {
-                            if (!String(e.description || '').includes('not modified')) console.warn('[Dispatcher] editMessageText failed:', e.message);
+                            if (!String(e.description || '').includes('not modified')) console.warn('[Dispatcher] Échec de editMessageText :', e.message);
                         }
                     }
                 }
@@ -460,7 +460,7 @@ class Dispatcher {
                 url: b.url,
                 web_app: b.web_app
             }));
-            console.log(`[Dispatcher] Extracted ${options.buttons.length} buttons`);
+            console.log(`[Dispatcher] ${options.buttons.length} boutons extraits`);
         }
 
         if (extra.parse_mode === 'HTML') options.parse_mode = 'HTML';
@@ -488,12 +488,12 @@ class Dispatcher {
         // 1. Gestion des CALLBACKS (Boutons Telegram & Actions WhatsApp)
         if (ctx.callbackQuery) {
             const data = ctx.callbackQuery.data;
-            console.log(`[Dispatcher-CB] Bouton détecté: "${data}" (User: ${userId})`);
+            console.log(`[Dispatcher-CB] Bouton détecté : "${data}" (Utilisateur : ${userId})`);
             const found = await this._routeAction(ctx, data);
             if (found) {
                 console.log(`[${platform}] ✅ Handler trouvé et exécuté pour: "${data}"`);
             } else {
-                console.log(`[${platform}] ❌ AUCUN handler pour le bouton: "${data}" — bouton non enregistré!`);
+                console.log(`[${platform}] ❌ AUCUN gestionnaire pour le bouton : "${data}" — bouton non enregistré !`);
             }
             return;
         }
@@ -501,7 +501,7 @@ class Dispatcher {
         // 2. Commande explicite /cmd
         if (text.startsWith('/')) {
             const cmd = text.split(' ')[0].substring(1);
-            console.log(`[Dispatcher] Checking command: "/${cmd}" (Available: ${Array.from(this.commands.keys()).join(', ')})`);
+            console.log(`[Dispatcher] Vérification de la commande : "/${cmd}" (Disponibles : ${Array.from(this.commands.keys()).join(', ')})`);
             if (this.commands.has(cmd)) {
                 console.log(`[${platform}] 📟 Commande /${cmd} trouvée`);
                 return await this.commands.get(cmd)(ctx);
@@ -608,7 +608,7 @@ class Dispatcher {
         if (!id || !buttons) return;
         const shortId = String(id).replace(/^(telegram_|whatsapp_)/, '').split('@')[0];
         this.userLastButtons.set(shortId, buttons);
-        console.log(`[Dispatcher] Buttons cache hydrated for ${shortId} (${buttons.length} buttons)`);
+        console.log(`[Dispatcher] Cache des boutons hydraté pour ${shortId} (${buttons.length} boutons)`);
     }
 }
 

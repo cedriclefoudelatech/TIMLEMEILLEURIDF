@@ -95,7 +95,7 @@ async function broadcastMessage(platform, message, options = {}) {
     // NOUVEAU: On utilise getAllUsersForBroadcast pour inclure aussi les utilisateurs bloqués
     const targets = await getAllUsersForBroadcast(null, bType);
     const totalTargets = targets.length;
-    debugLog(`[BC-TARGETS] ${totalTargets} cibles trouvées (Argument Platform: ${platform}, InternalType: ${bType}).`);
+    debugLog(`[BC-TARGETS] ${totalTargets} cibles trouvées (Argument Plateforme: ${platform}, Type Interne: ${bType}).`);
 
     // --- NOUVEAU : Vérification de la planification ---
     const now = new Date();
@@ -142,7 +142,7 @@ async function broadcastMessage(platform, message, options = {}) {
                     type: f.mimetype.includes('video') ? 'video' : 'photo' 
                 });
             } else {
-                debugLog(`[BC-UPLOAD-WARN] Pas d'URL retournée pour ${f.name}. Fallback to buffer.`);
+                debugLog(`[BC-UPLOAD-WARN] Pas d'URL retournée pour ${f.name}. Repli vers le buffer (fallback).`);
                 unifiedMediaList.push({ source: fileBuffer, filename: f.name, type: f.mimetype.includes('video') ? 'video' : 'photo' });
             }
         } catch (e) {
@@ -305,7 +305,7 @@ async function sendToUser(user, message, unifiedMediaList = [], options = {}) {
                 }
 
                 const safeWA = async () => {
-                    const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout Message WhatsApp')), GLOBAL_SEND_TIMEOUT));
+                    const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Délai d\'attente dépassé (Timeout) Message WhatsApp')), GLOBAL_SEND_TIMEOUT));
                     const execution = channel.sendInteractive(cleanPid, message, buttons, {
                         media_url: mediaUrl,
                         media_type: m0.type || 'photo'
@@ -327,7 +327,7 @@ async function sendToUser(user, message, unifiedMediaList = [], options = {}) {
                         }
 
                         const safeWA = async () => {
-                            const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout Message WhatsApp (Média)')), GLOBAL_SEND_TIMEOUT));
+                            const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Délai d\'attente dépassé (Timeout) Message WhatsApp (Média)')), GLOBAL_SEND_TIMEOUT));
                             const execution = channel.sendMessage(cleanPid, cap, { 
                                 media_url: mediaUrl, 
                                 media_type: m.type,
@@ -348,7 +348,7 @@ async function sendToUser(user, message, unifiedMediaList = [], options = {}) {
                     }
 
                     const safeWA = async () => {
-                        const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout Message WhatsApp (Simple)')), GLOBAL_SEND_TIMEOUT));
+                        const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Délai d\'attente dépassé (Timeout) Message WhatsApp (Simple)')), GLOBAL_SEND_TIMEOUT));
                         const execution = channel.sendMessage(cleanPid, message, { 
                             media_url: mediaUrl, 
                             media_type: m?.type || 'photo',
@@ -397,7 +397,7 @@ async function sendToUser(user, message, unifiedMediaList = [], options = {}) {
 
     // Helper function for safe send with fallback and TOUGH TIMEOUT
     const safeSend = async (method, ...args) => {
-        const timeout = (ms) => new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout API Telegram')), ms));
+        const timeout = (ms) => new Promise((_, reject) => setTimeout(() => reject(new Error('Délai d\'attente dépassé (Timeout) API Telegram')), ms));
         
         const execute = async () => {
             try {
@@ -406,7 +406,7 @@ async function sendToUser(user, message, unifiedMediaList = [], options = {}) {
             } catch (err) {
                 const desc = (err.description || '').toLowerCase();
                 if (desc.includes('can\'t parse entities') || desc.includes('bad request')) {
-                    debugLog(`[BC-RETRY] Fallback to Plain text for ${chatId} (${method})`);
+                    debugLog(`[BC-RETRY] Repli vers le texte brut pour ${chatId} (${method})`);
                     return await _bot.telegram[method](chatId, ...args);
                 }
                 throw err;
@@ -450,7 +450,7 @@ async function sendToUser(user, message, unifiedMediaList = [], options = {}) {
                 } else throw err;
             }
 
-            // Cache file_ids & Tracking
+            // Cache des file_ids & Suivi (Tracking)
             if (msgs && Array.isArray(msgs)) {
                 const { addMessageToTrack } = require('./database');
                 for (const msg of msgs) {
@@ -492,7 +492,7 @@ async function sendToUser(user, message, unifiedMediaList = [], options = {}) {
             debugLog(`[BC-SEND] Texte -> ${chatId}`);
             if (!message || message.trim() === '') {
                 debugLog(`[BC-SKIP] Message vide pour ${chatId}`);
-                return { success: true }; // On skip les messages vides sans erreur
+                return { success: true }; // On ignore les messages vides sans erreur
             }
             try {
                 const msg = await _bot.telegram.sendMessage(chatId, message, { parse_mode: 'HTML', ...(_protect ? { protect_content: true } : {}), ...(keyboard ? keyboard : {}) });
@@ -502,7 +502,7 @@ async function sendToUser(user, message, unifiedMediaList = [], options = {}) {
                 }
             } catch (err) {
                 if (err.description?.includes('can\'t parse entities')) {
-                    debugLog(`[BC-RETRY] Plain text fallback for: ${chatId}`);
+                    debugLog(`[BC-RETRY] Repli vers le texte brut pour : ${chatId}`);
                     const msg = await _bot.telegram.sendMessage(chatId, message, { ...(_protect ? { protect_content: true } : {}), ...(keyboard ? keyboard : {}) });
                     if (msg && (user.id || user.doc_id)) {
                         const { addMessageToTrack } = require('./database');
@@ -531,7 +531,7 @@ async function sendToUser(user, message, unifiedMediaList = [], options = {}) {
             if (user.id || user.doc_id) {
                 const { markUserBlocked } = require('./database');
                 await markUserBlocked(user.id || user.doc_id, false).catch(e => {
-                    debugLog(`[BC-MARK-ERR] Failed to mark ${chatId} as blocked: ${e.message}`);
+                    debugLog(`[BC-MARK-ERR] Échec du marquage de ${chatId} comme bloqué : ${e.message}`);
                 });
             }
             return { success: false, blocked: true, error: desc };
