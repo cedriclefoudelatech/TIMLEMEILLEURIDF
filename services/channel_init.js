@@ -8,9 +8,10 @@ async function initChannels() {
 
     // 1. Telegram
     console.log('[Système-Env] Toutes les clés :', Object.keys(process.env).join(', '));
-    const tgToken = process.env.BOT_TOKEN;
-    if (tgToken) {
-        console.log(`[Système] Token Telegram détecté (${tgToken.substring(0, 5)}...). Initialisation...`);
+    const rawToken = process.env.BOT_TOKEN;
+    const tgToken = (rawToken || '').trim();
+    if (tgToken && tgToken.length > 5) {
+        console.log(`[Système] Token Telegram détecté (${tgToken.length} chars, début: ${tgToken.substring(0, 5)}...). Initialisation...`);
         const tg = new TelegramChannel(tgToken);
         await tg.initialize();
         registry.register(tg);

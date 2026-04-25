@@ -15,11 +15,15 @@ if (process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID) {
 const keysToLog = ['BOT_TOKEN', 'SUPABASE_URL', 'WHATSAPPD_SESSION_ID', 'WHATSAPP_SESSION_ID', 'PORT'];
 console.log('[Système-Debug] Vérification des variables clés :');
 keysToLog.forEach(key => {
-    const val = process.env[key];
-    if (val) {
+    let val = process.env[key];
+    if (typeof val === 'string') val = val.trim();
+
+    if (val && val.length > 0) {
         console.log(`   - ${key} : PRÉSENT (${val.length} chars, début: ${val.substring(0, 4)}...)`);
     } else {
-        console.log(`   - ${key} : MANQUANT ❌`);
+        const rawVal = process.env[key];
+        const detail = (rawVal === undefined) ? 'UNDEFINED' : (rawVal === '' ? 'EMPTY_STRING' : 'WHITESPACE_ONLY');
+        console.log(`   - ${key} : MANQUANT ❌ (${detail})`);
     }
 });
 
