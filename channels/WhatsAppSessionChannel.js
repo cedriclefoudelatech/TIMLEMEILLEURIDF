@@ -107,9 +107,13 @@ class WhatsAppSessionChannel extends Channel {
                 keys: makeCacheableSignalKeyStore(state.keys, logger)
             },
             logger,
-            browser: ['Mac OS', 'Chrome', '121.0.6167.184'],
+            browser: ['Ubuntu', 'Chrome', '110.0.5481.177'],
             syncFullHistory: false,
             generateHighQualityLinkPreview: false,
+            connectTimeoutMs: 90000,
+            defaultQueryTimeoutMs: 0,
+            keepAliveIntervalMs: 10000,
+            shouldAwaitPayload: true,
             getMessage: async (key) => {
                 // Nécessaire pour que Baileys puisse décrypter les messages retry
                 return { conversation: '' };

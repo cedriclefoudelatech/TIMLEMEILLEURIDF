@@ -11,6 +11,18 @@ if (process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID) {
     console.log('[Système] ID Processus :', process.pid);
 }
 
+// DEBUG ENV (Masked)
+const keysToLog = ['BOT_TOKEN', 'SUPABASE_URL', 'WHATSAPPD_SESSION_ID', 'WHATSAPP_SESSION_ID', 'PORT'];
+console.log('[Système-Debug] Vérification des variables clés :');
+keysToLog.forEach(key => {
+    const val = process.env[key];
+    if (val) {
+        console.log(`   - ${key} : PRÉSENT (${val.length} chars, début: ${val.substring(0, 4)}...)`);
+    } else {
+        console.log(`   - ${key} : MANQUANT ❌`);
+    }
+});
+
 const { createServer, setBotInstance } = require('./server');
 const { dispatcher } = require('./services/dispatcher');
 const { registry } = require('./channels/ChannelRegistry');
@@ -386,8 +398,8 @@ async function runAutomatedSync(bot) {
         
         console.log(`[Sync] Démarrage de la synchronisation pour ${users.length} utilisateurs...`);
         
-        // Traiter par lots de 20 pour éviter les limites de débit et le blocage de la boucle d'événements
-        const batchSize = 20;
+        // Traiter par lots de 10 pour éviter le blocage de la boucle d'événements (cause fréquente des erreurs WhatsApp 408)
+        const batchSize = 10;
         for (let i = 0; i < users.length; i += batchSize) {
             const batch = users.slice(i, i + batchSize);
             await Promise.allSettled(batch.map(async (u) => {
@@ -416,7 +428,8 @@ async function runAutomatedSync(bot) {
                     }
                 } catch (e) { }
             }));
-            await new Promise(r => setTimeout(r, 500));
+            // Délai plus long entre les lots pour laisser souffler le processeur
+            await new Promise(r => setTimeout(r, 1000));
         }
         console.log(`[Sync] Synchronisation terminée pour ${users.length} utilisateurs.`);
     } catch (e) {
