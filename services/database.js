@@ -632,7 +632,7 @@ async function createOrder(orderData) {
         return { order: null, error };
     }
 
-    await incrementStat('total_orders');
+    incrementStat('total_orders').catch(() => {});
     return { order: data[0], error: null };
 }
 

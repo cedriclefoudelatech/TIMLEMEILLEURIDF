@@ -1075,69 +1075,59 @@ function setupOrderSystem(bot) {
         let finalProductList = productList;
         if (isPriority) finalProductList += `\n🚀 Option Livraison Prioritaire (+${priorityFee.toFixed(2)}€)`;
 
-        // --- 2. DÉTERMINATION FOURNISSEUR (Avant création) ---
-        const allProducts = await getProducts().catch(() => []);
-        let orderSupplierId = null;
-        if (cart.length > 0) {
-            for (const item of cart) {
-                const p = allProducts.find(prod => String(prod.id) === String(item.productId));
-                if (p && p.supplier_id) { orderSupplierId = p.supplier_id; break; }
+            // DÉTERMINATION DU FOURNISSEUR (Avant création)
+            const allProducts = await getProducts().catch(() => []);
+            let orderSupplierId = null;
+            if (cart.length > 0) {
+                for (const item of cart) {
+                    const p = allProducts.find(prod => String(prod.id) === String(item.productId));
+                    if (p && p.supplier_id) { orderSupplierId = p.supplier_id; break; }
+                }
             }
-        }
 
-        const orderData = {
-            user_id: userId,
-            username: ctx.from.username || 'Inconnu',
-            first_name: ctx.from.first_name || 'Inconnu',
-            product_name: finalProductList,
-            quantity: totalQty,
-            total_price: finalPrice,
-            payment_method: paymentMethod.toLowerCase(),
-            address: pending.address,
-            city: pending.city || '',
-            postal_code: pending.postal_code || '',
-            platform: ctx.platform,
-            status: orderSupplierId ? 'supplier_pending' : 'pending',
-            discount_applied: discount,
-            scheduled_at: pending.scheduled_at || null,
-        };
+            const orderData = {
+                user_id: userId,
+                username: ctx.from.username || 'Inconnu',
+                first_name: ctx.from.first_name || 'Inconnu',
+                product_name: finalProductList,
+                quantity: totalQty,
+                total_price: finalPrice,
+                payment_method: paymentMethod.toLowerCase(),
+                address: pending.address,
+                city: pending.city || '',
+                postal_code: pending.postal_code || '',
+                platform: ctx.platform,
+                status: orderSupplierId ? 'supplier_pending' : 'pending',
+                discount_applied: discount,
+                scheduled_at: pending.scheduled_at || null,
+            };
 
-        // --- 3. TRAVAIL PARALLÈLE (Vitesse Maximale) ---
-        console.log(`[Checkout] Exécution des tâches DB en parallèle...`);
-        const startTime = Date.now();
+            // --- 3. TRAVAIL PARALLÈLE (Vitesse Maximale) ---
+            console.log(`[Checkout] Exécution des tâches DB en parallèle...`);
+            const startTime = Date.now();
 
-        try {
-            // DECREMENT STOCK
+            // DECREMENT STOCK en tâche de fond (on n'attend pas la fin pour confirmer au client)
             const { saveProduct } = require('../services/database');
-            const stockTasks = cart.map(async item => {
+            cart.forEach(item => {
                 const p = allProducts.find(prod => String(prod.id) === String(item.productId));
                 if (p && typeof p.stock === 'number' && p.stock > 0) {
                     const newStock = Math.max(0, p.stock - item.qty);
-                    // Si le stock tombe à 0, on peut désactiver si une option globale est cochée (ou par défaut ici pour satisfaire la demande)
                     const updates = { id: p.id, stock: newStock };
-                    if (newStock <= 0) {
-                        updates.is_active = false;
-                        console.log(`[STOCK] Produit ${p.name} épuisé, désactivation automatique.`);
-                    }
-                    return saveProduct(updates).catch(e => console.error(`[STOCK-ERR] ${p.id}:`, e.message));
+                    if (newStock <= 0) updates.is_active = false;
+                    saveProduct(updates).catch(e => console.error(`[STOCK-ERR] ${p.id}:`, e.message));
                 }
-                return Promise.resolve();
             });
 
-            const [createResult, dbSettings] = await Promise.all([
-                createOrder(orderData),
-                getAppSettings(),
-                ...stockTasks
+            // On lance la création et on récupère les settings de la session (déjà chargés)
+            const [createResult] = await Promise.all([
+                createOrder(orderData)
             ]);
 
             if (createResult.error) throw createResult.error;
             const order = createResult.order;
             
-            // On vérifie si c'est la première commande en utilisant l'ID officiel (possiblement fusionné)
-            const officialUserId = ctx.state.user?.id || userId;
-            const previousOrders = await getOrdersByUser(officialUserId);
-            // S'il n'y a qu'1 commande (celle qu'on vient de créer), c'est que c'est bien la première.
-            const isFirstOrder = (!previousOrders || previousOrders.length <= 1);
+            // On utilise les settings déjà présents dans le contexte pour éviter un appel DB
+            const dbSettings = ctx.state.settings;
 
             console.log(`[Checkout] Tâches DB terminées en ${Date.now() - startTime}ms. Confirmation client...`);
 
@@ -1164,6 +1154,11 @@ function setupOrderSystem(bot) {
 
             // --- 5. TRAITEMENT ARRIÈRE-PLAN (Notifications) ---
             (async () => {
+                // Vérification première commande (en arrière-plan pour gagner du temps)
+                const officialUserId = ctx.state.user?.id || userId;
+                const previousOrders = await getOrdersByUser(officialUserId).catch(() => []);
+                const isFirstOrder = (!previousOrders || previousOrders.length <= 1);
+
                 // Notif Nouveau Client
                 if (isFirstOrder) {
                     const adminContact = dbSettings.private_contact_url || 'https://t.me/TIMLEMEILLEUR75';
