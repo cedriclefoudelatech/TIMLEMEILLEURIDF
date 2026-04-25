@@ -86,9 +86,13 @@ class TelegramChannel extends Channel {
 
         const lock = await checkLock(telegramLockId);
         if (lock && lock.owner !== instanceId) {
-            console.log(`[TG-LOCK] Telegram session busy (Owner: ${lock.owner}). Waiting 30s...`);
-            setTimeout(() => this.start(), 30000);
-            return;
+            const isExpired = Date.now() - lock.updatedAt > 120000; // 2 minutes
+            if (!isExpired) {
+                console.log(`[TG-LOCK] Telegram session busy (Owner: ${lock.owner}, fresh). Waiting 30s...`);
+                setTimeout(() => this.start(), 30000);
+                return;
+            }
+            console.log(`[TG-LOCK] Previous lock (Owner: ${lock.owner}) is EXPIRED. Breaking lock...`);
         }
 
         const claimed = await claimLock(telegramLockId, instanceId);
