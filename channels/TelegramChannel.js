@@ -113,14 +113,14 @@ class TelegramChannel extends Channel {
         
         const launch = async (retryCount = 0) => {
             try {
-                // Nettoyage radical avant de lancer pour éviter les conflits
-                await this.bot.telegram.deleteWebhook({ drop_pending_updates: true }).catch(() => {});
+                console.log('[TG-DEBUG] Suppression du webhook...');
+                await this.bot.telegram.deleteWebhook({ drop_pending_updates: true }).catch(e => console.log(`[TG-WARN] Webhook delete error: ${e.message}`));
                 
+                console.log('[TG-DEBUG] Appel de bot.launch()...');
                 await this.bot.launch();
                 console.log('✅ [TG] Bot lancé avec succès !');
                 this.isActive = true;
 
-                // Debug messages entrants
                 this.bot.use((ctx, next) => {
                     if (ctx.message || ctx.callbackQuery) {
                         console.log(`[TG-DEBUG] Update reçu de ${ctx.from.id}`);
@@ -128,11 +128,13 @@ class TelegramChannel extends Channel {
                     return next();
                 });
             } catch (err) {
-                if (err.message.includes('409') && retryCount < 5) {
-                    console.warn(`⚠️ [TG] Conflit 409 (déjà une instance). Tentative ${retryCount + 1}/5 dans 15s...`);
+                console.error('❌ [TG] Erreur lors du launch:', err.message);
+                if (err.message.includes('409') && retryCount < 10) {
+                    console.warn(`⚠️ [TG] Conflit 409 (déjà une instance). Tentative ${retryCount + 1}/10 dans 15s...`);
                     setTimeout(() => launch(retryCount + 1), 15000);
-                } else {
-                    console.error('❌ [TG] Erreur fatale au lancement:', err.message);
+                } else if (err.message.includes('ETIMEDOUT') || err.message.includes('ECONNRESET')) {
+                    console.warn(`⚠️ [TG] Erreur réseau. Nouvelle tentative dans 10s...`);
+                    setTimeout(() => launch(retryCount), 10000);
                 }
             }
         };
