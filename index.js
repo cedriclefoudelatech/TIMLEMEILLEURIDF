@@ -1,7 +1,7 @@
 const fs = require('fs');
 const envPath = fs.existsSync('.env.railway') ? '.env.railway' : '.env';
 require('dotenv').config({ path: envPath });
-// [TEST RECONNEXION] Persistance de session Supabase — push sans déconnexion WhatsApp
+// [DEPLOY] QR Regeneration & Debug - 2026-04-25 23:05
 
 console.log(`[Système] Chargement de l'environnement depuis : ${envPath}`);
 if (process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID) {
@@ -127,6 +127,7 @@ async function main() {
         }
     });
 
+    // [DEPLOY] QR Regeneration & Debug - 2026-04-25 22:40
     // Liaison des Gestionnaires existants au dispatcher
     setupStartHandler(dispatcher);
     setupOrderSystem(dispatcher);
