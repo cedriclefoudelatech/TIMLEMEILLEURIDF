@@ -290,6 +290,14 @@ class Dispatcher {
                         if (tgBot) return tgBot.telegram.getFileLink(fileId);
                     }
                     throw new Error('getFileLink n\'est pas disponible pour cette plateforme');
+                },
+                getChatMember: async (chatId, userId) => {
+                    if (channel.type === 'telegram') {
+                        const tgCh = registry.query('telegram');
+                        const tgBot = tgCh?.getBotInstance?.();
+                        if (tgBot) return tgBot.telegram.getChatMember(chatId, userId);
+                    }
+                    return { status: 'member' }; // Fallback neutre pour les autres plateformes
                 }
             },
 
