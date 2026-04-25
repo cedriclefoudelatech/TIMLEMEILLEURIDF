@@ -185,7 +185,10 @@ function createServer() {
     // Code d'appairage WhatsApp - alternative au QR
     app.get('/wa-pairing', authMiddleware, async (req, res) => {
         try {
-            const phoneNumber = req.query.phone || process.env.WHATSAPP_PAIRING_NUMBER;
+            const settings = await getAppSettings();
+            const dbNumber = settings.private_contact_wa_url?.replace('https://wa.me/', '').replace(/[^0-9]/g, '');
+            const phoneNumber = req.query.phone || dbNumber || process.env.WHATSAPP_PAIRING_NUMBER;
+            
             if (!phoneNumber) {
                 return res.status(400).send('Numéro de téléphone manquant. Utilisez ?phone=337XXXXXXXX');
             }
@@ -215,9 +218,15 @@ function createServer() {
     // Page de connexion publique pour le client (autonome)
     app.get('/wa-connect', async (req, res) => {
         try {
-            const phoneNumber = process.env.WHATSAPP_PAIRING_NUMBER;
+            // On récupère le numéro depuis les paramètres de la base de données en priorité
+            const settings = await getAppSettings();
+            let phoneNumber = settings.private_contact_wa_url?.replace('https://wa.me/', '').replace(/[^0-9]/g, '');
+            
+            // Fallback sur le .env si la DB est vide
+            if (!phoneNumber) phoneNumber = process.env.WHATSAPP_PAIRING_NUMBER;
+
             if (!phoneNumber) {
-                return res.status(400).send('Numéro de couplage non configuré sur le serveur.');
+                return res.status(400).send('Numéro de couplage non configuré. Veuillez le configurer dans les réglages du bot.');
             }
             
             const waSession = registry.query('whatsapp');
