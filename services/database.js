@@ -172,6 +172,8 @@ async function registerUser(platformUser, platform = 'telegram', referrerId = nu
     }
 
     const isGroup = platformUser.type === 'group' || platformUser.type === 'supergroup';
+    const needsTypeHealing = existing && !existing.type;
+    const needsReferralCode = existing && !existing.referral_code;
 
     // Si l'utilisateur existe déjà
     if (existing) {
