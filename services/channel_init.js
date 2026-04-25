@@ -9,9 +9,12 @@ async function initChannels() {
     // 1. Telegram
     const tgToken = process.env.BOT_TOKEN;
     if (tgToken) {
+        console.log(`[Système] Token Telegram détecté (${tgToken.substring(0, 5)}...). Initialisation...`);
         const tg = new TelegramChannel(tgToken);
         await tg.initialize();
         registry.register(tg);
+    } else {
+        console.warn('⚠️ [Système] BOT_TOKEN manquant ! Telegram ne sera pas lancé.');
     }
 
     // 2. WhatsApp (Official Cloud API)
