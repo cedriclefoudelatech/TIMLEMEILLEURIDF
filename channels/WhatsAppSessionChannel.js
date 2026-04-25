@@ -165,10 +165,13 @@ class WhatsAppSessionChannel extends Channel {
                 ].includes(statusCode);
 
                 if (needsFreshSession) {
-                    waLog(`[WA] Session invalide (code ${statusCode}) — effacement Supabase et attente 5s avant nouveau QR.`);
-                    if (this._clearSession) await this._clearSession();
+                    waLog(`[WA] Session CRITIQUE (code ${statusCode}) — Purge complète Supabase et attente 10s...`);
                     this.isActive = false;
-                    setTimeout(() => this.start(), 5000); // Délai de sécurité
+                    if (this._clearSession) {
+                        await this._clearSession().catch(e => waLog(`[WA-DB] Erreur purge: ${e.message}`));
+                    }
+                    // On attend un peu plus pour laisser Supabase et WhatsApp respirer
+                    setTimeout(() => this.start(), 10000); 
                 } else if (statusCode === 440) {
                     // Conflit : une autre instance a pris la session.
                     // Backoff exponentiel pour éviter la boucle infinie de conflits.
