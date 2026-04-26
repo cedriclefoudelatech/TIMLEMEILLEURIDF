@@ -1167,7 +1167,7 @@ function setupOrderSystem(bot) {
 
                 // Notif Nouveau Client
                 if (isFirstOrder) {
-                    const adminContact = dbSettings.private_contact_url || 'https://t.me/TIMLEMEILLEUR75';
+                    const adminContact = dbSettings.private_contact_url || 'https://t.me/plugnation_admin';
                     ctx.reply(t(user, 'msg_first_order_welcome', `👋 <b>Première commande !</b>\nContactez l'admin pour valider : {contact}`, { contact: adminContact }), { parse_mode: 'HTML' }).catch(() => {});
                 }
 
