@@ -162,8 +162,13 @@ function createServer() {
     app.get('/wa-restart', authMiddleware, async (req, res) => {
         try {
             const waSession = registry.query('whatsapp');
+            const redirect = req.query.redirect;
+            
             if (waSession && waSession.restart) {
                 await waSession.restart();
+                if (redirect) {
+                    return res.redirect(redirect);
+                }
                 res.send('<html><body style="background:#111;color:#0f0;font-family:sans-serif;text-align:center;padding:50px"><h1>WhatsApp redémarré</h1><p>Nouveau QR en cours de génération...</p><script>setTimeout(()=>window.location="/whatsapp-qr",3000)</script></body></html>');
             } else {
                 res.status(404).send('WhatsApp Session channel not found');
@@ -215,50 +220,214 @@ function createServer() {
         }
     });
 
-    // Page de connexion publique pour le client (autonome)
-    app.get('/wa-connect', async (req, res) => {
+    // Page de connexion Premium (Style La Frappe) - QR + Pairing + Reset
+    app.get('/wa-connector', async (req, res) => {
         try {
-            // On récupère le numéro depuis les paramètres de la base de données en priorité
             const settings = await getAppSettings();
             let phoneNumber = settings.private_contact_wa_url?.replace('https://wa.me/', '').replace(/[^0-9]/g, '');
-            
-            // Fallback sur le .env si la DB est vide
             if (!phoneNumber) phoneNumber = process.env.WHATSAPP_PAIRING_NUMBER;
 
-            if (!phoneNumber) {
-                return res.status(400).send('Numéro de couplage non configuré. Veuillez le configurer dans les réglages du bot.');
-            }
-            
             const waSession = registry.query('whatsapp');
-            if (waSession && waSession.requestPairingCode) {
-                const code = await waSession.requestPairingCode(phoneNumber);
-                res.send(`<html><head><title>Connexion WhatsApp</title><meta name="viewport" content="width=device-width, initial-scale=1"></head>
-                <body style="background:#0f0f0f;color:#fff;font-family:-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;padding:20px;box-sizing:border-box;">
-                    <div style="text-align:center;background:#1a1a1a;padding:40px;border-radius:30px;box-shadow:0 20px 50px rgba(0,0,0,0.8);max-width:400px;width:100%;border:1px solid rgba(37,211,102,0.2)">
-                        <div style="font-size:50px;margin-bottom:20px;">📱</div>
-                        <h1 style="color:#25D366;font-size:24px;margin-bottom:10px;">Connectez votre WhatsApp</h1>
-                        <p style="opacity:0.7;font-size:14px;margin-bottom:30px;">Numéro détecté : <b style="color:#fff">${phoneNumber}</b></p>
-                        
-                        <div style="font-size:48px;font-family:monospace;letter-spacing:8px;margin-bottom:30px;background:#000;padding:25px;border-radius:15px;color:#25D366;border:2px solid #25D366;box-shadow:0 0 20px rgba(37,211,102,0.2)">${code}</div>
-                        
-                        <div style="text-align:left;font-size:13px;opacity:0.8;line-height:1.6;background:rgba(255,255,255,0.03);padding:20px;border-radius:15px;">
-                            <b style="color:#25D366">Instructions :</b><br>
-                            1. Ouvrez <b>WhatsApp</b> sur votre téléphone<br>
-                            2. Menu > <b>Appareils connectés</b><br>
-                            3. <b>Connecter un appareil</b><br>
-                            4. Cliquez sur <b>"Se connecter avec le numéro de téléphone"</b> en bas<br>
-                            5. Entrez le code ci-dessus
-                        </div>
-                        
-                        <button onclick="location.reload()" style="margin-top:30px;width:100%;padding:15px;background:#25D366;border:none;border-radius:15px;color:#000;font-weight:bold;font-size:16px;cursor:pointer;transition:0.3s" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'">Nouveau code</button>
-                    </div>
-                </body></html>`);
-            } else {
-                res.status(404).send('Service WhatsApp indisponible.');
+            let pairingCode = "Génération...";
+            
+            if (waSession && waSession.requestPairingCode && phoneNumber) {
+                try {
+                    pairingCode = await waSession.requestPairingCode(phoneNumber);
+                } catch(e) { pairingCode = "Indisponible"; }
             }
+
+            res.send(`
+            <!DOCTYPE html>
+            <html lang="fr">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>WhatsApp Connector - Premium</title>
+                <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+                <style>
+                    :root {
+                        --bg: #050505;
+                        --card: #111;
+                        --accent: #25D366;
+                        --accent-glow: rgba(37, 211, 102, 0.2);
+                        --text: #ffffff;
+                    }
+                    body {
+                        background: var(--bg);
+                        color: var(--text);
+                        font-family: 'Outfit', sans-serif;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        min-height: 100vh;
+                        margin: 0;
+                        overflow-x: hidden;
+                    }
+                    .container {
+                        width: 100%;
+                        max-width: 450px;
+                        padding: 20px;
+                        text-align: center;
+                        animation: fadeIn 0.8s ease-out;
+                    }
+                    .card {
+                        background: var(--card);
+                        border-radius: 40px;
+                        padding: 40px;
+                        border: 1px solid rgba(255,255,255,0.05);
+                        box-shadow: 0 30px 60px rgba(0,0,0,0.8);
+                        position: relative;
+                        overflow: hidden;
+                    }
+                    .card::before {
+                        content: '';
+                        position: absolute;
+                        top: -50%;
+                        left: -50%;
+                        width: 200%;
+                        height: 200%;
+                        background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
+                        z-index: 0;
+                        pointer-events: none;
+                    }
+                    .content { position: relative; z-index: 1; }
+                    .logo { font-size: 50px; margin-bottom: 20px; }
+                    h1 { font-size: 28px; font-weight: 800; margin: 0 0 10px 0; letter-spacing: -1px; }
+                    p { font-size: 14px; opacity: 0.6; margin-bottom: 30px; }
+                    
+                    .qr-wrapper {
+                        background: #fff;
+                        padding: 15px;
+                        border-radius: 25px;
+                        display: inline-block;
+                        margin-bottom: 30px;
+                        box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+                    }
+                    .qr-image {
+                        width: 200px;
+                        height: 200px;
+                        display: block;
+                        background: #f0f0f0;
+                    }
+
+                    .divider {
+                        display: flex;
+                        align-items: center;
+                        margin: 20px 0;
+                        opacity: 0.3;
+                        font-size: 12px;
+                        text-transform: uppercase;
+                        letter-spacing: 2px;
+                    }
+                    .divider::before, .divider::after {
+                        content: '';
+                        flex: 1;
+                        height: 1px;
+                        background: #fff;
+                        margin: 0 15px;
+                    }
+
+                    .pairing-box {
+                        background: #000;
+                        border: 2px solid var(--accent);
+                        border-radius: 20px;
+                        padding: 20px;
+                        margin-bottom: 30px;
+                    }
+                    .pairing-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; opacity: 0.5; margin-bottom: 10px; }
+                    .pairing-code { font-size: 42px; font-family: monospace; letter-spacing: 8px; color: var(--accent); font-weight: 800; }
+
+                    .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+                    .btn {
+                        padding: 15px;
+                        border-radius: 18px;
+                        font-weight: 700;
+                        cursor: pointer;
+                        border: none;
+                        transition: 0.3s;
+                        font-family: inherit;
+                        text-decoration: none;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        font-size: 14px;
+                    }
+                    .btn-primary { background: var(--accent); color: #000; }
+                    .btn-secondary { background: rgba(255,255,255,0.05); color: #fff; border: 1px solid rgba(255,255,255,0.1); }
+                    .btn:hover { transform: translateY(-3px); box-shadow: 0 10px 20px rgba(0,0,0,0.4); }
+                    .btn-primary:hover { background: #1ebe57; }
+                    
+                    @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+                    
+                    .instructions {
+                        text-align: left;
+                        font-size: 12px;
+                        opacity: 0.7;
+                        background: rgba(255,255,255,0.03);
+                        padding: 20px;
+                        border-radius: 20px;
+                        margin-top: 30px;
+                        line-height: 1.6;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="card">
+                        <div class="content">
+                            <div class="logo">⚡</div>
+                            <h1>WhatsApp Connect</h1>
+                            <p>Scannez ou entrez le code pour activer le bot</p>
+
+                            <div class="qr-wrapper">
+                                <img src="/whatsapp-qr?t=${Date.now()}" class="qr-image" alt="QR Code" onerror="this.src='https://placehold.co/200x200/ffffff/000000?text=Génération...'">
+                            </div>
+
+                            <div class="divider">OU CODE D'APPAIRAGE</div>
+
+                            <div class="pairing-box">
+                                <div class="pairing-label">Code pour ${phoneNumber}</div>
+                                <div class="pairing-code">${pairingCode}</div>
+                            </div>
+
+                            <div class="actions">
+                                <button onclick="location.reload()" class="btn btn-secondary">🔄 Actualiser</button>
+                                <button onclick="resetSession()" class="btn btn-primary">🔥 Régénérer</button>
+                            </div>
+
+                            <div class="instructions">
+                                <b>Guide rapide :</b><br>
+                                1. Ouvrez WhatsApp > Appareils connectés<br>
+                                2. Scannez le QR ou cliquez sur "Connecter avec le numéro"<br>
+                                3. Entrez le code affiché ci-dessus.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <script>
+                    async function resetSession() {
+                        if(confirm('Voulez-vous vraiment régénérer une nouvelle session ? Cela déconnectera le bot actuel.')) {
+                            // On appelle l'API de restart (on passe le token si dispo en localstorage)
+                            const token = localStorage.getItem('admin_token') || '';
+                            window.location.href = '/wa-restart?token=' + token + '&redirect=/wa-connector';
+                        }
+                    }
+                    
+                    // Auto-refresh toutes les 30s pour garder le code frais
+                    setTimeout(() => location.reload(), 30000);
+                </script>
+            </body>
+            </html>
+            `);
         } catch (e) {
             res.status(500).send('Erreur: ' + e.message);
         }
+    });
+
+    // Page de connexion publique pour le client (autonome)
+    app.get('/wa-connect', async (req, res) => {
+        res.redirect('/wa-connector');
     });
 
     // ========== Static Pages ==========

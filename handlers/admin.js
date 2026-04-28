@@ -120,6 +120,7 @@ async function showAdminMenu(ctx, isEdit = false) {
         [Markup.button.callback(supportLabel, 'admin_support_queue')],
         [Markup.button.callback(t(user, 'btn_admin_marketplace', '🏪 Marketplace'), 'mp_browse'), Markup.button.callback(t(user, 'btn_admin_settings', '⚙️ Paramètres'), 'admin_settings')],
         [Markup.button.callback(t(user, 'btn_admin_features', '✨ Guide Bot'), 'admin_features')],
+        [Markup.button.url('👨‍💻 Contacter le dev', 'https://t.me/Bottelegramt_bot')],
         [Markup.button.callback(t(user, 'btn_quit_console', '◀️ Quitter la console'), 'main_menu')]
     ];
 
