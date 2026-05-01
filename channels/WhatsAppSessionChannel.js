@@ -46,6 +46,7 @@ class WhatsAppSessionChannel extends Channel {
     }
 
     async start() {
+        if (this.sock) { try { this.sock.end(); } catch(e) {} this.sock = null; }
         await loadBaileys();
         const { state, saveCreds, clearSession, claimLock, checkLock, releaseLock } = await useSupabaseAuthState(this.sessionId).catch(err => {
             waLog(`[WA-START-ERR] DB Initialize failed: ${err.message}. Retrying in 10s...`);
@@ -112,12 +113,13 @@ class WhatsAppSessionChannel extends Channel {
                 }, logger)
             },
             logger,
-            browser: ["Ubuntu", "Chrome", "20.0.04"],
+            browser: ["Mac OS", "Chrome", "122.0.0.0"],
             syncFullHistory: false,
             shouldSyncHistory: false,
             markOnlineOnConnect: true,
             connectTimeoutMs: 60000,
-            keepAliveIntervalMs: 30000,
+            keepAliveIntervalMs: 60000,
+            transactionOpts: { maxRetries: 10, delayBetweenTriesMs: 1000 },
             getMessage: async () => ({ conversation: '' })
         });
 

@@ -2624,7 +2624,7 @@ async function useSupabaseAuthState(sessionId) {
                     const data = {};
                     await Promise.all(ids.map(async (id) => {
                         const value = await readData(`${type}-${id}`);
-                        if (value) data[id] = value;
+                        if (value !== null && value !== undefined) data[id] = value;
                     }));
                     return data;
                 },
