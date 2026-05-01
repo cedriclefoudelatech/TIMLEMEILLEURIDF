@@ -422,7 +422,10 @@ function createServer() {
                             <p>Utilisez le QR ou le Code d'appairage</p>
 
                             <div class="qr-wrapper">
-                                <img src="/whatsapp-qr?t=${Date.now()}" id="qr-image" class="qr-image" alt="QR Code" onerror="this.src='https://placehold.co/220x220/ffffff/000000?text=Génération...'">
+                                ${waSession?.lastQR ? 
+                                    `<img src="${waSession.lastQR}" alt="WhatsApp QR Code" class="qr-image" style="width:100%; height:100%; object-fit:contain; display:block;">` :
+                                    `<img src="/whatsapp-qr?t=${Date.now()}" id="qr-image" class="qr-image" alt="QR Code" onerror="this.src='https://placehold.co/220x220/ffffff/000000?text=Génération...'">`
+                                }
                             </div>
 
                             <div class="divider">OU VIA LE CODE</div>

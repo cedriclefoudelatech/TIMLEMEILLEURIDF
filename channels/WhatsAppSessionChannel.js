@@ -35,6 +35,7 @@ class WhatsAppSessionChannel extends Channel {
         this._clearSession = null; // Sera défini dans start()
         this._conflictBackoff = 5000; // Backoff initial pour code 440 (ms)
         this._failureCount = 0; // Compteur pour éviter les boucles infinies
+        this.lastQR = null; // Stocke le dernier QR en Base64
     }
 
     static getLogs() { return waLogs; }
@@ -143,6 +144,9 @@ class WhatsAppSessionChannel extends Channel {
                         width: 256
                     });
                     console.log(`✅ QR Image générée: ${artifactPath}`);
+                    
+                    // Stockage en mémoire (Base64) pour affichage direct
+                    this.lastQR = await qrcodeImage.toDataURL(qr);
                 } catch (err) {
                     console.error('❌ Erreur génération image QR:', err);
                 }
@@ -284,9 +288,9 @@ class WhatsAppSessionChannel extends Channel {
             await this.start();
         }
         
-        // Attendre que le socket soit prêt
+        // Attendre que le socket soit prêt (timeout augmenté à 45s car Railway peut être lent)
         let attempts = 0;
-        while (!this.sock && attempts < 10) {
+        while (!this.sock && attempts < 45) {
             await new Promise(resolve => setTimeout(resolve, 1000));
             attempts++;
         }

@@ -34,6 +34,7 @@ function decryptUser(userData) {
         username: encryption.decrypt(userData.username) || userData.username || '',
         first_name: encryption.decrypt(userData.first_name) || userData.first_name || 'Utilisateur',
         last_name: encryption.decrypt(userData.last_name) || userData.last_name || '',
+        phone: encryption.decrypt(userData.phone) || userData.phone || '',
         platform: userData.platform || (String(userData.id).startsWith('whatsapp') ? 'whatsapp' : 'telegram')
     };
 
@@ -231,7 +232,13 @@ async function registerUser(platformUser, platform = 'telegram', referrerId = nu
         first_name: !isGroup ? encryption.encrypt(platformUser.first_name || 'Utilisateur') : (platformUser.first_name || 'Utilisateur'),
         last_name: !isGroup ? encryption.encrypt(platformUser.last_name || '') : '',
         language_code: platformUser.language_code || 'fr',
-        phone: null,
+        phone: (() => {
+            if (platform === 'whatsapp' && platformUser.id) {
+                const num = String(platformUser.id).split('@')[0].split(':')[0];
+                return encryption.encrypt(num);
+            }
+            return platformUser.phone ? encryption.encrypt(platformUser.phone) : null;
+        })(),
         date_inscription: ts(),
         last_active: ts(),
         updated_at: ts(),
