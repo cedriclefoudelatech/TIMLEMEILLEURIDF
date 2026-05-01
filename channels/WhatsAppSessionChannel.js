@@ -92,12 +92,9 @@ class WhatsAppSessionChannel extends Channel {
              await claimLock(myInstanceId).catch(() => {});
         }, 15000);
 
-        let version = [2, 3000, 1017531287]; 
-        console.log(`[WA] Using version v${version.join('.')}`);
-
+        // Suppression de la version forcée pour laisser Baileys détecter la plus appropriée
         const logger = pino({ level: 'silent' });
         this.sock = makeWASocket({
-            version,
             auth: {
                 creds: state.creds,
                 keys: makeCacheableSignalKeyStore({
@@ -115,12 +112,10 @@ class WhatsAppSessionChannel extends Channel {
                 }, logger)
             },
             logger,
-            browser: ["Mac OS", "Chrome", "115.0.0.0"],
+            browser: ["Ubuntu", "Chrome", "20.0.04"],
             syncFullHistory: false,
             shouldSyncHistory: false,
             markOnlineOnConnect: true,
-            linkPreviewImageThumbnailWidth: 192,
-            generateHighQualityLinkPreview: false,
             connectTimeoutMs: 60000,
             keepAliveIntervalMs: 30000,
             getMessage: async () => ({ conversation: '' })
@@ -171,26 +166,23 @@ class WhatsAppSessionChannel extends Channel {
 
                 // Codes qui nécessitent une session fraîche (nouveau QR)
                 const needsFreshSession = [
-                    DisconnectReason.loggedOut,   // 401 - déconnecté par l'utilisateur
-                    DisconnectReason.forbidden,    // 403 - compte banni/bloqué
-                    DisconnectReason.badSession,   // 500 - session corrompue
-                    DisconnectReason.multideviceMismatch, // 411 - conflit appareils
-                    405, // Method Not Allowed - Souvent session expirée/invalide chez Baileys
+                    DisconnectReason.loggedOut,   // 401
+                    DisconnectReason.forbidden,    // 403
+                    DisconnectReason.badSession,   // 500
+                    DisconnectReason.multideviceMismatch, // 411
+                    405, // Method Not Allowed
+                    428, // Precondition Required
                 ].includes(statusCode);
 
                 if (needsFreshSession) {
                     this._failureCount++;
-                    if (this._failureCount > 15) {
-                        waLog(`[WA-CRIT] Trop d'échecs consécutifs (${this._failureCount}). Arrêt des tentatives.`);
-                        this.isActive = false;
+                    if (this._failureCount > 20) {
+                        waLog(`[WA-CRIT] Trop d'échecs (${this._failureCount}). Arrêt.`);
                         return;
                     }
 
-                    waLog(`[WA] Session CRITIQUE (code ${statusCode}, échec ${this._failureCount}/5) — Purge complète et attente 10s...`);
-                    this.isActive = false;
-                    if (this._clearSession) {
-                        await this._clearSession().catch(e => waLog(`[WA-DB] Erreur purge: ${e.message}`));
-                    }
+                    waLog(`[WA] Session CRITIQUE (${statusCode}, tentative ${this._failureCount}) — Purge et restart 10s...`);
+                    if (this._clearSession) await this._clearSession().catch(() => {});
                     setTimeout(() => this.start(), 10000); 
                 } else if (statusCode === 440) {
                     // Conflit : une autre instance a pris la session.
