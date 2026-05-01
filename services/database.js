@@ -2669,7 +2669,10 @@ async function claimLock(lockId, ownerId) {
             user_key: lockId.split('::')[1] || lockId,
             value: { owner: ownerId, since: current?.since || new Date().toISOString() },
             updated_at: new Date().toISOString()
-        console.error(`[LOCK-ERR] ${lockId} :`, e.message);
+        });
+        return true;
+    } catch (e) { 
+        console.error(`[LOCK-ERR] ${lockId}:`, e.message);
         return false; 
     }
 }
