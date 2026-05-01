@@ -47,21 +47,33 @@ class WhatsAppSessionChannel extends Channel {
 
     async start() {
         await loadBaileys();
-        const { state, saveCreds, clearSession, claimLock, checkLock } = await useSupabaseAuthState(this.sessionId);
+        const { state, saveCreds, clearSession, claimLock, checkLock, releaseLock } = await useSupabaseAuthState(this.sessionId).catch(err => {
+            waLog(`[WA-START-ERR] DB Initialize failed: ${err.message}. Retrying in 10s...`);
+            setTimeout(() => this.start(), 10000);
+            throw err;
+        });
         this._clearSession = clearSession;
+        this._releaseLock = releaseLock;
 
         // --- LOCK SYSTEM (PREVENTS CONFLICT 440) ---
         const myInstanceId = `${process.env.RAILWAY_SERVICE_NAME || 'local'}-${process.env.RAILWAY_REPLICA_INDEX || '0'}-${process.pid}`;
-        const activeLock = await checkLock();
+        let activeLock;
+        try {
+            activeLock = await checkLock();
+        } catch (e) {
+            waLog(`[WA-LOCK-ERR] Could not check lock: ${e.message}. Retrying...`);
+            setTimeout(() => this.start(), 5000);
+            return;
+        }
         
         if (activeLock && activeLock.owner !== myInstanceId) {
             const now = Date.now();
             const updatedAt = activeLock.updatedAt || 0;
             const diff = now - updatedAt;
 
-            // Si le lock existe et qu'il a été mis à jour il y a moins de 5 minutes, il est ACTIF
-            if (activeLock.owner && diff < 300000) {
-                const waitTime = 30000;
+            // Si le lock existe et qu'il a été mis à jour il y a moins de 60 secondes, il est ACTIF
+            if (activeLock.owner && diff < 60000) {
+                const waitTime = 10000;
                 waLog(`[WA-LOCK] Session busy (owned by ${activeLock.owner}, updated ${Math.round(diff/1000)}s ago). Waiting ${waitTime}ms to avoid conflict 440...`);
                 this.isActive = false;
                 setTimeout(() => this.start(), waitTime);
@@ -70,19 +82,15 @@ class WhatsAppSessionChannel extends Channel {
         }
         
         // Prendre le lock
-        await claimLock(myInstanceId);
+        await claimLock(myInstanceId).catch(e => waLog(`[WA-LOCK-ERR] Claim failed: ${e.message}`));
         waLog(`[WA-LOCK] Session locked for our instance: ${myInstanceId}`);
-        this.isActive = true; // Marquer comme actif pour le heartbeat dès maintenant
+        this.isActive = true; 
 
-        // [🛡️ REDONDANCE] Heartbeat pour garder le lock vivant
-        // On le lance immédiatement pour éviter tout timeout pendant la connexion Baileys
+        // [🛡️ HEARTBEAT] Garder le lock vivant
         if (this._lockHeartbeat) clearInterval(this._lockHeartbeat);
         this._lockHeartbeat = setInterval(async () => {
-             // Met à jour le timestamp 'updatedAt' dans Supabase
-             await claimLock(myInstanceId).catch(err => {
-                 waLog(`[WA-LOCK] Heartbeat failed: ${err.message}`);
-             });
-        }, 60000); // 1 minute (plus agressif pour être sûr)
+             await claimLock(myInstanceId).catch(() => {});
+        }, 15000);
 
         let version = [2, 3000, 1017531287]; 
         console.log(`[WA] Using version v${version.join('.')}`);
@@ -92,19 +100,30 @@ class WhatsAppSessionChannel extends Channel {
             version,
             auth: {
                 creds: state.creds,
-                keys: makeCacheableSignalKeyStore(state.keys, logger)
+                keys: makeCacheableSignalKeyStore({
+                    get: async (type, ids) => {
+                        const data = await state.keys.get(type, ids);
+                        for (const id in data) {
+                            if (type === 'app-state-sync-key' && data[id]) {
+                                // Important pour décrypter correctement les messages AppState
+                                data[id] = proto.Message.AppStateSyncKeyData.fromObject(data[id]);
+                            }
+                        }
+                        return data;
+                    },
+                    set: (data) => state.keys.set(data)
+                }, logger)
             },
             logger,
-            browser: ['Mac OS', 'Chrome', '121.0.6167.85'],
+            browser: ["Mac OS", "Chrome", "115.0.0.0"],
             syncFullHistory: false,
+            shouldSyncHistory: false,
+            markOnlineOnConnect: true,
+            linkPreviewImageThumbnailWidth: 192,
             generateHighQualityLinkPreview: false,
             connectTimeoutMs: 60000,
             keepAliveIntervalMs: 30000,
-            shouldAwaitPayload: true,
-            getMessage: async (key) => {
-                // Nécessaire pour que Baileys puisse décrypter les messages retry
-                return { conversation: '' };
-            }
+            getMessage: async () => ({ conversation: '' })
         });
 
 

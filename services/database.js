@@ -2479,7 +2479,9 @@ async function deleteOrder(id) {
 async function useSupabaseAuthState(sessionId) {
     const TABLE = 'bot_state';
     const NAMESPACE = 'wa_session';
-    // Import dynamique pour baileys ESM-uniquement (Node 22+)
+    const DB_TIMEOUT = 10000;
+    
+    // Dynamic import for ESM-only baileys
     const baileysMod = await import('@whiskeysockets/baileys');
     const BufferJSON = baileysMod.BufferJSON;
     const initAuthCreds = baileysMod.initAuthCreds;
@@ -2495,14 +2497,20 @@ async function useSupabaseAuthState(sessionId) {
                 .from(TABLE)
                 .select('value')
                 .eq('id', makeId(key))
-                .abortSignal(AbortSignal.timeout(10000))
+                .abortSignal(AbortSignal.timeout(DB_TIMEOUT))
                 .single();
             
-            if (!error && data) {
+            if (error && error.code !== 'PGRST116') {
+                console.error(`[WA-DB-READ-ERR] ${key}:`, error.message);
+                throw error;
+            }
+
+            if (data) {
                 return JSON.parse(JSON.stringify(data.value), BufferJSON.reviver);
             }
-            
-            // Si on vient de purger, NE PAS aller chercher dans le backup
+
+            // [🛡️ REDONDANCE] Si la session principale est vide, on cherche dans le backup
+            // On ignore le backup si on est en train de purger
             if (global._wa_purging === sessionId) return null;
 
             const backupId = `wa_backup::${sessionId}::${key}`;
@@ -2513,7 +2521,7 @@ async function useSupabaseAuthState(sessionId) {
                 .maybeSingle();
 
             if (backupData) {
-                // Restoration silencieuse vers la session principale pour éviter les futurs ralentissements
+                console.log(`[WA-DB] 🛡️ Restoring session from BACKUP for ${key}`);
                 const serialized = JSON.parse(JSON.stringify(backupData.value));
                 supabase.from(TABLE).upsert({
                     id: makeId(key),
@@ -2528,41 +2536,45 @@ async function useSupabaseAuthState(sessionId) {
 
             return null;
         } catch (e) {
-            return null;
+            console.error(`[WA-DB-READ-ERR] Key ${key}:`, e.message);
+            throw e; 
         }
     }
 
     async function writeData(key, value) {
         try {
             const serialized = JSON.parse(JSON.stringify(value, BufferJSON.replacer));
-            const payload = {
-                id: makeId(key),
-                namespace: NAMESPACE,
-                user_key: key,
-                value: serialized,
-                updated_at: new Date().toISOString()
-            };
+            const id = makeId(key);
+            
+            // Verrou local préventif
+            if (global.wa_db_locks?.[id]) return;
+            if (!global.wa_db_locks) global.wa_db_locks = {};
+            global.wa_db_locks[id] = true;
 
-            // Écriture principale
-            await supabase.from(TABLE).upsert(payload, { onConflict: 'id' }).abortSignal(AbortSignal.timeout(10000));
+            try {
+                const payload = {
+                    id: id,
+                    namespace: NAMESPACE,
+                    user_key: key,
+                    value: serialized,
+                    updated_at: new Date().toISOString()
+                };
 
-            // Écriture redondante (Backup) - Persiste même après clearSession()
-            const backupId = `wa_backup::${sessionId}::${key}`;
-            await supabase.from(TABLE).upsert({
-                ...payload,
-                id: backupId,
-                namespace: 'wa_backup'
-            }, { onConflict: 'id' });
+                await supabase.from(TABLE).upsert(payload).abortSignal(AbortSignal.timeout(DB_TIMEOUT));
 
+                // Backup silencieux
+                const backupId = `wa_backup::${sessionId}::${key}`;
+                await supabase.from(TABLE).upsert({ ...payload, id: backupId, namespace: 'wa_backup' });
+            } finally {
+                delete global.wa_db_locks[id];
+            }
         } catch (e) {
-            console.error(`[WA-DB] Erreur writeData pour la clé ${key} :`, e.message);
+            console.error(`[WA-DB] writeData error for ${key}:`, e.message);
         }
     }
 
     async function removeData(key) {
-        try {
-            await supabase.from(TABLE).delete().eq('id', makeId(key));
-        } catch (e) { }
+        try { await supabase.from(TABLE).delete().eq('id', makeId(key)); } catch (e) { }
     }
 
     async function clearAllData() {
@@ -2570,7 +2582,6 @@ async function useSupabaseAuthState(sessionId) {
             console.log(`[WA-DB] 💥 PURGE TOTALE pour ${sessionId}...`);
             global._wa_purging = sessionId; 
             
-            // 1. Supprimer par patterns variés (ID et Namespace)
             const tasks = [
                 supabase.from(TABLE).delete().like('id', `%${sessionId}%`),
                 supabase.from(TABLE).delete().eq('namespace', NAMESPACE).like('id', `%${sessionId}%`),
@@ -2579,20 +2590,30 @@ async function useSupabaseAuthState(sessionId) {
                 supabase.from(TABLE).delete().eq('id', `wa_lock::${sessionId}`),
                 supabase.from(TABLE).delete().eq('id', `global_lock::${sessionId}`)
             ];
-            
             await Promise.all(tasks);
-
             console.log(`[WA-DB] ✅ Fin de purge pour ${sessionId}.`);
             setTimeout(() => { global._wa_purging = null; }, 10000);
         } catch (e) {
-            console.error('[WA-DB] Erreur fatale clearAllData :', e.message);
+            console.error('[WA-DB] clearAllData error:', e.message);
         }
     }
 
-    // Chargement initial des credentials depuis Supabase
-    const credsRaw = await readData('creds');
+    // Chargement initial des credentials avec retry
+    let credsRaw = null;
+    let attempts = 0;
+    while (attempts < 3) {
+        try {
+            credsRaw = await readData('creds');
+            break;
+        } catch (dbErr) {
+            attempts++;
+            if (attempts >= 3) throw new Error(`CRITICAL_STORAGE_ERROR: ${dbErr.message}`);
+            await new Promise(r => setTimeout(r, 3000));
+        }
+    }
+
     const creds = credsRaw || initAuthCreds();
-    if (!credsRaw) console.log(`[WA-DB] ✨ Session ${sessionId} démarrée à NEUF (initAuthCreds)`);
+    if (!credsRaw) console.log(`[WA-DB] ✨ Session ${sessionId} démarrée à NEUF`);
     else console.log(`[WA-DB] 📂 Session ${sessionId} chargée (nouveau: false)`);
 
     return {
@@ -2603,22 +2624,17 @@ async function useSupabaseAuthState(sessionId) {
                     const data = {};
                     await Promise.all(ids.map(async (id) => {
                         const value = await readData(`${type}-${id}`);
-                        if (value !== null && value !== undefined) {
-                            data[id] = value;
-                        }
+                        if (value) data[id] = value;
                     }));
                     return data;
                 },
                 set: async (data) => {
                     const tasks = [];
-                    for (const category in data) {
-                        for (const id in data[category]) {
-                            const value = data[category][id];
-                            if (value) {
-                                tasks.push(writeData(`${category}-${id}`, value));
-                            } else {
-                                tasks.push(removeData(`${category}-${id}`));
-                            }
+                    for (const cat in data) {
+                        for (const id in data[cat]) {
+                            const val = data[cat][id];
+                            if (val) tasks.push(writeData(`${cat}-${id}`, val));
+                            else tasks.push(removeData(`${cat}-${id}`));
                         }
                     }
                     await Promise.all(tasks);
@@ -2627,45 +2643,32 @@ async function useSupabaseAuthState(sessionId) {
         },
         saveCreds: () => writeData('creds', creds),
         clearSession: clearAllData,
-        // SYSTÈME DE VERROU (LOCK) 
         claimLock: (ownerId) => claimLock(`wa_lock::${sessionId}`, ownerId),
         checkLock: () => checkLock(`wa_lock::${sessionId}`),
-
-        getMetadata: async (key) => {
-            const data = await readData(`meta-${key}`);
-            return data;
-        },
-        saveMetadata: async (key, value) => {
-            await writeData(`meta-${key}`, value);
-        }
+        releaseLock: (ownerId) => releaseLock(`wa_lock::${sessionId}`, ownerId)
     };
 }
 
 /**
- * Système de verrouillage distribué générique
+ * Système de verrouillage distribué (Lock)
  */
-async function claimLock(lockId, ownerId) {
-    const TABLE = 'bot_state';
+async function releaseLock(lockId, ownerId) {
     try {
-        // 1. Vérifier si un verrou existe déjà et s'il est valide
-        const current = await checkLock(lockId);
-        if (current && current.owner !== ownerId) {
-            console.log(`[LOCK] Conflit : Verrou ${lockId} déjà tenu par ${current.owner}`);
-            return false;
-        }
+        await supabase.from('bot_state').delete().eq('id', lockId).eq('value->>owner', ownerId);
+        return true;
+    } catch (e) { return false; }
+}
 
-        // 2. Tenter de prendre ou renouveler le verrou
-        const { error } = await supabase.from(TABLE).upsert({
+async function claimLock(lockId, ownerId) {
+    try {
+        const current = await checkLock(lockId);
+        if (current && current.owner !== ownerId) return false;
+        await supabase.from('bot_state').upsert({
             id: lockId,
             namespace: 'global_lock',
             user_key: lockId.split('::')[1] || lockId,
             value: { owner: ownerId, since: current?.since || new Date().toISOString() },
             updated_at: new Date().toISOString()
-        }, { onConflict: 'id' });
-        
-        if (error) return false;
-        return true;
-    } catch (e) { 
         console.error(`[LOCK-ERR] ${lockId} :`, e.message);
         return false; 
     }
