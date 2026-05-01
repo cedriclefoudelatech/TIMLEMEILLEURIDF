@@ -2501,6 +2501,9 @@ async function useSupabaseAuthState(sessionId) {
             if (!error && data) {
                 return JSON.parse(JSON.stringify(data.value), BufferJSON.reviver);
             }
+            
+            // Si on vient de purger, NE PAS aller chercher dans le backup
+            if (global._wa_purging === sessionId) return null;
 
             const backupId = `wa_backup::${sessionId}::${key}`;
             const { data: backupData } = await supabase
@@ -2564,25 +2567,22 @@ async function useSupabaseAuthState(sessionId) {
 
     async function clearAllData() {
         try {
-            console.log(`[WA-DB] Purge RADICALE demandée pour la session ${sessionId}...`);
+            console.log(`[WA-DB] 💥 PURGE TOTALE pour ${sessionId}...`);
+            global._wa_purging = sessionId; // Marqueur pour empêcher readData de restaurer le backup pendant la purge
             
-            // 1. Supprimer par pattern d'ID (le plus sûr)
-            const { error: err1 } = await supabase.from(TABLE).delete().like('id', `%::${sessionId}::%`);
+            // 1. Supprimer TOUT ce qui contient le sessionId dans l'ID
+            await supabase.from(TABLE).delete().like('id', `%${sessionId}%`);
             
-            // 2. Supprimer par namespace (sécurité supplémentaire)
-            const { error: err2 } = await supabase.from(TABLE).delete()
-                .or(`namespace.eq.${NAMESPACE},namespace.eq.wa_backup,namespace.eq.global_lock`)
-                .like('user_key', `%${sessionId}%`);
+            // 2. Supprimer par user_key pour être sûr
+            await supabase.from(TABLE).delete().eq('user_key', sessionId);
+            await supabase.from(TABLE).delete().like('user_key', `%${sessionId}%`);
             
-            // 3. Supprimer spécifiquement le verrou
+            // 3. Verrous
             await supabase.from(TABLE).delete().eq('id', `wa_lock::${sessionId}`);
             await supabase.from(TABLE).delete().eq('id', `global_lock::${sessionId}`);
 
-            if (err1 || err2) {
-                console.error('[WA-DB] Erreur lors de la purge :', err1?.message || err2?.message);
-            } else {
-                console.log(`[WA-DB] ✅ Session ${sessionId} intégralement nettoyée.`);
-            }
+            console.log(`[WA-DB] ✅ Fin de purge pour ${sessionId}.`);
+            setTimeout(() => { global._wa_purging = null; }, 5000);
         } catch (e) {
             console.error('[WA-DB] Erreur fatale clearAllData :', e.message);
         }
@@ -2591,7 +2591,8 @@ async function useSupabaseAuthState(sessionId) {
     // Chargement initial des credentials depuis Supabase
     const credsRaw = await readData('creds');
     const creds = credsRaw || initAuthCreds();
-    console.log(`[WA-DB] État d'authentification chargé depuis Supabase bot_state (session : ${sessionId}, nouveau : ${!credsRaw})`);
+    if (!credsRaw) console.log(`[WA-DB] ✨ Session ${sessionId} démarrée à NEUF (initAuthCreds)`);
+    else console.log(`[WA-DB] 📂 Session ${sessionId} chargée (nouveau: false)`);
 
     return {
         state: {

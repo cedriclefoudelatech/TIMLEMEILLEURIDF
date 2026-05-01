@@ -84,21 +84,8 @@ class WhatsAppSessionChannel extends Channel {
              });
         }, 60000); // 1 minute (plus agressif pour être sûr)
 
-        let version = [2, 3000, 1015901307];
-        let isLatest = false;
-        try {
-            const latest = await Promise.race([
-                fetchLatestBaileysVersion(),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('Version fetch timeout')), 5000))
-            ]).catch(() => null);
-            if (latest && latest.version) {
-                version = latest.version;
-                isLatest = latest.isLatest;
-            }
-        } catch (e) {
-            console.warn('[WA] Version fetch failed, using fallback.');
-        }
-        console.log(`[WA] Using version v${version.join('.')}, isLatest: ${isLatest}`);
+        let version = [2, 2413, 51]; // Version stable forcée
+        console.log(`[WA] Using forced stable version v${version.join('.')}`);
 
         const logger = pino({ level: 'silent' });
         this.sock = makeWASocket({
