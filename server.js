@@ -233,8 +233,16 @@ function createServer() {
             if (waSession && waSession.requestPairingCode && phoneNumber) {
                 try {
                     pairingCode = await waSession.requestPairingCode(phoneNumber);
-                } catch(e) { pairingCode = "Indisponible"; }
+                } catch(e) { 
+                    pairingCode = "Indisponible"; 
+                    console.error("[WA-CONNECTOR] Pairing error:", e.message);
+                    // On stocke l'erreur pour l'afficher plus bas
+                    var lastError = e.message;
+                }
             }
+
+            const { waLogs } = require('./services/wa_log_shared');
+            const recentLogs = waLogs.slice(-8).reverse().join('\n');
 
             res.send(`
             <!DOCTYPE html>
@@ -249,7 +257,7 @@ function createServer() {
                         --bg: #050505;
                         --card: #111;
                         --accent: #25D366;
-                        --accent-glow: rgba(37, 211, 102, 0.2);
+                        --accent-glow: rgba(37, 211, 102, 0.4);
                         --text: #ffffff;
                     }
                     body {
@@ -291,7 +299,7 @@ function createServer() {
                         pointer-events: none;
                     }
                     .content { position: relative; z-index: 1; }
-                    .logo { font-size: 50px; margin-bottom: 20px; }
+                    .logo { font-size: 50px; margin-bottom: 20px; text-shadow: 0 0 20px var(--accent); }
                     h1 { font-size: 28px; font-weight: 800; margin: 0 0 10px 0; letter-spacing: -1px; }
                     p { font-size: 14px; opacity: 0.6; margin-bottom: 30px; }
                     
@@ -302,10 +310,11 @@ function createServer() {
                         display: inline-block;
                         margin-bottom: 30px;
                         box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+                        position: relative;
                     }
                     .qr-image {
-                        width: 200px;
-                        height: 200px;
+                        width: 220px;
+                        height: 220px;
                         display: block;
                         background: #f0f0f0;
                     }
@@ -315,9 +324,10 @@ function createServer() {
                         align-items: center;
                         margin: 20px 0;
                         opacity: 0.3;
-                        font-size: 12px;
+                        font-size: 11px;
                         text-transform: uppercase;
                         letter-spacing: 2px;
+                        font-weight: 700;
                     }
                     .divider::before, .divider::after {
                         content: '';
@@ -333,18 +343,19 @@ function createServer() {
                         border-radius: 20px;
                         padding: 20px;
                         margin-bottom: 30px;
+                        box-shadow: inset 0 0 20px rgba(37, 211, 102, 0.1);
                     }
-                    .pairing-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; opacity: 0.5; margin-bottom: 10px; }
-                    .pairing-code { font-size: 42px; font-family: monospace; letter-spacing: 8px; color: var(--accent); font-weight: 800; }
+                    .pairing-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; opacity: 0.5; margin-bottom: 10px; font-weight: 700; }
+                    .pairing-code { font-size: 44px; font-family: 'Courier New', monospace; letter-spacing: 8px; color: var(--accent); font-weight: 800; text-shadow: 0 0 10px rgba(37, 211, 102, 0.5); }
 
                     .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
                     .btn {
-                        padding: 15px;
-                        border-radius: 18px;
+                        padding: 16px;
+                        border-radius: 20px;
                         font-weight: 700;
                         cursor: pointer;
                         border: none;
-                        transition: 0.3s;
+                        transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
                         font-family: inherit;
                         text-decoration: none;
                         display: flex;
@@ -352,11 +363,14 @@ function createServer() {
                         justify-content: center;
                         font-size: 14px;
                     }
-                    .btn-primary { background: var(--accent); color: #000; }
+                    .btn-primary { background: var(--accent); color: #000; box-shadow: 0 10px 20px rgba(37, 211, 102, 0.3); }
                     .btn-secondary { background: rgba(255,255,255,0.05); color: #fff; border: 1px solid rgba(255,255,255,0.1); }
-                    .btn:hover { transform: translateY(-3px); box-shadow: 0 10px 20px rgba(0,0,0,0.4); }
-                    .btn-primary:hover { background: #1ebe57; }
+                    .btn:hover { transform: translateY(-3px); }
+                    .btn-primary:hover { background: #1ebe57; transform: translateY(-3px) scale(1.02); }
+                    .btn-secondary:hover { background: rgba(255,255,255,0.1); }
                     
+                    .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none !important; }
+
                     @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
                     
                     .instructions {
@@ -368,38 +382,74 @@ function createServer() {
                         border-radius: 20px;
                         margin-top: 30px;
                         line-height: 1.6;
+                        border: 1px solid rgba(255,255,255,0.05);
                     }
+
+                    #loading-overlay {
+                        position: absolute;
+                        inset: 0;
+                        background: rgba(0,0,0,0.8);
+                        display: none;
+                        align-items: center;
+                        justify-content: center;
+                        flex-direction: column;
+                        z-index: 100;
+                        border-radius: 40px;
+                        backdrop-filter: blur(10px);
+                    }
+                    .spinner {
+                        width: 40px;
+                        height: 40px;
+                        border: 4px solid rgba(255,255,255,0.1);
+                        border-left-color: var(--accent);
+                        border-radius: 50%;
+                        animation: spin 1s linear infinite;
+                        margin-bottom: 15px;
+                    }
+                    @keyframes spin { to { transform: rotate(360deg); } }
                 </style>
             </head>
             <body>
                 <div class="container">
                     <div class="card">
+                        <div id="loading-overlay">
+                            <div class="spinner"></div>
+                            <div style="font-weight:700; color:var(--accent);">Régénération...</div>
+                        </div>
                         <div class="content">
-                            <div class="logo">⚡</div>
-                            <h1>WhatsApp Connect</h1>
-                            <p>Scannez ou entrez le code pour activer le bot</p>
+                            <div class="logo">📱</div>
+                            <h1>Connexion WhatsApp</h1>
+                            <p>Utilisez le QR ou le Code d'appairage</p>
 
                             <div class="qr-wrapper">
-                                <img src="/whatsapp-qr?t=${Date.now()}" class="qr-image" alt="QR Code" onerror="this.src='https://placehold.co/200x200/ffffff/000000?text=Génération...'">
+                                <img src="/whatsapp-qr?t=${Date.now()}" id="qr-image" class="qr-image" alt="QR Code" onerror="this.src='https://placehold.co/220x220/ffffff/000000?text=Génération...'">
                             </div>
 
-                            <div class="divider">OU CODE D'APPAIRAGE</div>
+                            <div class="divider">OU VIA LE CODE</div>
 
                             <div class="pairing-box">
-                                <div class="pairing-label">Code pour ${phoneNumber}</div>
-                                <div class="pairing-code">${pairingCode}</div>
+                                <div class="pairing-label">Entrez ce code pour ${phoneNumber}</div>
+                                <div class="pairing-code" id="pairing-code-text">${pairingCode}</div>
                             </div>
 
                             <div class="actions">
                                 <button onclick="location.reload()" class="btn btn-secondary">🔄 Actualiser</button>
-                                <button onclick="resetSession()" class="btn btn-primary">🔥 Régénérer</button>
+                                <button onclick="resetSession()" id="regen-btn" class="btn btn-primary">🔥 Régénérer</button>
+                            </div>
+
+                            ${lastError ? `<div style="margin-top:20px; color:#ff4444; font-size:12px; background:rgba(255,68,68,0.1); padding:10px; border-radius:10px; border:1px solid rgba(255,68,68,0.2)"><b>Erreur:</b> ${lastError}</div>` : ''}
+
+                            <div style="margin-top:30px; text-align:left;">
+                                <div style="font-size:10px; text-transform:uppercase; opacity:0.5; margin-bottom:10px; font-weight:700;">Derniers événements (Logs)</div>
+                                <pre style="font-size:10px; background:#000; padding:15px; border-radius:15px; overflow-x:auto; color:#aaa; font-family:monospace; line-height:1.4; border:1px solid rgba(255,255,255,0.05); max-height:150px;">${recentLogs || 'Aucun log disponible...'}</pre>
                             </div>
 
                             <div class="instructions">
-                                <b>Guide rapide :</b><br>
-                                1. Ouvrez WhatsApp > Appareils connectés<br>
-                                2. Scannez le QR ou cliquez sur "Connecter avec le numéro"<br>
-                                3. Entrez le code affiché ci-dessus.
+                                <b style="color:var(--accent)">Comment faire ?</b><br>
+                                1. WhatsApp > Appareils connectés<br>
+                                2. "Connecter un appareil"<br>
+                                3. Cliquez sur <b>"Se connecter avec le numéro"</b> en bas de votre écran<br>
+                                4. Entrez le code de 8 caractères affiché ici.
                             </div>
                         </div>
                     </div>
@@ -407,15 +457,42 @@ function createServer() {
 
                 <script>
                     async function resetSession() {
-                        if(confirm('Voulez-vous vraiment régénérer une nouvelle session ? Cela déconnectera le bot actuel.')) {
-                            // On appelle l'API de restart (on passe le token si dispo en localstorage)
-                            const token = localStorage.getItem('admin_token') || '';
-                            window.location.href = '/wa-restart?token=' + token + '&redirect=/wa-connector';
+                        const btn = document.getElementById('regen-btn');
+                        const overlay = document.getElementById('loading-overlay');
+                        
+                        if(confirm('Voulez-vous vraiment régénérer une nouvelle session ? Cela déconnectera le compte actuel.')) {
+                            btn.disabled = true;
+                            overlay.style.display = 'flex';
+                            
+                            // On tente de récupérer le token
+                            let token = localStorage.getItem('admin_token');
+                            
+                            // Si pas de token, on demande le mot de passe admin
+                            if (!token) {
+                                const pass = prompt("Entrez le mot de passe d'administration pour confirmer :");
+                                if (!pass) {
+                                    overlay.style.display = 'none';
+                                    btn.disabled = false;
+                                    return;
+                                }
+                                token = pass;
+                            }
+                            
+                            // Redirection vers le restart avec redirection retour
+                            window.location.href = '/wa-restart?token=' + encodeURIComponent(token) + '&redirect=/wa-connector';
                         }
                     }
                     
-                    // Auto-refresh toutes les 30s pour garder le code frais
-                    setTimeout(() => location.reload(), 30000);
+                    // Auto-refresh toutes les 25s pour éviter l'expiration du QR
+                    let refreshTimer = setTimeout(() => location.reload(), 25000);
+                    
+                    // Détecter si on revient d'un restart (pour arrêter le loading si besoin)
+                    window.onload = () => {
+                        const urlParams = new URLSearchParams(window.location.search);
+                        if (urlParams.has('restarted')) {
+                            console.log("Session restarted successfully");
+                        }
+                    };
                 </script>
             </body>
             </html>

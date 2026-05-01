@@ -2557,11 +2557,15 @@ async function useSupabaseAuthState(sessionId) {
 
     async function clearAllData() {
         try {
-            // Supprimer toutes les entrées de cette session (principales + backup)
+            // Supprimer toutes les entrées de cette session (principales + backup + lock)
             await supabase.from(TABLE).delete()
-                .or(`namespace.eq.${NAMESPACE},namespace.eq.wa_backup`)
+                .or(`namespace.eq.${NAMESPACE},namespace.eq.wa_backup,namespace.eq.global_lock`)
                 .like('id', `%::${sessionId}::%`);
-            console.log(`[WA-DB] Session ${sessionId} (et backup) effacée de Supabase`);
+            
+            // Fallback pour le verrou s'il n'a pas été attrapé par le like (ex: wa_lock::session)
+            await supabase.from(TABLE).delete().eq('id', `wa_lock::${sessionId}`);
+            
+            console.log(`[WA-DB] Session ${sessionId} (et backup/lock) effacée de Supabase`);
         } catch (e) {
             console.error('[WA-DB] Erreur clearAllData :', e.message);
         }
