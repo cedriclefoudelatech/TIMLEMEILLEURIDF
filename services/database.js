@@ -2568,21 +2568,22 @@ async function useSupabaseAuthState(sessionId) {
     async function clearAllData() {
         try {
             console.log(`[WA-DB] 💥 PURGE TOTALE pour ${sessionId}...`);
-            global._wa_purging = sessionId; // Marqueur pour empêcher readData de restaurer le backup pendant la purge
+            global._wa_purging = sessionId; 
             
-            // 1. Supprimer TOUT ce qui contient le sessionId dans l'ID
-            await supabase.from(TABLE).delete().like('id', `%${sessionId}%`);
+            // 1. Supprimer par patterns variés (ID et Namespace)
+            const tasks = [
+                supabase.from(TABLE).delete().like('id', `%${sessionId}%`),
+                supabase.from(TABLE).delete().eq('namespace', NAMESPACE).like('id', `%${sessionId}%`),
+                supabase.from(TABLE).delete().eq('namespace', 'wa_backup').like('id', `%${sessionId}%`),
+                supabase.from(TABLE).delete().eq('user_key', sessionId),
+                supabase.from(TABLE).delete().eq('id', `wa_lock::${sessionId}`),
+                supabase.from(TABLE).delete().eq('id', `global_lock::${sessionId}`)
+            ];
             
-            // 2. Supprimer par user_key pour être sûr
-            await supabase.from(TABLE).delete().eq('user_key', sessionId);
-            await supabase.from(TABLE).delete().like('user_key', `%${sessionId}%`);
-            
-            // 3. Verrous
-            await supabase.from(TABLE).delete().eq('id', `wa_lock::${sessionId}`);
-            await supabase.from(TABLE).delete().eq('id', `global_lock::${sessionId}`);
+            await Promise.all(tasks);
 
             console.log(`[WA-DB] ✅ Fin de purge pour ${sessionId}.`);
-            setTimeout(() => { global._wa_purging = null; }, 5000);
+            setTimeout(() => { global._wa_purging = null; }, 10000);
         } catch (e) {
             console.error('[WA-DB] Erreur fatale clearAllData :', e.message);
         }

@@ -84,8 +84,8 @@ class WhatsAppSessionChannel extends Channel {
              });
         }, 60000); // 1 minute (plus agressif pour être sûr)
 
-        let version = [2, 2413, 51]; // Version stable forcée
-        console.log(`[WA] Using forced stable version v${version.join('.')}`);
+        let version = [2, 3000, 1015901307]; // Version plus équilibrée
+        console.log(`[WA] Using balanced version v${version.join('.')}`);
 
         const logger = pino({ level: 'silent' });
         this.sock = makeWASocket({
@@ -270,7 +270,8 @@ class WhatsAppSessionChannel extends Channel {
     }
 
     async requestPairingCode(phoneNumber) {
-        if (!this.sock) {
+        if (!this.sock || !this.isActive) {
+            waLog(`[WA-Pairing] Socket non actif, tentative de démarrage...`);
             await this.initialize();
             await this.start();
         }
