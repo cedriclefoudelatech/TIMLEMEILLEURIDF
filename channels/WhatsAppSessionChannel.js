@@ -84,8 +84,8 @@ class WhatsAppSessionChannel extends Channel {
              });
         }, 60000); // 1 minute (plus agressif pour être sûr)
 
-        let version = [2, 3000, 1015901307]; // Version plus équilibrée
-        console.log(`[WA] Using balanced version v${version.join('.')}`);
+        let version = [2, 3000, 1017531287]; 
+        console.log(`[WA] Using version v${version.join('.')}`);
 
         const logger = pino({ level: 'silent' });
         this.sock = makeWASocket({
@@ -98,9 +98,8 @@ class WhatsAppSessionChannel extends Channel {
             browser: ['Mac OS', 'Chrome', '121.0.6167.85'],
             syncFullHistory: false,
             generateHighQualityLinkPreview: false,
-            connectTimeoutMs: 90000,
-            defaultQueryTimeoutMs: 0,
-            keepAliveIntervalMs: 10000,
+            connectTimeoutMs: 60000,
+            keepAliveIntervalMs: 30000,
             shouldAwaitPayload: true,
             getMessage: async (key) => {
                 // Nécessaire pour que Baileys puisse décrypter les messages retry
@@ -162,8 +161,8 @@ class WhatsAppSessionChannel extends Channel {
 
                 if (needsFreshSession) {
                     this._failureCount++;
-                    if (this._failureCount > 5) {
-                        waLog(`[WA-CRIT] Trop d'échecs consécutifs (${this._failureCount}). Arrêt des tentatives pour protéger le serveur.`);
+                    if (this._failureCount > 15) {
+                        waLog(`[WA-CRIT] Trop d'échecs consécutifs (${this._failureCount}). Arrêt des tentatives.`);
                         this.isActive = false;
                         return;
                     }
