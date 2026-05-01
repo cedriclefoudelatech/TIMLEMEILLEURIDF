@@ -2564,17 +2564,27 @@ async function useSupabaseAuthState(sessionId) {
 
     async function clearAllData() {
         try {
-            // Supprimer toutes les entrées de cette session (principales + backup + lock)
-            await supabase.from(TABLE).delete()
+            console.log(`[WA-DB] Purge RADICALE demandée pour la session ${sessionId}...`);
+            
+            // 1. Supprimer par pattern d'ID (le plus sûr)
+            const { error: err1 } = await supabase.from(TABLE).delete().like('id', `%::${sessionId}::%`);
+            
+            // 2. Supprimer par namespace (sécurité supplémentaire)
+            const { error: err2 } = await supabase.from(TABLE).delete()
                 .or(`namespace.eq.${NAMESPACE},namespace.eq.wa_backup,namespace.eq.global_lock`)
-                .like('id', `%::${sessionId}::%`);
+                .like('user_key', `%${sessionId}%`);
             
-            // Fallback pour le verrou s'il n'a pas été attrapé par le like (ex: wa_lock::session)
+            // 3. Supprimer spécifiquement le verrou
             await supabase.from(TABLE).delete().eq('id', `wa_lock::${sessionId}`);
-            
-            console.log(`[WA-DB] Session ${sessionId} (et backup/lock) effacée de Supabase`);
+            await supabase.from(TABLE).delete().eq('id', `global_lock::${sessionId}`);
+
+            if (err1 || err2) {
+                console.error('[WA-DB] Erreur lors de la purge :', err1?.message || err2?.message);
+            } else {
+                console.log(`[WA-DB] ✅ Session ${sessionId} intégralement nettoyée.`);
+            }
         } catch (e) {
-            console.error('[WA-DB] Erreur clearAllData :', e.message);
+            console.error('[WA-DB] Erreur fatale clearAllData :', e.message);
         }
     }
 

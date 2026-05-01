@@ -108,7 +108,7 @@ class WhatsAppSessionChannel extends Channel {
                 keys: makeCacheableSignalKeyStore(state.keys, logger)
             },
             logger,
-            browser: ['Ubuntu', 'Chrome', '110.0.5481.177'],
+            browser: ['Mac OS', 'Chrome', '121.0.6167.85'],
             syncFullHistory: false,
             generateHighQualityLinkPreview: false,
             connectTimeoutMs: 90000,
