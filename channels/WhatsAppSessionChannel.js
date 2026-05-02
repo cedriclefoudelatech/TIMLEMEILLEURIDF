@@ -56,10 +56,10 @@ class WhatsAppSessionChannel extends Channel {
             waLog(`[WA-Pairing] Mode jumelage activé pour : ${this.pairingPhone}`);
         }
         const { state, saveCreds, clearSession, claimLock, checkLock, releaseLock } = await useSupabaseAuthState(this.sessionId).catch(err => {
-            waLog(`[WA-START-ERR] DB Initialize failed: ${err.message}. Retrying in 10s...`);
             setTimeout(() => this.start(options), 10000);
             throw err;
         });
+        this._failureCount = 0; // Reset failure count on manual start/restart
         this._clearSession = clearSession;
         this._releaseLock = releaseLock;
 
@@ -100,9 +100,17 @@ class WhatsAppSessionChannel extends Channel {
              await claimLock(myInstanceId).catch(() => {});
         }, 15000);
 
-        // Suppression de la version forcée pour laisser Baileys détecter la plus appropriée
+        // [🛡️ REDONDANCE] Récupération de la dernière version Baileys pour éviter le rejet 405/428
+        let version = [2, 3000, 1015901307]; // Fallback
+        try {
+            const latest = await fetchLatestBaileysVersion().catch(() => null);
+            if (latest && latest.version) version = latest.version;
+        } catch (e) {}
+        waLog(`[WA] Using version v${version.join('.')}`);
+
         const logger = pino({ level: 'silent' });
         this.sock = makeWASocket({
+            version,
             auth: {
                 creds: state.creds,
                 keys: makeCacheableSignalKeyStore({
@@ -120,7 +128,7 @@ class WhatsAppSessionChannel extends Channel {
                 }, logger)
             },
             logger,
-            browser: ["Mac OS", "Chrome", "122.0.0.0"],
+            browser: ["macOS", "Chrome", "115.0.0.0"],
             syncFullHistory: false,
             shouldSyncHistory: false,
             markOnlineOnConnect: true,

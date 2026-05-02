@@ -37,8 +37,8 @@ async function initChannels() {
     // 3. WhatsApp (Session / TCT style)
     const waSessionId = process.env.WHATSAPPD_SESSION_ID || process.env.WHATSAPP_SESSION_ID;
     if (waSessionId || process.env.SESSION_ID) {
-        // Ajout d'un suffixe '_v3' pour forcer une nouvelle identité et éviter l'erreur 405 (session brûlée)
-        const sid = (waSessionId || process.env.SESSION_ID) + '_v3';
+        // Ajout d'un suffixe '_v4' pour forcer une nouvelle identité et éviter l'erreur 405 (session brûlée)
+        const sid = (waSessionId || process.env.SESSION_ID) + '_v4';
         const was = new WhatsAppSessionChannel({ sessionId: sid });
         await was.initialize();
         registry.register(was);
