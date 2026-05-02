@@ -34,6 +34,7 @@ class WhatsAppSessionChannel extends Channel {
         this.messageHandler = null;
         this.store = null;
         this._restarting = false;
+        this._decryptionFailures = 0;
         this._clearSession = null; // Sera défini dans start()
         this._conflictBackoff = 5000; // Backoff initial pour code 440 (ms)
         this._failureCount = 0; // Compteur pour éviter les boucles infinies
@@ -201,66 +202,27 @@ class WhatsAppSessionChannel extends Channel {
             // Suppression de l'ancienne logique setTimeout fixe (remplacée par la méthode Le Relais ci-dessus)
 
             if (connection === 'close') {
-                const error = lastDisconnect?.error;
-                const statusCode = error?.output?.statusCode;
-                this.isActive = false; // Désactiver immédiatement le canal pour stopper les envois
-                waLog(`[WA] Connexion fermée. Code: ${statusCode}, Msg: ${error?.message}, Payload: ${JSON.stringify(error?.output?.payload)}`);
+                const statusCode = lastDisconnect?.error?.output?.statusCode;
+                const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+                this.isActive = false;
 
-                // Si on est en restart, ne pas reconnecter (restart() s'en charge)
-                if (this._restarting) {
-                    waLog('[WA] Restart en cours, pas de reconnexion auto.');
-                    return;
-                }
+                waLog(`[WA] Connexion fermée: ${statusCode}. Reconnexion: ${shouldReconnect}`);
 
-                const isLogout = [
-                    DisconnectReason.loggedOut,   // 401
-                    DisconnectReason.badSession,   // 500
-                ].includes(statusCode);
-
-                if (isLogout) {
-                    waLog(`[WA] Session EXPIRÉE ou DÉCONNECTÉE (code ${statusCode}). Purge et demande de nouveau QR...`);
-                    this._failureCount = 0; 
-                    if (this._clearSession) {
-                        await this._clearSession().catch(() => {});
-                    }
-                    setTimeout(() => this.start(), 5000); // Redémarrage rapide pour générer le QR
-                    return;
-                }
-
-                // Autres codes nécessitant une attention (mais sans purge immédiate comme 428)
-                const needsFreshSession = [
-                    DisconnectReason.forbidden,    // 403
-                    DisconnectReason.multideviceMismatch, // 411
-                    405, // Method Not Allowed
-                    428, // Precondition Required
-                ].includes(statusCode);
-
-                if (needsFreshSession) {
-                    this._failureCount++;
-                    if (this._failureCount > 20) {
-                        waLog(`[WA-CRIT] Trop d'échecs (${this._failureCount}). Arrêt.`);
-                        return;
-                    }
-
-                    waLog(`[WA] Session CRITIQUE (${statusCode}, tentative ${this._failureCount}) — Pause de sécurité (Cool-off) 10min sans purge...`);
-                    // [🛡️ IMPORTANT] On ne purge PAS sur 428, on attend juste que Meta lève le blocage IP.
-                    setTimeout(() => this.start(), 600000); 
-                } else if (statusCode === 440) {
-                    // Conflit : une autre instance a pris la session.
-                    const delay = this._conflictBackoff;
-                    this._conflictBackoff = Math.min(this._conflictBackoff * 2, 60000); // max 60s
-                    waLog(`[WA] Conflit 440 — attente ${delay}ms...`);
-                    this.isActive = false;
-                    setTimeout(() => this.start(), delay);
-                } else {
-                    waLog(`[WA] Reconnexion simple (code ${statusCode}) dans 10s...`);
+                if (statusCode === DisconnectReason.loggedOut) {
+                    waLog('[WA-CRIT] Déconnecté (401)! Nettoyage de la session...');
+                    if (this._clearSession) await this._clearSession().catch(() => {});
+                    setTimeout(() => this.start(), 2000); 
+                } else if (statusCode === 440 || statusCode === 405) {
+                    waLog('[WA-STABILITY] Conflit ou erreur 405. Attente 10s avant retry...');
                     setTimeout(() => this.start(), 10000);
+                } else {
+                    waLog(`[WA-RETRY] Tentative de reconnexion immédiate (code ${statusCode})...`);
+                    this.start();
                 }
             } else if (connection === 'open') {
                 waLog('✅ [WA] WhatsApp connecté avec succès !');
                 this.isActive = true;
-                this._failureCount = 0; // Reset sur succès
-                this._conflictBackoff = 5000;
+                this._decryptionFailures = 0;
             }
         });
 
@@ -283,11 +245,29 @@ class WhatsAppSessionChannel extends Channel {
                 }
                 const isMe = msg.key.fromMe;
 
-                // Ignorer les messages de protocole sans contenu utile
-                if (!msg.message || msg.message?.protocolMessage || msg.message?.senderKeyDistributionMessage) {
+                // [🛡️ DÉTECTION ÉCHEC DÉCHIFFREMENT]
+                if (!msg.message || msg.message?.protocolMessage) {
+                    const isDecryptionFailure = !msg.message && !msg.key.fromMe;
+                    if (isDecryptionFailure) {
+                        this._decryptionFailures++;
+                        waLog(`[WA-WARN] Échec déchiffrement #${this._decryptionFailures} de ${remoteJid}`);
+                        
+                        // Si on a trop d'échecs à la suite, la session est corrompue -> AUTO-PURGE
+                        if (this._decryptionFailures >= 5) {
+                            waLog(`[WA-CRIT] Session corrompue (trop d'échecs). Auto-purge et restart...`);
+                            if (this._clearSession) {
+                                await this._clearSession().catch(() => {});
+                            }
+                            setTimeout(() => process.exit(1), 2000); // Forcer le restart de Railway
+                            return;
+                        }
+                    }
                     waLog(`[WA-MSG] SKIP protocol/empty from ${remoteJid}`);
                     continue;
                 }
+
+                // Succès : on remet le compteur à zéro
+                this._decryptionFailures = 0;
 
                 const selfJidClean = selfJid?.split(':')[0]?.split('@')[0];
                 const remoteJidClean = remoteJid?.split('@')[0].split(':')[0];
