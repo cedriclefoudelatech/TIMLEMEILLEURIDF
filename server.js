@@ -165,7 +165,11 @@ function createServer() {
             const redirect = req.query.redirect;
             
             if (waSession && waSession.restart) {
-                await waSession.restart();
+                // On peut passer le numéro de téléphone pour le pairing directement dans le restart
+                const phone = req.query.phone || (await getAppSettings().then(s => s.private_contact_wa_url?.replace(/[^0-9]/g, ''))).catch(() => null);
+                
+                await waSession.restart({ pairingPhone: phone });
+                
                 if (redirect) {
                     return res.redirect(redirect);
                 }
@@ -221,24 +225,28 @@ function createServer() {
     });
 
     // Page de connexion Premium (Style La Frappe) - QR + Pairing + Reset
-    app.get('/wa-connector', async (req, res) => {
+    app.get('/wa-connector', authMiddleware, async (req, res) => {
         try {
             const settings = await getAppSettings();
             let phoneNumber = settings.private_contact_wa_url?.replace('https://wa.me/', '').replace(/[^0-9]/g, '');
             if (!phoneNumber) phoneNumber = process.env.WHATSAPP_PAIRING_NUMBER;
 
             const waSession = registry.query('whatsapp');
-            let pairingCode = "Génération...";
             
-            if (waSession && waSession.requestPairingCode && phoneNumber) {
-                try {
-                    pairingCode = await waSession.requestPairingCode(phoneNumber);
-                } catch(e) { 
-                    pairingCode = "Indisponible"; 
-                    console.error("[WA-CONNECTOR] Pairing error:", e.message);
-                    // On stocke l'erreur pour l'afficher plus bas
-                    var lastError = e.message;
-                }
+            // Support polling JSON pour mise à jour dynamique sans rechargement
+            if (req.query.json === '1') {
+                return res.json({
+                    phone: waSession?.pairingPhone || phoneNumber,
+                    code: waSession?.pairingCode || "Génération...",
+                    status: waSession?.pairingCode ? 'ready' : 'pending'
+                });
+            }
+
+            let pairingCode = waSession?.pairingCode || "Génération...";
+            
+            // Si pas de code encore, on tente de le demander en arrière-plan (sans bloquer trop longtemps)
+            if (waSession && !waSession.pairingCode && phoneNumber) {
+                waSession.requestPairingCode(phoneNumber).catch(e => console.error("[WA-CONNECTOR] Async pairing error:", e.message));
             }
 
             const { waLogs } = require('./services/wa_log_shared');
@@ -470,24 +478,35 @@ function createServer() {
                             // On tente de récupérer le token
                             let token = localStorage.getItem('admin_token');
                             
-                            // Si pas de token, on demande le mot de passe admin
-                            if (!token) {
-                                const pass = prompt("Entrez le mot de passe d'administration pour confirmer :");
-                                if (!pass) {
-                                    overlay.style.display = 'none';
-                                    btn.disabled = false;
-                                    return;
-                                }
-                                token = pass;
-                            }
-                            
                             // Redirection vers le restart avec redirection retour
-                            window.location.href = '/wa-restart?token=' + encodeURIComponent(token) + '&redirect=/wa-connector';
+                            window.location.href = '/wa-restart?token=' + encodeURIComponent(token || '') + '&redirect=/wa-connector';
                         }
                     }
+
+                    // Polling intelligent pour le code d'appairage
+                    async function pollPairingCode() {
+                        const codeElement = document.getElementById('pairing-code-text');
+                        if (!codeElement || codeElement.textContent !== "Génération...") return;
+
+                        try {
+                            const token = localStorage.getItem('admin_token');
+                            const res = await fetch(window.location.pathname + '?json=1&token=' + encodeURIComponent(token || '') + '&t=' + Date.now());
+                            const data = await res.json();
+                            if (data.code && data.code !== "Génération...") {
+                                codeElement.textContent = data.code;
+                                codeElement.style.color = "#0f0";
+                                codeElement.style.borderColor = "#25D366";
+                                // On peut aussi rafraîchir l'image QR au passage
+                                const qrImg = document.getElementById('qr-image');
+                                if (qrImg) qrImg.src = "/whatsapp-qr?t=" + Date.now();
+                            }
+                        } catch(e) {}
+                    }
                     
-                    // Auto-refresh toutes les 25s pour éviter l'expiration du QR
-                    let refreshTimer = setTimeout(() => location.reload(), 25000);
+                    setInterval(pollPairingCode, 3000);
+                    
+                    // Auto-refresh toutes les 45s pour le QR si non connecté
+                    setTimeout(() => location.reload(), 45000);
                     
                     // Détecter si on revient d'un restart (pour arrêter le loading si besoin)
                     window.onload = () => {

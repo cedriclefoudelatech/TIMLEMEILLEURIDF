@@ -36,6 +36,8 @@ class WhatsAppSessionChannel extends Channel {
         this._conflictBackoff = 5000; // Backoff initial pour code 440 (ms)
         this._failureCount = 0; // Compteur pour éviter les boucles infinies
         this.lastQR = null; // Stocke le dernier QR en Base64
+        this.pairingPhone = null;
+        this.pairingCode = null;
     }
 
     static getLogs() { return waLogs; }
@@ -45,12 +47,17 @@ class WhatsAppSessionChannel extends Channel {
         console.log(`[WA-Session] Supabase mode for: ${this.sessionId}`);
     }
 
-    async start() {
+    async start(options = {}) {
         if (this.sock) { try { this.sock.end(); } catch(e) {} this.sock = null; }
         await loadBaileys();
+        if (options.pairingPhone) {
+            this.pairingPhone = options.pairingPhone;
+            this.pairingCode = null;
+            waLog(`[WA-Pairing] Mode jumelage activé pour : ${this.pairingPhone}`);
+        }
         const { state, saveCreds, clearSession, claimLock, checkLock, releaseLock } = await useSupabaseAuthState(this.sessionId).catch(err => {
             waLog(`[WA-START-ERR] DB Initialize failed: ${err.message}. Retrying in 10s...`);
-            setTimeout(() => this.start(), 10000);
+            setTimeout(() => this.start(options), 10000);
             throw err;
         });
         this._clearSession = clearSession;
@@ -77,7 +84,7 @@ class WhatsAppSessionChannel extends Channel {
                 const waitTime = 10000;
                 waLog(`[WA-LOCK] Session busy (owned by ${activeLock.owner}, updated ${Math.round(diff/1000)}s ago). Waiting ${waitTime}ms to avoid conflict 440...`);
                 this.isActive = false;
-                setTimeout(() => this.start(), waitTime);
+                setTimeout(() => this.start(options), waitTime);
                 return;
             }
         }
@@ -152,6 +159,23 @@ class WhatsAppSessionChannel extends Channel {
                 } catch (err) {
                     console.error('❌ Erreur génération image QR:', err);
                 }
+            }
+
+            // --- PAIRING CODE LOGIC (LA FRAPPE STYLE) ---
+            if (this.pairingPhone && !this.sock.authState.creds.registered && !this.pairingCode) {
+                waLog(`[WA-Pairing] Demande de code pour ${this.pairingPhone} dans 10 secondes...`);
+                setTimeout(async () => {
+                    try {
+                        const cleanPhone = this.pairingPhone.replace(/\D/g, '');
+                        waLog(`📡 [WA-Pairing] Envoi de la requête de code pour +${cleanPhone}...`);
+                        const code = await this.sock.requestPairingCode(cleanPhone);
+                        this.pairingCode = code;
+                        waLog(`✅ [WA-Pairing] CODE REÇU : ${this.pairingCode}`);
+                    } catch (err) {
+                        waLog(`❌ [WA-Pairing] Échec demande de code : ${err.message}`);
+                        this.pairingCode = "ERROR: " + err.message;
+                    }
+                }, 10000);
             }
 
             if (connection === 'close') {
@@ -282,24 +306,26 @@ class WhatsAppSessionChannel extends Channel {
     }
 
     async requestPairingCode(phoneNumber) {
+        if (phoneNumber) {
+            this.pairingPhone = phoneNumber;
+            this.pairingCode = null;
+        }
+
         if (!this.sock || !this.isActive) {
             waLog(`[WA-Pairing] Socket non actif, tentative de démarrage...`);
             await this.initialize();
-            await this.start();
+            await this.start({ pairingPhone: phoneNumber });
         }
         
-        // Attendre que le socket soit prêt (timeout augmenté à 45s car Railway peut être lent)
+        // Attendre que le code soit généré par l'event loop (timeout 45s)
         let attempts = 0;
-        while (!this.sock && attempts < 45) {
+        while (!this.pairingCode && attempts < 45) {
             await new Promise(resolve => setTimeout(resolve, 1000));
             attempts++;
         }
 
-        if (!this.sock) throw new Error("Socket non initialisé");
-
-        // Baileys requestPairingCode
-        const code = await this.sock.requestPairingCode(phoneNumber);
-        return code;
+        if (!this.pairingCode) throw new Error("Le code n'a pas pu être généré. Vérifiez les logs.");
+        return this.pairingCode;
     }
 
     async stop() {
@@ -307,7 +333,7 @@ class WhatsAppSessionChannel extends Channel {
         this.isActive = false;
     }
 
-    async restart() {
+    async restart(options = {}) {
         waLog('[WA] Restart demandé — nettoyage session Supabase et reconnexion...');
         this._restarting = true;
         // 1. Fermer la connexion existante
@@ -316,17 +342,22 @@ class WhatsAppSessionChannel extends Channel {
             this.sock = null;
         }
         this.isActive = false;
+        this.pairingCode = null;
+        this.pairingPhone = options.pairingPhone || null;
+
         // 2. Supprimer la session Supabase pour forcer un nouveau QR
         if (this._clearSession) {
             await this._clearSession();
             waLog('[WA] Session Supabase supprimée.');
         }
+        
         // 3. Supprimer l'ancien QR image
         const qrPath = path.join(process.cwd(), 'whatsapp_qr.png');
         if (fs.existsSync(qrPath)) fs.unlinkSync(qrPath);
+
         // 4. Redémarrer
         this._restarting = false;
-        await this.start();
+        await this.start(options);
     }
 
     _resolveMedia(url) {
