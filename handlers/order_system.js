@@ -743,11 +743,11 @@ function setupOrderSystem(bot) {
                 pendingOrderConfirmation.set(userId, { ...checkoutData, possibleDiscount });
                 return safeEdit(ctx,
                     `💰 <b>Utiliser votre solde ?</b>\n\n` +
-                    `Votre solde actuel : <b>${(user.wallet_balance).toFixed(2)}€</b>\n` +
-                    `Réduction possible : <b>${possibleDiscount.toFixed(2)}€</b>.\n\n` +
+                    `Votre solde actuel : <b>${(parseFloat(user.wallet_balance) || 0).toFixed(2)}€</b>\n` +
+                    `Réduction possible : <b>${(parseFloat(possibleDiscount) || 0).toFixed(2)}€</b>.\n\n` +
                     `Voulez-vous l'appliquer ?`,
                     Markup.inlineKeyboard([
-                        [Markup.button.callback(`✅ Déduire ${possibleDiscount.toFixed(2)}€`, 'confirm_order_use_credit_yes'), Markup.button.callback('❌ Plein tarif', 'confirm_order_use_credit_no')],
+                        [Markup.button.callback(`✅ Déduire ${(parseFloat(possibleDiscount) || 0).toFixed(2)}€`, 'confirm_order_use_credit_yes'), Markup.button.callback('❌ Plein tarif', 'confirm_order_use_credit_no')],
                         [Markup.button.callback(settings.btn_back_to_address || '◀️ Retour Adresse', 'start_checkout')]
                     ])
                 );
@@ -1010,9 +1010,9 @@ function setupOrderSystem(bot) {
             cartText +
             t(user, 'label_address', `📍 Adresse :`) + ` ${address}\n` +
             (scheduledAt ? t(user, 'label_scheduled_for', `🕒 Prévue pour :`) + ` <b>${scheduledAt}</b>\n` : t(user, 'label_delivery_asap', `🚀 Livraison : ASAP`) + `\n`) +
-            (priorityFee > 0 ? t(user, 'label_priority_option', `🚀 <b>Option Prioritaire : +{fee}€</b>`, { fee: priorityFee.toFixed(2) }) + `\n` : '') +
-            t(user, 'label_subtotal', `💰 Sous-total :`) + ` <b>${totalProducts.toFixed(2)}€</b>\n` +
-            (discount > 0 ? t(user, 'label_credit_discount', `🎁 Remise Crédit :`) + ` -${discount.toFixed(2)}€\n` : '') +
+            (priorityFee > 0 ? t(user, 'label_priority_option', `🚀 <b>Option Prioritaire : +{fee}€</b>`, { fee: (parseFloat(priorityFee) || 0).toFixed(2) }) + `\n` : '') +
+            t(user, 'label_subtotal', `💰 Sous-total :`) + ` <b>${(parseFloat(totalProducts) || 0).toFixed(2)}€</b>\n` +
+            (discount > 0 ? t(user, 'label_credit_discount', `🎁 Remise Crédit :`) + ` -${(parseFloat(discount) || 0).toFixed(2)}€\n` : '') +
             t(user, 'label_total_to_pay', `💵 <b>TOTAL À RÉGLER : {total}€</b>`, { total: finalPrice.toFixed(2) }) + `\n\n` +
             t(user, 'msg_confirm_order', `Confirmez-vous la commande ?`);
 
