@@ -260,7 +260,22 @@ class WhatsAppSessionChannel extends Channel {
             waLog(`[WA-MSG] selfJid=${selfJid}`);
 
             for (const msg of m.messages) {
-                const remoteJid = msg.key.remoteJid;
+                let remoteJid = msg.key.remoteJid;
+                
+                // [🛡️ RÉSOLUTION LID -> PN]
+                // Si l'identifiant est un LID (identifiant technique), on tente de récupérer le numéro de téléphone réel
+                if (remoteJid?.endsWith('@lid')) {
+                    try {
+                        const resolvedJid = await this.sock.getLidDefaultId(remoteJid);
+                        if (resolvedJid && resolvedJid.endsWith('@s.whatsapp.net')) {
+                            waLog(`[WA-LID] Résolution : ${remoteJid} -> ${resolvedJid}`);
+                            remoteJid = resolvedJid;
+                        }
+                    } catch (e) {
+                        waLog(`[WA-LID-WARN] Impossible de résoudre ${remoteJid}: ${e.message}`);
+                    }
+                }
+
                 const isMe = msg.key.fromMe;
 
                 // Ignorer les messages de protocole sans contenu utile
