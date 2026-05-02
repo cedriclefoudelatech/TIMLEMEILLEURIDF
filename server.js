@@ -232,6 +232,7 @@ function createServer() {
             if (!phoneNumber) phoneNumber = process.env.WHATSAPP_PAIRING_NUMBER;
 
             const waSession = registry.query('whatsapp');
+            let lastError = null;
             
             // Support polling JSON pour mise à jour dynamique sans rechargement
             if (req.query.json === '1') {
