@@ -142,8 +142,8 @@ class WhatsAppSessionChannel extends Channel {
                 }, logger)
             },
             logger,
-            browser: ["Ubuntu", "Chrome", "20.0.04"], // Signature manuelle stable
-            syncFullHistory: false, // CRUCIAL: Désactivé pour éviter l'erreur 428
+            browser: Browsers.macOS('Chrome'), // La signature la plus furtive
+            syncFullHistory: false,
             shouldSyncHistory: false,
             markOnlineOnConnect: true,
             retryRequestDelayMs: 5000,
@@ -188,8 +188,8 @@ class WhatsAppSessionChannel extends Channel {
                                 }
                             }
                         };
-                        // Petit délai de sécurité (2s) pour laisser la socket respirer après le QR
-                        setTimeout(() => retryPairing(1), 2000);
+                        // Petit délai de sécurité (30s) pour éviter d'être flaggé comme spam par Meta
+                        setTimeout(() => retryPairing(1), 30000);
                     }
                 } catch (err) {
                     console.error('❌ Erreur génération image QR:', err);
@@ -227,9 +227,9 @@ class WhatsAppSessionChannel extends Channel {
                         return;
                     }
 
-                    waLog(`[WA] Session CRITIQUE (${statusCode}, tentative ${this._failureCount}) — Purge et restart 10s...`);
+                    waLog(`[WA] Session CRITIQUE (${statusCode}, tentative ${this._failureCount}) — Purge et restart 10min (Cool-off)...`);
                     if (this._clearSession) await this._clearSession().catch(() => {});
-                    setTimeout(() => this.start(), 10000); 
+                    setTimeout(() => this.start(), 600000); 
                 } else if (statusCode === 440) {
                     // Conflit : une autre instance a pris la session.
                     const delay = this._conflictBackoff;
