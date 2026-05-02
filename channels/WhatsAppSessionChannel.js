@@ -150,7 +150,7 @@ class WhatsAppSessionChannel extends Channel {
             browser: Browsers.ubuntu('Chrome'), // Retour à la signature Ubuntu demandée
             syncFullHistory: false,
             shouldSyncHistory: false,
-            markOnlineOnConnect: true,
+            markOnlineOnConnect: false, // [🛡️ STABILITÉ] Ne pas se mettre en ligne tout de suite pour éviter le 428
             retryRequestDelayMs: 5000,
             connectTimeoutMs: 60000,
             keepAliveIntervalMs: 60000,
@@ -172,8 +172,7 @@ class WhatsAppSessionChannel extends Channel {
                     this.lastQR = await qrcodeImage.toDataURL(qr);
 
                     // [🏁 MÉTHODE LE RELAIS] On demande le code de pairing UNIQUEMENT quand le QR est émis
-                    // [🛡️ QR STABLE] Désactivé temporairement pour forcer l'affichage du QR
-                    if (false && this.pairingPhone && !this.sock.authState.creds.registered && !this.pairingCode && !this._pairingRequested) {
+                    if (this.pairingPhone && !this.sock.authState.creds.registered && !this.pairingCode && !this._pairingRequested) {
                         this._pairingRequested = true;
                         const retryPairing = async (attempt = 1) => {
                             if (attempt > 3 || this.pairingCode) return;
@@ -428,10 +427,7 @@ class WhatsAppSessionChannel extends Channel {
         const cleanText = this._stripHTML(text);
 
         try {
-            // [🛡️ PRESENCE WAKEUP] Simuler une activité pour valider la session Signal
-            await this.sock.sendPresenceUpdate('available', jid).catch(() => {});
-            await this.sock.sendPresenceUpdate('composing', jid).catch(() => {});
-
+            // [🛡️ STABILITÉ] Suppression du PresenceUpdate qui peut fragiliser les nouvelles sessions
             let result;
             if (options.source || options.media_url) {
                 let mediaSource = options.source;
