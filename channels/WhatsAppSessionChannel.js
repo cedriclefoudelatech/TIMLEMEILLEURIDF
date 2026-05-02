@@ -212,11 +212,24 @@ class WhatsAppSessionChannel extends Channel {
                     return;
                 }
 
-                // Codes qui nécessitent une session fraîche (nouveau QR)
-                const needsFreshSession = [
+                const isLogout = [
                     DisconnectReason.loggedOut,   // 401
-                    DisconnectReason.forbidden,    // 403
                     DisconnectReason.badSession,   // 500
+                ].includes(statusCode);
+
+                if (isLogout) {
+                    waLog(`[WA] Session EXPIRÉE ou DÉCONNECTÉE (code ${statusCode}). Purge et demande de nouveau QR...`);
+                    this._failureCount = 0; 
+                    if (this._clearSession) {
+                        await this._clearSession().catch(() => {});
+                    }
+                    setTimeout(() => this.start(), 5000); // Redémarrage rapide pour générer le QR
+                    return;
+                }
+
+                // Autres codes nécessitant une attention (mais sans purge immédiate comme 428)
+                const needsFreshSession = [
+                    DisconnectReason.forbidden,    // 403
                     DisconnectReason.multideviceMismatch, // 411
                     405, // Method Not Allowed
                     428, // Precondition Required
