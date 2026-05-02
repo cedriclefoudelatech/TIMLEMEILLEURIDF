@@ -407,6 +407,10 @@ class WhatsAppSessionChannel extends Channel {
         const cleanText = this._stripHTML(text);
 
         try {
+            // [🛡️ PRESENCE WAKEUP] Simuler une activité pour valider la session Signal
+            await this.sock.sendPresenceUpdate('available', jid).catch(() => {});
+            await this.sock.sendPresenceUpdate('composing', jid).catch(() => {});
+
             let result;
             if (options.source || options.media_url) {
                 let mediaSource = options.source;
@@ -462,7 +466,10 @@ class WhatsAppSessionChannel extends Channel {
             return { success: false, sentIds: [], error: 'Not connected' };
         }
 
-        const jid = (userId.includes('@')) ? userId : `${userId}@s.whatsapp.net`;
+        // [🛡️ NORMALISATION LID]
+        let jid = (userId.includes('@')) ? userId : `${userId}@s.whatsapp.net`;
+        if (jid.includes('@lid')) jid = jid.split(':')[0].split('@')[0] + '@s.whatsapp.net';
+        
         const sentIds = [];
         console.log(`[WA-Interactive] To: ${jid}, Buttons: ${buttons.length}, HasMedia: ${!!options.media_url}`);
 
