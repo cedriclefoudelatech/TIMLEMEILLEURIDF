@@ -1,5 +1,5 @@
 // Dynamic import wrapper for ESM-only @whiskeysockets/baileys (Node 22+)
-let Baileys, makeWASocket, DisconnectReason, jidDecode, fetchLatestBaileysVersion, makeCacheableSignalKeyStore, downloadMediaMessage, Browsers;
+let Baileys, makeWASocket, DisconnectReason, jidDecode, fetchLatestBaileysVersion, makeCacheableSignalKeyStore, downloadMediaMessage, Browsers, proto;
 
 async function loadBaileys() {
     if (Baileys) return;
@@ -11,6 +11,7 @@ async function loadBaileys() {
     makeCacheableSignalKeyStore = Baileys.makeCacheableSignalKeyStore;
     downloadMediaMessage = Baileys.downloadMediaMessage;
     Browsers = Baileys.Browsers;
+    proto = Baileys.proto;
 }
 
 const { Channel } = require('./Channel');
@@ -62,11 +63,7 @@ class WhatsAppSessionChannel extends Channel {
         });
         this._failureCount = 0; // Reset failure count on manual start/restart
         this._clearSession = clearSession;
-        // [🛡️ PURGE FORCEE _v7] On vide tout au premier démarrage pour forcer un QR stable
-        if (this.sessionId.endsWith('_v7')) {
-            waLog(`[WA-FORCE-CLEAN] Purge de sécurité pour ${this.sessionId}...`);
-            await clearSession().catch(() => {});
-        }
+        // [🛡️ LOCK SYSTEM] On s'assure que seule une instance utilise la session à la fois.
         this._releaseLock = releaseLock;
 
         const wrappedSaveCreds = async () => {
@@ -150,7 +147,7 @@ class WhatsAppSessionChannel extends Channel {
             browser: Browsers.ubuntu('Chrome'), // Retour à la signature Ubuntu demandée
             syncFullHistory: false,
             shouldSyncHistory: false,
-            markOnlineOnConnect: false, // [🛡️ STABILITÉ] Ne pas se mettre en ligne tout de suite pour éviter le 428
+            markOnlineOnConnect: true, // [🛡️ STABILITÉ] Marquer online pour éviter d'être déconnecté par le serveur
             retryRequestDelayMs: 5000,
             connectTimeoutMs: 60000,
             keepAliveIntervalMs: 60000,
