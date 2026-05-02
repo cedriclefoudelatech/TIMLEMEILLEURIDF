@@ -1,5 +1,5 @@
 // Dynamic import wrapper for ESM-only @whiskeysockets/baileys (Node 22+)
-let Baileys, makeWASocket, DisconnectReason, jidDecode, fetchLatestBaileysVersion, makeCacheableSignalKeyStore, downloadMediaMessage;
+let Baileys, makeWASocket, DisconnectReason, jidDecode, fetchLatestBaileysVersion, makeCacheableSignalKeyStore, downloadMediaMessage, Browsers;
 
 async function loadBaileys() {
     if (Baileys) return;
@@ -10,6 +10,7 @@ async function loadBaileys() {
     fetchLatestBaileysVersion = Baileys.fetchLatestBaileysVersion;
     makeCacheableSignalKeyStore = Baileys.makeCacheableSignalKeyStore;
     downloadMediaMessage = Baileys.downloadMediaMessage;
+    Browsers = Baileys.Browsers;
 }
 
 const { Channel } = require('./Channel');
