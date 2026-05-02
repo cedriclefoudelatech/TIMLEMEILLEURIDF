@@ -142,7 +142,7 @@ class WhatsAppSessionChannel extends Channel {
                 }, logger)
             },
             logger,
-            browser: Browsers.macOS('Chrome'), // La signature la plus furtive
+            browser: Browsers.windows('Chrome'), // Signature Windows souvent plus stable sur les VPS/Railway
             syncFullHistory: false,
             shouldSyncHistory: false,
             markOnlineOnConnect: true,
@@ -227,8 +227,8 @@ class WhatsAppSessionChannel extends Channel {
                         return;
                     }
 
-                    waLog(`[WA] Session CRITIQUE (${statusCode}, tentative ${this._failureCount}) — Purge et restart 10min (Cool-off)...`);
-                    if (this._clearSession) await this._clearSession().catch(() => {});
+                    waLog(`[WA] Session CRITIQUE (${statusCode}, tentative ${this._failureCount}) — Pause de sécurité (Cool-off) 10min sans purge...`);
+                    // [🛡️ IMPORTANT] On ne purge PAS sur 428, on attend juste que Meta lève le blocage IP.
                     setTimeout(() => this.start(), 600000); 
                 } else if (statusCode === 440) {
                     // Conflit : une autre instance a pris la session.
