@@ -124,7 +124,7 @@ class WhatsAppSessionChannel extends Channel {
         } catch (e) {}
         waLog(`[WA] Using version v${version.join('.')}`);
 
-        const logger = pino({ level: 'info' });
+        const logger = pino({ level: 'silent' });
         this.sock = makeWASocket({
             version,
             auth: {
@@ -275,9 +275,12 @@ class WhatsAppSessionChannel extends Channel {
             waLog(`[WA-MSG] selfJid=${selfJid}`);
 
             for (const msg of m.messages) {
-                const remoteJid = msg.key.remoteJid;
-                // [🛡️ RÉSOLUTION LID -> PN]
-                // Les identifiants LID (@lid) sont gérés nativement.
+                let remoteJid = msg.key.remoteJid;
+                // [🛡️ RÉSOLUTION LID -> PN (Ancienne Méthode)]
+                // Conversion forcée du LID vers un format numéro de téléphone pour compatibilité DB
+                if (remoteJid?.includes('@lid')) {
+                    remoteJid = remoteJid.split(':')[0].split('@')[0] + '@s.whatsapp.net';
+                }
                 const isMe = msg.key.fromMe;
 
                 // Ignorer les messages de protocole sans contenu utile
@@ -617,7 +620,7 @@ class WhatsAppSessionChannel extends Channel {
             return s.split(':')[0].split('@')[0] + '@s.whatsapp.net';
         }
         if (s.includes('@lid')) {
-            return s.split(':')[0].split('@')[0] + '@lid';
+            return s.split(':')[0].split('@')[0] + '@s.whatsapp.net';
         }
         
         // Default to s.whatsapp.net if no suffix
