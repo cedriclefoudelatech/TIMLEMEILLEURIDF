@@ -506,8 +506,20 @@ class WhatsAppSessionChannel extends Channel {
             if (result?.key?.id) sentIds.push(result.key.id);
             return { success: true, sentIds };
         } catch (e) {
+            if (e.message.includes('SessionError') || e.message.includes('No sessions')) {
+                waLog(`[WA-Session-Fix] Tentative de réparation de session pour ${jid}...`);
+                // Sur SessionError, on tente un envoi ultra-basique pour "réveiller" Signal
+                try {
+                    await this.sock.sendMessage(jid, { text: "." }); 
+                    const result = await this.sock.sendMessage(jid, { text: textMenu || "Choisissez une option :" });
+                    if (result?.key?.id) sentIds.push(result.key.id);
+                    return { success: true, sentIds };
+                } catch (e2) {
+                    waLog(`[WA-Interactive] Échec critique après fix session: ${e2.message}`);
+                }
+            }
             console.error('[WA-Interactive] Échec envoi texte:', e);
-            return { success: false, sentIds };
+            return { success: false, sentIds, error: e.message };
         }
     }
 

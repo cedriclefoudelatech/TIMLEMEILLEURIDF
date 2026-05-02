@@ -316,11 +316,10 @@ class Dispatcher {
                     const oldIds = this.userLastMessageIds.get(userId) || [];
                     console.log(`[WA-Cleanup] Tentative de suppression de ${oldIds.length} messages pour ${userId}`);
                     for(const id of oldIds) {
-                        try {
-                            await channel.deleteMessage(userId, id);
-                        } catch (e) {
+                        // On ne bloque pas l'exécution pour la suppression (évite les conflits de socket)
+                        channel.deleteMessage(userId, id).catch(e => {
                             console.warn(`[WA-Cleanup] Echec suppression ${id}:`, e.message);
-                        }
+                        });
                     }
                     this.userLastMessageIds.delete(userId);
                 }
