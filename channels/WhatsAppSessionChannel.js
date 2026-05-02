@@ -132,10 +132,11 @@ class WhatsAppSessionChannel extends Channel {
                 }, logger)
             },
             logger,
-            browser: ["Windows", "Desktop", "10.0.19045"],
-            syncFullHistory: false,
+            browser: Browsers.ubuntu('Chrome'),
+            syncFullHistory: true,
             shouldSyncHistory: false,
             markOnlineOnConnect: true,
+            retryRequestDelayMs: 5000,
             connectTimeoutMs: 60000,
             keepAliveIntervalMs: 60000,
             transactionOpts: { maxRetries: 10, delayBetweenTriesMs: 1000 },
@@ -151,53 +152,40 @@ class WhatsAppSessionChannel extends Channel {
             const { connection, lastDisconnect, qr } = update;
             waLog(`[WA] Connection Update: ${JSON.stringify(update, null, 2)}`);
 
-            if (qr) {
-                console.log('--------------------------------------------------');
-                console.log('👉 SCANNEZ CE QR CODE POUR CONNECTER WHATSAPP :');
-                qrcodeTerminal.generate(qr, { small: true });
-                console.log('--------------------------------------------------');
-
-                // Sauvegarder en image pour le web endpoint /whatsapp-qr
-                try {
-                    const artifactPath = path.join(process.cwd(), 'whatsapp_qr.png');
-                    await qrcodeImage.toFile(artifactPath, qr, {
-                        color: { dark: '#000000', light: '#ffffff' },
-                        width: 256
-                    });
-                    console.log(`✅ QR Image générée: ${artifactPath}`);
-                    
                     // Stockage en mémoire (Base64) pour affichage direct
                     this.lastQR = await qrcodeImage.toDataURL(qr);
+
+                    // [🏁 MÉTHODE LE RELAIS] On demande le code de pairing UNIQUEMENT quand le QR est émis
+                    if (this.pairingPhone && !this.sock.authState.creds.registered && !this.pairingCode && !this._pairingRequested) {
+                        this._pairingRequested = true;
+                        const retryPairing = async (attempt = 1) => {
+                            if (attempt > 3 || this.pairingCode) return;
+                            waLog(`[WA-Pairing] Tentative ${attempt}/3 (Méthode Le Relais) : demande de code pour ${this.pairingPhone}...`);
+                            try {
+                                const cleanPhone = this.pairingPhone.replace(/\D/g, '');
+                                const code = await this.sock.requestPairingCode(cleanPhone);
+                                this.pairingCode = code;
+                                waLog(`✅ [WA-Pairing] CODE REÇU : ${this.pairingCode}`);
+                            } catch (err) {
+                                waLog(`⚠️ [WA-Pairing] Échec tentative ${attempt} : ${err.message}`);
+                                if (attempt < 3) {
+                                    waLog(`[WA-Pairing] Nouvelle tentative dans 10s...`);
+                                    setTimeout(() => retryPairing(attempt + 1), 10000);
+                                } else {
+                                    this.pairingCode = "ERROR: " + err.message;
+                                    this._pairingRequested = false; // Permettre de retenter au prochain QR
+                                }
+                            }
+                        };
+                        // Petit délai de sécurité (2s) pour laisser la socket respirer après le QR
+                        setTimeout(() => retryPairing(1), 2000);
+                    }
                 } catch (err) {
                     console.error('❌ Erreur génération image QR:', err);
                 }
             }
 
-            // --- PAIRING CODE LOGIC (LA FRAPPE STYLE) ---
-            if (this.pairingPhone && !this.sock.authState.creds.registered && !this.pairingCode) {
-                const retryPairing = async (attempt = 1) => {
-                    if (attempt > 3 || this.pairingCode) return;
-                    
-                    waLog(`[WA-Pairing] Tentative ${attempt}/3 : demande de code pour ${this.pairingPhone}...`);
-                    try {
-                        const cleanPhone = this.pairingPhone.replace(/\D/g, '');
-                        const code = await this.sock.requestPairingCode(cleanPhone);
-                        this.pairingCode = code;
-                        waLog(`✅ [WA-Pairing] CODE REÇU : ${this.pairingCode}`);
-                    } catch (err) {
-                        waLog(`⚠️ [WA-Pairing] Échec tentative ${attempt} : ${err.message}`);
-                        if (attempt < 3) {
-                            waLog(`[WA-Pairing] Nouvelle tentative dans 15s...`);
-                            setTimeout(() => retryPairing(attempt + 1), 15000);
-                        } else {
-                            this.pairingCode = "ERROR: " + err.message;
-                        }
-                    }
-                };
-                
-                // On attend que la socket soit bien établie (12s)
-                setTimeout(() => retryPairing(1), 12000);
-            }
+            // Suppression de l'ancienne logique setTimeout fixe (remplacée par la méthode Le Relais ci-dessus)
 
             if (connection === 'close') {
                 const error = lastDisconnect?.error;
