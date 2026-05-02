@@ -278,18 +278,8 @@ class WhatsAppSessionChannel extends Channel {
                 let remoteJid = msg.key.remoteJid;
                 
                 // [🛡️ RÉSOLUTION LID -> PN]
-                // Si l'identifiant est un LID (identifiant technique), on tente de récupérer le numéro de téléphone réel
-                if (remoteJid?.endsWith('@lid')) {
-                    try {
-                        const resolvedJid = await this.sock.getLidDefaultId(remoteJid);
-                        if (resolvedJid && resolvedJid.endsWith('@s.whatsapp.net')) {
-                            waLog(`[WA-LID] Résolution : ${remoteJid} -> ${resolvedJid}`);
-                            remoteJid = resolvedJid;
-                        }
-                    } catch (e) {
-                        waLog(`[WA-LID-WARN] Impossible de résoudre ${remoteJid}: ${e.message}`);
-                    }
-                }
+                // Les identifiants LID (@lid) sont gérés nativement par la base de données via le numéro de téléphone.
+                // On évite les appels à getLidDefaultId qui peuvent échouer selon la version de Baileys.
 
                 const isMe = msg.key.fromMe;
 
@@ -299,9 +289,9 @@ class WhatsAppSessionChannel extends Channel {
                     continue;
                 }
 
-                const selfJidClean = selfJid?.split(':')[0];
+                const selfJidClean = selfJid?.split(':')[0]?.split('@')[0];
                 const remoteJidClean = remoteJid?.split('@')[0].split(':')[0];
-                const isMessageToSelf = remoteJidClean === selfJidClean || remoteJid?.endsWith('@lid');
+                const isMessageToSelf = (remoteJidClean === selfJidClean) && !!selfJidClean;
 
                 // Détecter si le message vient d'un BOT (Baileys ou autre bot instance)
                 const isBotId = msg.key.id.startsWith('BAE5') || msg.key.id.startsWith('3EB0') || msg.key.id.length > 20;
@@ -567,7 +557,13 @@ class WhatsAppSessionChannel extends Channel {
     }
 
     _extractText(msg) {
-        const m = msg.message;
+        let m = msg.message;
+        // Déballage des messages éphémères ou à vue unique
+        if (m?.ephemeralMessage?.message) m = m.ephemeralMessage.message;
+        if (m?.viewOnceMessageV2?.message) m = m.viewOnceMessageV2.message;
+        if (m?.viewOnceMessageV2Extension?.message) m = m.viewOnceMessageV2Extension.message;
+        if (m?.documentWithCaptionMessage?.message) m = m.documentWithCaptionMessage.message;
+
         const text = m?.listResponseMessage?.singleSelectReply?.selectedRowId ||
                      m?.buttonsResponseMessage?.selectedButtonId ||
                      m?.conversation ||
