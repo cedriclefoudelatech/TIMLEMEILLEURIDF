@@ -275,13 +275,21 @@ class WhatsAppSessionChannel extends Channel {
             waLog(`[WA-MSG] selfJid=${selfJid}`);
 
             for (const msg of m.messages) {
-                let remoteJid = msg.key.remoteJid;
+                const remoteJid = msg.key.remoteJid;
+                const isMe = msg.key.fromMe;
                 
+                // [DEBUG AGGRESSIF]
+                const msgKeys = msg.message ? Object.keys(msg.message).join(',') : 'null';
+                waLog(`[WA-DEBUG] Nouveau message: fromMe=${isMe}, from=${remoteJid}, id=${msg.key.id}, keys=${msgKeys}`);
+                if (msg.message) {
+                    // Log du contenu si c'est du texte simple pour voir ce qui arrive
+                    const textContent = msg.message.conversation || msg.message.extendedTextMessage?.text || "non-texte";
+                    waLog(`[WA-DEBUG] Contenu probable: ${textContent}`);
+                }
+
                 // [🛡️ RÉSOLUTION LID -> PN]
                 // Les identifiants LID (@lid) sont gérés nativement par la base de données via le numéro de téléphone.
                 // On évite les appels à getLidDefaultId qui peuvent échouer selon la version de Baileys.
-
-                const isMe = msg.key.fromMe;
 
                 // Ignorer les messages de protocole sans contenu utile
                 if (!msg.message || msg.message?.protocolMessage || msg.message?.senderKeyDistributionMessage) {
