@@ -285,7 +285,8 @@ class WhatsAppSessionChannel extends Channel {
 
                 // Ignorer les messages de protocole sans contenu utile
                 if (!msg.message || msg.message?.protocolMessage || msg.message?.senderKeyDistributionMessage) {
-                    waLog(`[WA-MSG] SKIP protocol/empty from ${remoteJid}`);
+                    const keys = msg.message ? Object.keys(msg.message).join(',') : 'null';
+                    waLog(`[WA-MSG] SKIP protocol/empty from ${remoteJid} (Keys: ${keys})`);
                     continue;
                 }
 
