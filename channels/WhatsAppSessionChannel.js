@@ -65,6 +65,10 @@ class WhatsAppSessionChannel extends Channel {
 
         // --- LOCK SYSTEM (PREVENTS CONFLICT 440) ---
         const myInstanceId = `${process.env.RAILWAY_SERVICE_NAME || 'local'}-${process.env.RAILWAY_REPLICA_INDEX || '0'}-${process.pid}`;
+        
+        // [🛡️ SÉCURITÉ] On force la libération du verrou précédent si on est en train de redémarrer
+        await releaseLock().catch(() => {});
+        
         let activeLock;
         try {
             activeLock = await checkLock();
@@ -128,7 +132,7 @@ class WhatsAppSessionChannel extends Channel {
                 }, logger)
             },
             logger,
-            browser: ["macOS", "Chrome", "115.0.0.0"],
+            browser: ["Windows", "Chrome", "122.0.6261.112"],
             syncFullHistory: false,
             shouldSyncHistory: false,
             markOnlineOnConnect: true,
@@ -171,19 +175,28 @@ class WhatsAppSessionChannel extends Channel {
 
             // --- PAIRING CODE LOGIC (LA FRAPPE STYLE) ---
             if (this.pairingPhone && !this.sock.authState.creds.registered && !this.pairingCode) {
-                waLog(`[WA-Pairing] Demande de code pour ${this.pairingPhone} dans 10 secondes...`);
-                setTimeout(async () => {
+                const retryPairing = async (attempt = 1) => {
+                    if (attempt > 3 || this.pairingCode) return;
+                    
+                    waLog(`[WA-Pairing] Tentative ${attempt}/3 : demande de code pour ${this.pairingPhone}...`);
                     try {
                         const cleanPhone = this.pairingPhone.replace(/\D/g, '');
-                        waLog(`📡 [WA-Pairing] Envoi de la requête de code pour +${cleanPhone}...`);
                         const code = await this.sock.requestPairingCode(cleanPhone);
                         this.pairingCode = code;
                         waLog(`✅ [WA-Pairing] CODE REÇU : ${this.pairingCode}`);
                     } catch (err) {
-                        waLog(`❌ [WA-Pairing] Échec demande de code : ${err.message}`);
-                        this.pairingCode = "ERROR: " + err.message;
+                        waLog(`⚠️ [WA-Pairing] Échec tentative ${attempt} : ${err.message}`);
+                        if (attempt < 3) {
+                            waLog(`[WA-Pairing] Nouvelle tentative dans 15s...`);
+                            setTimeout(() => retryPairing(attempt + 1), 15000);
+                        } else {
+                            this.pairingCode = "ERROR: " + err.message;
+                        }
                     }
-                }, 10000);
+                };
+                
+                // On attend que la socket soit bien établie (12s)
+                setTimeout(() => retryPairing(1), 12000);
             }
 
             if (connection === 'close') {
