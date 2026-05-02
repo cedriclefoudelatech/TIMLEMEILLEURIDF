@@ -64,6 +64,15 @@ class WhatsAppSessionChannel extends Channel {
         this._clearSession = clearSession;
         this._releaseLock = releaseLock;
 
+        const wrappedSaveCreds = async () => {
+            try {
+                await saveCreds();
+                waLog(`[WA-DB] ✅ Credentials sauvegardés pour ${this.sessionId}`);
+            } catch (err) {
+                waLog(`[WA-DB-ERR] ❌ Échec sauvegarde credentials: ${err.message}`);
+            }
+        };
+
         // --- LOCK SYSTEM (PREVENTS CONFLICT 440) ---
         const myInstanceId = `${process.env.RAILWAY_SERVICE_NAME || 'local'}-${process.env.RAILWAY_REPLICA_INDEX || '0'}-${process.pid}`;
         
@@ -133,8 +142,8 @@ class WhatsAppSessionChannel extends Channel {
                 }, logger)
             },
             logger,
-            browser: Browsers.ubuntu('Chrome'),
-            syncFullHistory: true,
+            browser: ["Ubuntu", "Chrome", "20.0.04"], // Signature manuelle stable
+            syncFullHistory: false, // CRUCIAL: Désactivé pour éviter l'erreur 428
             shouldSyncHistory: false,
             markOnlineOnConnect: true,
             retryRequestDelayMs: 5000,
@@ -147,7 +156,7 @@ class WhatsAppSessionChannel extends Channel {
 
         // this.store.bind(this.sock.ev); // Removed store bind
 
-        this.sock.ev.on('creds.update', saveCreds);
+        this.sock.ev.on('creds.update', wrappedSaveCreds);
 
         this.sock.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect, qr } = update;
