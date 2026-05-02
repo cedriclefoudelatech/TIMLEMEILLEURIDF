@@ -124,7 +124,7 @@ class WhatsAppSessionChannel extends Channel {
         } catch (e) {}
         waLog(`[WA] Using version v${version.join('.')}`);
 
-        const logger = pino({ level: 'silent' });
+        const logger = pino({ level: 'info' });
         this.sock = makeWASocket({
             version,
             auth: {
@@ -594,7 +594,7 @@ class WhatsAppSessionChannel extends Channel {
                 'buffer',
                 {},
                 {
-                    logger: pino({ level: 'silent' }),
+                    logger: pino({ level: 'info' }),
                     reuploadRequest: this.sock.updateMediaMessage
                 }
             );
