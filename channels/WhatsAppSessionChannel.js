@@ -559,7 +559,8 @@ class WhatsAppSessionChannel extends Channel {
 
     _extractText(msg) {
         let m = msg.message;
-        // Déballage des messages éphémères ou à vue unique
+        // Déballage des messages spécifiques Baileys/WhatsApp
+        if (m?.deviceSentMessage?.message) m = m.deviceSentMessage.message;
         if (m?.ephemeralMessage?.message) m = m.ephemeralMessage.message;
         if (m?.viewOnceMessageV2?.message) m = m.viewOnceMessageV2.message;
         if (m?.viewOnceMessageV2Extension?.message) m = m.viewOnceMessageV2Extension.message;
