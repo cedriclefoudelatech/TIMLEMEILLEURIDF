@@ -151,7 +151,8 @@ class WhatsAppSessionChannel extends Channel {
         this.sock.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect, qr } = update;
             waLog(`[WA] Connection Update: ${JSON.stringify(update, null, 2)}`);
-
+            if (qr) {
+                try {
                     // Stockage en mémoire (Base64) pour affichage direct
                     this.lastQR = await qrcodeImage.toDataURL(qr);
 
