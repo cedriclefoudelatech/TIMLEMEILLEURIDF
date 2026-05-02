@@ -142,7 +142,7 @@ class WhatsAppSessionChannel extends Channel {
                 }, logger)
             },
             logger,
-            browser: Browsers.windows('Chrome'), // Signature Windows souvent plus stable sur les VPS/Railway
+            browser: Browsers.ubuntu('Chrome'), // Retour à la signature Ubuntu demandée
             syncFullHistory: false,
             shouldSyncHistory: false,
             markOnlineOnConnect: true,
