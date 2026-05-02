@@ -291,13 +291,15 @@ class WhatsAppSessionChannel extends Channel {
                 }
 
                 const selfJidClean = selfJid?.split(':')[0]?.split('@')[0];
+                const selfLid = this.sock.user?.lid;
                 const remoteJidClean = remoteJid?.split('@')[0].split(':')[0];
-                const isMessageToSelf = (remoteJidClean === selfJidClean) && !!selfJidClean;
+                const isMessageToSelf = (remoteJidClean === selfJidClean || remoteJid === selfLid) && !!selfJidClean;
 
                 // Détecter si le message vient d'un BOT (Baileys ou autre bot instance)
-                const isBotId = msg.key.id.startsWith('BAE5') || msg.key.id.startsWith('3EB0') || msg.key.id.length > 20;
+                // Note: On retire 3EB0 car c'est aussi utilisé par certains clients officiels
+                const isBotId = msg.key.id.startsWith('BAE5') || msg.key.id.length > 25;
 
-                waLog(`[WA-MSG] fromMe=${isMe}, isBotId=${isBotId}, remoteJid=${remoteJid}, toSelf=${isMessageToSelf}, msgKeys=${Object.keys(msg.message || {}).join(',')}`);
+                waLog(`[WA-MSG] fromMe=${isMe}, isBotId=${isBotId}, remoteJid=${remoteJid}, selfLid=${selfLid}, toSelf=${isMessageToSelf}`);
 
                 // Empêcher les boucles : on ignore tout ce qui est marqué fromMe SAUF si c'est nous qui écrivons manuellement (pas un ID de bot)
                 if (isMe && isBotId) { waLog(`[WA-MSG] SKIP: fromMe+botId`); continue; }
