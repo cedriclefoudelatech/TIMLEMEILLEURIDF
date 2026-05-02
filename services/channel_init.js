@@ -35,9 +35,16 @@ async function initChannels() {
     }
 
     // 3. WhatsApp (Session / TCT style)
-    const waSessionId = process.env.WHATSAPPD_SESSION_ID || process.env.WHATSAPP_SESSION_ID;
-    if (waSessionId || process.env.SESSION_ID) {
-        const sid = waSessionId || process.env.SESSION_ID;
+    let waSessionId = process.env.WHATSAPPD_SESSION_ID || process.env.WHATSAPP_SESSION_ID || process.env.SESSION_ID;
+    
+    // [🛡️ FLEXIBILITÉ] Si non trouvé, on cherche une variable qui COMMENCE par WHATSAPP_SESSION_ID
+    if (!waSessionId) {
+        const altKey = Object.keys(process.env).find(k => k.startsWith('WHATSAPP_SESSION_ID') || k.startsWith('WHATSAPPD_SESSION_ID'));
+        if (altKey) waSessionId = process.env[altKey];
+    }
+
+    if (waSessionId) {
+        const sid = waSessionId;
         const was = new WhatsAppSessionChannel({ sessionId: sid });
         await was.initialize();
         registry.register(was);
