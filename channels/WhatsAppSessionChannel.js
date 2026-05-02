@@ -62,6 +62,11 @@ class WhatsAppSessionChannel extends Channel {
         });
         this._failureCount = 0; // Reset failure count on manual start/restart
         this._clearSession = clearSession;
+        // [🛡️ PURGE FORCEE _v7] On vide tout au premier démarrage pour forcer un QR stable
+        if (this.sessionId.endsWith('_v7')) {
+            waLog(`[WA-FORCE-CLEAN] Purge de sécurité pour ${this.sessionId}...`);
+            await clearSession().catch(() => {});
+        }
         this._releaseLock = releaseLock;
 
         const wrappedSaveCreds = async () => {
@@ -167,7 +172,8 @@ class WhatsAppSessionChannel extends Channel {
                     this.lastQR = await qrcodeImage.toDataURL(qr);
 
                     // [🏁 MÉTHODE LE RELAIS] On demande le code de pairing UNIQUEMENT quand le QR est émis
-                    if (this.pairingPhone && !this.sock.authState.creds.registered && !this.pairingCode && !this._pairingRequested) {
+                    // [🛡️ QR STABLE] Désactivé temporairement pour forcer l'affichage du QR
+                    if (false && this.pairingPhone && !this.sock.authState.creds.registered && !this.pairingCode && !this._pairingRequested) {
                         this._pairingRequested = true;
                         const retryPairing = async (attempt = 1) => {
                             if (attempt > 3 || this.pairingCode) return;
