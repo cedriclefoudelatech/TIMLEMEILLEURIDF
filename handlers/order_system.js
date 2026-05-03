@@ -25,6 +25,7 @@ const pendingOrderConfirmation = createPersistentMap('pendingConfirm');
 const awaitingDelayReason = createPersistentMap('awaitingDelay');
 const awaitingChatReply = createPersistentMap('awaitingChat');
 const awaitingReviewText = createPersistentMap('awaitingReview');
+const awaitingPaymentProof = createPersistentMap('awaitingPaymentProof');
 // État éphémère (pas besoin de persister)
 const userLastActivity = new Map();
 
@@ -80,7 +81,8 @@ async function initOrderState() {
     await Promise.all([
         userCarts.load(), pendingOrders.load(), awaitingAddressDetails.load(),
         pendingOrderConfirmation.load(), awaitingDelayReason.load(),
-        awaitingChatReply.load(), awaitingReviewText.load()
+        awaitingChatReply.load(), awaitingReviewText.load(),
+        awaitingPaymentProof.load()
     ]);
     console.log('[State] Tous les états order_system chargés');
 }
@@ -615,10 +617,44 @@ function setupOrderSystem(bot) {
         );
     }
 
-    // Capture de l'adresse (message texte)
-    bot.on('message', async (ctx, next) => {
-        if (!ctx.message.text && !ctx.message.photo && !ctx.message.video) return next();
+    // Capture de l'adresse ou de la preuve de paiement (message média/texte)
+    bot.on(['message', 'photo'], async (ctx, next) => {
         const userId = `${ctx.platform}_${ctx.from.id}`;
+        
+        // --- 1. GESTION PREUVE DE PAIEMENT ---
+        const proofState = awaitingPaymentProof.get(userId);
+        if (proofState && (ctx.message.photo || ctx.message.document)) {
+            const photo = ctx.message.photo ? ctx.message.photo[ctx.message.photo.length - 1].file_id : ctx.message.document.file_id;
+            const { orderData, method, finalProductList, pending } = proofState;
+            
+            orderData.status = 'awaiting_payment';
+            orderData.payment_proof_id = photo;
+            
+            const createResult = await createOrder(orderData);
+            if (createResult.error) return ctx.reply(`❌ Erreur : ${createResult.error.message}`);
+            
+            const order = createResult.order;
+            awaitingPaymentProof.delete(userId);
+            userCarts.delete(userId);
+            pendingOrders.delete(userId);
+
+            await ctx.reply(`✅ <b>Preuve reçue !</b>\n\nVotre commande <code>#${order.id.slice(-5)}</code> est en cours de validation manuelle par nos administrateurs.`, { parse_mode: 'HTML' });
+
+            const adminMsg = `📸 <b>PREUVE DE PAIEMENT (${method})</b>\n\n` +
+                `👤 Client : ${esc(ctx.from.first_name)} (@${esc(ctx.from.username || 'Inconnu')})\n` +
+                `💰 Montant : <b>${order.total_price}€</b>\n` +
+                `🔑 ID Commande : <code>${order.id}</code>`;
+            
+            const adminBtns = Markup.inlineKeyboard([
+                [Markup.button.callback('✅ VALIDER', `confirm_payment_${order.id}`)],
+                [Markup.button.callback('❌ REJETER', `reject_payment_${order.id}`)]
+            ]);
+
+            await notifyAdmins(bot, adminMsg, { photo, reply_markup: adminBtns.reply_markup });
+            return;
+        }
+
+        if (!ctx.message.text && !ctx.message.photo && !ctx.message.video) return next();
         
 
 
@@ -1113,6 +1149,23 @@ function setupOrderSystem(bot) {
                 scheduled_at: pending.scheduled_at || null,
             };
 
+            const settings = ctx.state?.settings || await getAppSettings();
+            const method = paymentMethod.toUpperCase();
+
+            if (method === 'CRYPTO' || method === 'VIREMENT') {
+                const detailLabel = method === 'CRYPTO' ? 'Wallet Crypto' : 'RIB / IBAN';
+                const detailValue = method === 'CRYPTO' ? (settings.payment_crypto_wallet || '<i>Non configuré</i>') : (settings.payment_bank_rib || '<i>Non configuré</i>');
+                
+                awaitingPaymentProof.set(userId, { orderData, method, finalProductList, pending });
+
+                const text = `💳 <b>RÈGLEMENT PAR ${method}</b>\n\n` +
+                    `Veuillez effectuer le virement de <b>${finalPrice.toFixed(2)}€</b> vers :\n\n` +
+                    `📍 <b>${detailLabel} :</b>\n<code>${detailValue}</code>\n\n` +
+                    `✅ Une fois fait, envoyez une <b>capture d'écran</b> ici.`;
+                
+                return safeEdit(ctx, text, { parse_mode: 'HTML', ...Markup.inlineKeyboard([[Markup.button.callback('◀️ Retour', 'view_cart')]]) });
+            }
+
             // --- 3. TRAVAIL PARALLÈLE (Vitesse Maximale) ---
             console.log(`[Checkout] Exécution des tâches DB en parallèle...`);
             const startTime = Date.now();
@@ -1227,6 +1280,26 @@ function setupOrderSystem(bot) {
             const settings = ctx.state?.settings || await getAppSettings();
             return safeEdit(ctx, `❌ Erreur.\n<i>${err.message}</i>`, Markup.inlineKeyboard([[Markup.button.callback(settings.btn_back_quick_menu || '◀️ Menu', 'main_menu')]]));
         }
+    });
+
+    bot.action(/^confirm_payment_(.+)$/, async (ctx) => {
+        const orderId = ctx.match[1];
+        const order = await getOrder(orderId);
+        if (!order) return ctx.answerCbQuery('❌ Commande introuvable.');
+        await updateOrderStatus(orderId, 'pending');
+        await ctx.answerCbQuery('✅ Paiement validé !');
+        await sendTelegramMessage(order.user_id, `✅ <b>Paiement Validé !</b>\n\nVotre commande <code>#${orderId.slice(-5)}</code> est confirmée.`, { parse_mode: 'HTML' });
+        await ctx.editMessageCaption(`✅ <b>PAIEMENT VALIDÉ</b>`, Markup.inlineKeyboard([])).catch(() => {});
+    });
+
+    bot.action(/^reject_payment_(.+)$/, async (ctx) => {
+        const orderId = ctx.match[1];
+        const order = await getOrder(orderId);
+        if (!order) return ctx.answerCbQuery('❌ Commande introuvable.');
+        await updateOrderStatus(orderId, 'cancelled');
+        await ctx.answerCbQuery('❌ Paiement rejeté.');
+        await sendTelegramMessage(order.user_id, `❌ <b>Paiement Refusé</b>\n\nLa preuve pour la commande <code>#${orderId.slice(-5)}</code> a été refusée.`, { parse_mode: 'HTML' });
+        await ctx.editMessageCaption(`❌ <b>PAIEMENT REJETÉ</b>`, Markup.inlineKeyboard([])).catch(() => {});
     });
 
     // ========== SYSTEME LIVREUR ==========

@@ -223,6 +223,7 @@ class WhatsAppSessionChannel extends Channel {
                 waLog('✅ [WA] WhatsApp connecté avec succès !');
                 this.isActive = true;
                 this._decryptionFailures = 0;
+                this._connectedAt = Date.now(); // [🛡️ STABILITÉ] Marquer le début de la connexion
             }
         });
 
@@ -255,13 +256,19 @@ class WhatsAppSessionChannel extends Channel {
                         // [🏆 STRATÉGIE DÉFINITIVE]
                         // Si on échoue à déchiffrer ne serait-ce qu'UN message, la session est suspecte.
                         // On purge immédiatement pour forcer un état propre.
-                        if (this._decryptionFailures >= 1) {
-                            waLog(`[WA-CRIT] Corruption de clés détectée. Auto-purge immédiate pour réparation...`);
+                        // [🛡️ GRACE PERIOD] On attend 2 minutes après la connexion avant d'autoriser l'auto-purge
+                        const gracePeriod = 120000; // 2 minutes
+                        const timeSinceConnect = Date.now() - (this._connectedAt || 0);
+
+                        if (this._decryptionFailures >= 1 && timeSinceConnect > gracePeriod) {
+                            waLog(`[WA-CRIT] Corruption de clés détectée (après délai de grâce). Auto-purge...`);
                             if (this._clearSession) {
                                 await this._clearSession().catch(() => {});
                             }
                             setTimeout(() => process.exit(1), 1000); // Restart Railway
                             return;
+                        } else if (this._decryptionFailures >= 1) {
+                            waLog(`[WA-MSG] Échec déchiffrement pendant synchronisation (délai de grâce)... on continue.`);
                         }
                     }
                     waLog(`[WA-MSG] SKIP protocol/empty from ${remoteJid}`);
