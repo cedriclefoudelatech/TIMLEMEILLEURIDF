@@ -252,13 +252,15 @@ class WhatsAppSessionChannel extends Channel {
                         this._decryptionFailures++;
                         waLog(`[WA-WARN] Échec déchiffrement #${this._decryptionFailures} de ${remoteJid}`);
                         
-                        // Si on a trop d'échecs à la suite, la session est corrompue -> AUTO-PURGE
-                        if (this._decryptionFailures >= 5) {
-                            waLog(`[WA-CRIT] Session corrompue (trop d'échecs). Auto-purge et restart...`);
+                        // [🏆 STRATÉGIE DÉFINITIVE]
+                        // Si on échoue à déchiffrer ne serait-ce qu'UN message, la session est suspecte.
+                        // On purge immédiatement pour forcer un état propre.
+                        if (this._decryptionFailures >= 1) {
+                            waLog(`[WA-CRIT] Corruption de clés détectée. Auto-purge immédiate pour réparation...`);
                             if (this._clearSession) {
                                 await this._clearSession().catch(() => {});
                             }
-                            setTimeout(() => process.exit(1), 2000); // Forcer le restart de Railway
+                            setTimeout(() => process.exit(1), 1000); // Restart Railway
                             return;
                         }
                     }
