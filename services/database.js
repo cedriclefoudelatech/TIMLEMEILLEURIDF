@@ -2541,17 +2541,16 @@ async function useSupabaseAuthState(sessionId) {
         }
     }
 
-    async function writeData(key, value) {
-        try {
-            const serialized = JSON.parse(JSON.stringify(value, BufferJSON.replacer));
-            const id = makeId(key);
-            
-            // Verrou local préventif
-            if (global.wa_db_locks?.[id]) return;
-            if (!global.wa_db_locks) global.wa_db_locks = {};
-            global.wa_db_locks[id] = true;
+    // File d'attente pour garantir l'ordre des écritures et éviter les pertes
+    if (!global.wa_write_queues) global.wa_write_queues = {};
 
+    async function writeData(key, value) {
+        const id = makeId(key);
+        if (!global.wa_write_queues[id]) global.wa_write_queues[id] = Promise.resolve();
+
+        global.wa_write_queues[id] = global.wa_write_queues[id].then(async () => {
             try {
+                const serialized = JSON.parse(JSON.stringify(value, BufferJSON.replacer));
                 const payload = {
                     id: id,
                     namespace: NAMESPACE,
@@ -2565,12 +2564,12 @@ async function useSupabaseAuthState(sessionId) {
                 // Backup silencieux
                 const backupId = `wa_backup::${sessionId}::${key}`;
                 await supabase.from(TABLE).upsert({ ...payload, id: backupId, namespace: 'wa_backup' });
-            } finally {
-                delete global.wa_db_locks[id];
+            } catch (e) {
+                console.error(`[WA-DB] writeData error for ${key}:`, e.message);
             }
-        } catch (e) {
-            console.error(`[WA-DB] writeData error for ${key}:`, e.message);
-        }
+        });
+        
+        return global.wa_write_queues[id];
     }
 
     async function removeData(key) {
