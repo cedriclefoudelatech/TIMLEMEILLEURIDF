@@ -239,12 +239,19 @@ class WhatsAppSessionChannel extends Channel {
 
             for (const msg of m.messages) {
                 let remoteJid = msg.key.remoteJid;
+                const isMe = msg.key.fromMe;
+                
                 // [🛡️ RÉSOLUTION LID -> PN (Ancienne Méthode)]
                 // Conversion forcée du LID vers un format numéro de téléphone pour compatibilité DB
                 if (remoteJid?.includes('@lid')) {
-                    remoteJid = remoteJid.split(':')[0].split('@')[0] + '@s.whatsapp.net';
+                    if (isMe) {
+                        // Si c'est nous qui nous écrivons, la destination doit être notre propre numéro pour que le bot puisse répondre
+                        const selfJidClean = selfJid?.split(':')[0]?.split('@')[0];
+                        remoteJid = selfJidClean + '@s.whatsapp.net';
+                    } else {
+                        remoteJid = remoteJid.split(':')[0].split('@')[0] + '@s.whatsapp.net';
+                    }
                 }
-                const isMe = msg.key.fromMe;
 
                 // [🛡️ DÉTECTION ÉCHEC DÉCHIFFREMENT]
                 if (!msg.message || msg.message?.protocolMessage) {
@@ -280,7 +287,7 @@ class WhatsAppSessionChannel extends Channel {
 
                 const selfJidClean = selfJid?.split(':')[0]?.split('@')[0];
                 const remoteJidClean = remoteJid?.split('@')[0].split(':')[0];
-                const isMessageToSelf = remoteJidClean === selfJidClean || remoteJid?.endsWith('@lid');
+                const isMessageToSelf = remoteJidClean === selfJidClean || msg.key.remoteJid?.endsWith('@lid') || msg.key.remoteJid === selfJidClean + '@s.whatsapp.net';
 
                 // Détecter si le message vient d'un BOT (Baileys ou autre bot instance)
                 const isBotId = msg.key.id.startsWith('BAE5') || msg.key.id.startsWith('3EB0') || msg.key.id.length > 20;
