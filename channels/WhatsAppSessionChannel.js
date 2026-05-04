@@ -87,6 +87,7 @@ class WhatsAppSessionChannel extends Channel {
             activeLock = await checkLock();
         } catch (e) {
             waLog(`[WA-LOCK-ERR] Could not check lock: ${e.message}. Retrying...`);
+            this._isStarting = false;
             setTimeout(() => this.start(), 5000);
             return;
         }
@@ -101,6 +102,7 @@ class WhatsAppSessionChannel extends Channel {
                 const waitTime = 10000;
                 waLog(`[WA-LOCK] Session busy (owned by ${activeLock.owner}, updated ${Math.round(diff/1000)}s ago). Waiting ${waitTime}ms to avoid conflict 440...`);
                 this.isActive = false;
+                this._isStarting = false;
                 setTimeout(() => this.start(options), waitTime);
                 return;
             }
@@ -156,6 +158,8 @@ class WhatsAppSessionChannel extends Channel {
             getMessage: async () => ({ conversation: '' })
         });
 
+        // Libération du verrou local de démarrage maintenant que le socket est initialisé
+        this._isStarting = false;
 
         // this.store.bind(this.sock.ev); // Removed store bind
 
