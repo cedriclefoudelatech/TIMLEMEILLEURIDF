@@ -51,6 +51,11 @@ class WhatsAppSessionChannel extends Channel {
     }
 
     async start(options = {}) {
+        if (this._isStarting) {
+            waLog(`[WA-START] Démarrage déjà en cours ignoré pour éviter conflit 440.`);
+            return;
+        }
+        this._isStarting = true;
         if (this.sock) { try { this.sock.end(); } catch(e) {} this.sock = null; }
         await loadBaileys();
         if (options.pairingPhone) {
