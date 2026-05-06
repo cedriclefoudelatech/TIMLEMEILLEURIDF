@@ -125,9 +125,15 @@ class Dispatcher {
                     await this.middleware[index](ctx, next);
                 } else {
                     // 3. Gestion des approbations (STRICT)
+                    // 3. Gestion des approbations (STRICT)
                     const registeredUser = ctx.state.user;
-                    const isApproved = registeredUser?.is_approved !== false || registeredUser?.is_livreur === true || (await require('../handlers/admin').isAdmin(ctx));
-                    console.log(`[WA-DISPATCH] User: ${registeredUser?.id} | is_approved: ${registeredUser?.is_approved} | isApproved: ${isApproved}`);
+                    // Logic: approved if is_approved is true OR if it's NOT false (e.g. undefined/missing from old data)
+                    // BUT for NEW users, registerUser sets it explicitly to false.
+                    const isApproved = (registeredUser?.is_approved === true) || (registeredUser?.is_approved === undefined) || (registeredUser?.is_livreur === true) || (await require('../handlers/admin').isAdmin(ctx));
+                    
+                    if (process.env.NODE_ENV !== 'production' || !isApproved) {
+                        console.log(`[WA-DISPATCH] Check Approval for ${ctx.from.id}: is_approved=${registeredUser?.is_approved}, is_livreur=${registeredUser?.is_livreur}, FINAL=${isApproved}`);
+                    }
 
                     const isStartCommand = ctx.message?.text?.startsWith('/start') || ctx.message?.text?.toLowerCase() === 'start';
                     const isPermittedAction = ctx.callbackQuery && [

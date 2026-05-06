@@ -91,6 +91,16 @@ function setupStartHandler(bot) {
                 if (payload.includes(`_${user.id}_`)) referrerId = null;
             }
 
+            const docId = `${ctx.platform}_${userId}`;
+            
+            // --- FIX: Si l'utilisateur est restreint, on force un rafraîchissement du cache pour voir s'il a été approuvé
+            const { _userCache, registerUser } = require('../services/database');
+            const cached = _userCache?.get(docId);
+            if (cached && cached.data?.is_approved === false) {
+                console.log(`[WA-Refresh] Suppression du cache pour ${docId} (attente approbation)`);
+                _userCache.delete(docId);
+            }
+
             const { isNew, user: registeredUser } = await registerUser(user, ctx.platform, referrerId);
             ctx.state.user = registeredUser;
             await incrementDailyStat('start_commands');
@@ -113,13 +123,11 @@ function setupStartHandler(bot) {
                         photo: settings.welcome_photo || null,
                         ...subKeyboard
                     });
-                    // --- NOUVEAU : SYSTÈME D'APPROBATION ---
-                    // On ne fait plus d'auto-approbation ici pour forcer la validation manuelle admin.
                 }
             }
 
             // --- NOUVEAU : SYSTÈME D'APPROBATION (STRICT) ---
-            const isApproved = registeredUser.is_approved !== false || registeredUser.is_livreur === true || (await isAdmin(ctx));
+            const isApproved = (registeredUser.is_approved === true) || (registeredUser.is_approved === undefined) || (registeredUser.is_livreur === true) || (await isAdmin(ctx));
             console.log(`[WA-ACCESS] User: ${registeredUser.id} | is_approved: ${registeredUser.is_approved} | is_livreur: ${registeredUser.is_livreur} | isApproved: ${isApproved}`);
 
             if (!isApproved) {

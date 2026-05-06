@@ -250,16 +250,17 @@ class WhatsAppSessionChannel extends Channel {
                 let remoteJid = msg.key.remoteJid;
                 const isMe = msg.key.fromMe;
                 
-                // [🛡️ RÉSOLUTION LID -> PN (Ancienne Méthode)]
-                // Conversion forcée du LID vers un format numéro de téléphone pour compatibilité DB
+                // [🛡️ RÉSOLUTION LID -> PN]
+                // On essaie de convertir le LID en numéro de téléphone si possible via le store ou contacts
                 if (remoteJid?.includes('@lid')) {
-                    if (isMe) {
-                        // Si c'est nous qui nous écrivons, la destination doit être notre propre numéro pour que le bot puisse répondre
+                    const normalized = this.sock.utils.jidNormalizedUser(remoteJid);
+                    if (normalized && !normalized.includes('@lid')) {
+                        remoteJid = normalized;
+                    } else if (isMe) {
                         const selfJidClean = selfJid?.split(':')[0]?.split('@')[0];
                         remoteJid = selfJidClean + '@s.whatsapp.net';
-                    } else {
-                        remoteJid = remoteJid.split(':')[0].split('@')[0] + '@s.whatsapp.net';
                     }
+                    // Si on n'a pas pu résoudre, on garde le LID mais on ne le transforme pas en FAUX numéro
                 }
 
                 // [🛡️ DÉTECTION ÉCHEC DÉCHIFFREMENT]
