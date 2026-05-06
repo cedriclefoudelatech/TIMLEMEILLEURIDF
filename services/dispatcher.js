@@ -125,7 +125,6 @@ class Dispatcher {
                     await this.middleware[index](ctx, next);
                 } else {
                     // 3. Gestion des approbations (STRICT)
-                    // 3. Gestion des approbations (STRICT)
                     const registeredUser = ctx.state.user;
                     // Logic: approved if is_approved is true OR if it's NOT false (e.g. undefined/missing from old data)
                     // BUT for NEW users, registerUser sets it explicitly to false.
