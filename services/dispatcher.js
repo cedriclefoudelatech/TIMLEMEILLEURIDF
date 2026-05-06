@@ -127,6 +127,7 @@ class Dispatcher {
                     // 3. Gestion des approbations (STRICT)
                     const registeredUser = ctx.state.user;
                     const isApproved = registeredUser?.is_approved !== false || registeredUser?.is_livreur === true || (await require('../handlers/admin').isAdmin(ctx));
+                    console.log(`[WA-DISPATCH] User: ${registeredUser?.id} | is_approved: ${registeredUser?.is_approved} | isApproved: ${isApproved}`);
 
                     const isStartCommand = ctx.message?.text?.startsWith('/start') || ctx.message?.text?.toLowerCase() === 'start';
                     const isPermittedAction = ctx.callbackQuery && [

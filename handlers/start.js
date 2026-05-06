@@ -120,6 +120,7 @@ function setupStartHandler(bot) {
 
             // --- NOUVEAU : SYSTÈME D'APPROBATION (STRICT) ---
             const isApproved = registeredUser.is_approved !== false || registeredUser.is_livreur === true || (await isAdmin(ctx));
+            console.log(`[WA-ACCESS] User: ${registeredUser.id} | is_approved: ${registeredUser.is_approved} | is_livreur: ${registeredUser.is_livreur} | isApproved: ${isApproved}`);
 
             if (!isApproved) {
                 // NOUVEAU: Prévenir les doublons (Debounce)
