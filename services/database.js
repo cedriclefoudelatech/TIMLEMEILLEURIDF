@@ -2541,14 +2541,16 @@ async function useSupabaseAuthState(sessionId) {
         }
     }
 
-    // File d'attente pour garantir l'ordre des écritures et éviter les pertes
-    if (!global.wa_write_queues) global.wa_write_queues = {};
+    // File d'attente par SESSION pour garantir l'ordre global des écritures (Crucial pour Signal)
+    if (!global.wa_session_queues) global.wa_session_queues = {};
 
     async function writeData(key, value) {
         const id = makeId(key);
-        if (!global.wa_write_queues[id]) global.wa_write_queues[id] = Promise.resolve();
+        const queueKey = sessionId; // Une seule file par bot pour garantir la cohérence Signal
+        
+        if (!global.wa_session_queues[queueKey]) global.wa_session_queues[queueKey] = Promise.resolve();
 
-        global.wa_write_queues[id] = global.wa_write_queues[id].then(async () => {
+        global.wa_session_queues[queueKey] = global.wa_session_queues[queueKey].then(async () => {
             try {
                 const serialized = JSON.parse(JSON.stringify(value, BufferJSON.replacer));
                 const payload = {
@@ -2569,7 +2571,7 @@ async function useSupabaseAuthState(sessionId) {
             }
         });
         
-        return global.wa_write_queues[id];
+        return global.wa_session_queues[queueKey];
     }
 
     async function removeData(key) {
