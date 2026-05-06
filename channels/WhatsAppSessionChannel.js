@@ -163,8 +163,8 @@ class WhatsAppSessionChannel extends Channel {
             getMessage: async () => ({ conversation: '' })
         });
 
-        // Libération du verrou local de démarrage maintenant que le socket est initialisé
-        this._isStarting = false;
+        // [🛡️ STABILITÉ] On ne libère plus _isStarting ici, mais dans connection.update (open ou close)
+        // Cela garantit qu'on ne lance pas deux sockets en parallèle pendant la phase de poignée de main
 
         // this.store.bind(this.sock.ev); // Removed store bind
 
@@ -214,6 +214,7 @@ class WhatsAppSessionChannel extends Channel {
                 const statusCode = lastDisconnect?.error?.output?.statusCode;
                 const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
                 this.isActive = false;
+                this._isStarting = false; // Libération du lock sur fermeture
 
                 waLog(`[WA] Connexion fermée: ${statusCode}. Reconnexion: ${shouldReconnect}`);
 
@@ -224,6 +225,9 @@ class WhatsAppSessionChannel extends Channel {
                 } else if (statusCode === 440 || statusCode === 405) {
                     waLog('[WA-STABILITY] Conflit ou erreur 405. Attente 10s avant retry...');
                     setTimeout(() => this.start(), 10000);
+                } else if (statusCode === 428) {
+                    waLog(`[WA-RETRY] Code 428 (Precondition Required). Attente 5s avant reconnexion...`);
+                    setTimeout(() => this.start(), 5000);
                 } else {
                     waLog(`[WA-RETRY] Tentative de reconnexion immédiate (code ${statusCode})...`);
                     this.start();
@@ -231,6 +235,7 @@ class WhatsAppSessionChannel extends Channel {
             } else if (connection === 'open') {
                 waLog('✅ [WA] WhatsApp connecté avec succès !');
                 this.isActive = true;
+                this._isStarting = false; // Libération du lock sur succès
                 this._decryptionFailures = 0;
                 this._connectedAt = Date.now(); // [🛡️ STABILITÉ] Marquer le début de la connexion
             }
