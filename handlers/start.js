@@ -91,7 +91,7 @@ function setupStartHandler(bot) {
                 if (payload.includes(`_${user.id}_`)) referrerId = null;
             }
 
-            const docId = `${ctx.platform}_${userId}`;
+
             
             // --- FIX: Si l'utilisateur est restreint, on force un rafraîchissement du cache pour voir s'il a été approuvé
             const { _userCache, registerUser } = require('../services/database');
