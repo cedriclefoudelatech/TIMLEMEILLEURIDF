@@ -155,11 +155,11 @@ class WhatsAppSessionChannel extends Channel {
             browser: Browsers.ubuntu('Chrome'), // Retour à la signature Ubuntu demandée
             syncFullHistory: false,
             shouldSyncHistory: false,
-            markOnlineOnConnect: true, // [🛡️ STABILITÉ] Marquer online pour éviter d'être déconnecté par le serveur
+            markOnlineOnConnect: false, // [🛡️ STABILITÉ] Test: Désactivé pour voir si ça évite les 428 immédiats
             retryRequestDelayMs: 5000,
             connectTimeoutMs: 60000,
             keepAliveIntervalMs: 60000,
-            transactionOpts: { maxRetries: 10, delayBetweenTriesMs: 1000 },
+            transactionOpts: { maxRetries: 5, delayBetweenTriesMs: 2000 },
             getMessage: async () => ({ conversation: '' })
         });
 
@@ -226,8 +226,18 @@ class WhatsAppSessionChannel extends Channel {
                     waLog('[WA-STABILITY] Conflit ou erreur 405. Attente 10s avant retry...');
                     setTimeout(() => this.start(), 10000);
                 } else if (statusCode === 428) {
-                    waLog(`[WA-RETRY] Code 428 (Precondition Required). Attente 5s avant reconnexion...`);
-                    setTimeout(() => this.start(), 5000);
+                    this._consecutive428 = (this._consecutive428 || 0) + 1;
+                    waLog(`[WA-RETRY] Code 428 (#${this._consecutive428})...`);
+                    
+                    if (this._consecutive428 >= 3) {
+                        waLog(`[WA-CRIT] Trop d'erreurs 428 consécutives. Session probablement corrompue. PURGE TOTALE...`);
+                        this._consecutive428 = 0;
+                        if (this._clearSession) await this._clearSession().catch(() => {});
+                        setTimeout(() => this.start(), 5000);
+                    } else {
+                        waLog(`[WA-RETRY] Attente 15s avant reconnexion...`);
+                        setTimeout(() => this.start(), 15000);
+                    }
                 } else {
                     waLog(`[WA-RETRY] Tentative de reconnexion immédiate (code ${statusCode})...`);
                     this.start();
@@ -235,9 +245,10 @@ class WhatsAppSessionChannel extends Channel {
             } else if (connection === 'open') {
                 waLog('✅ [WA] WhatsApp connecté avec succès !');
                 this.isActive = true;
-                this._isStarting = false; // Libération du lock sur succès
+                this._isStarting = false;
+                this._consecutive428 = 0; // Reset success
                 this._decryptionFailures = 0;
-                this._connectedAt = Date.now(); // [🛡️ STABILITÉ] Marquer le début de la connexion
+                this._connectedAt = Date.now();
             }
         });
 
