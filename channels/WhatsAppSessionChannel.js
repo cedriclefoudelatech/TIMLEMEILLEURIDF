@@ -157,9 +157,10 @@ class WhatsAppSessionChannel extends Channel {
             syncFullHistory: false,
             shouldSyncHistory: false,
             markOnlineOnConnect: true, // [🛡️ STABILITÉ] Réactivé pour favoriser le déchiffrement initial
-            retryRequestDelayMs: 5000,
-            connectTimeoutMs: 60000,
-            keepAliveIntervalMs: 60000,
+            connectTimeoutMs: 90000,
+            keepAliveIntervalMs: 30000,
+            emitOwnEvents: true,
+            retryRequestDelayMs: 2000,
             transactionOpts: { maxRetries: 5, delayBetweenTriesMs: 2000 },
             getMessage: async () => ({ conversation: '' })
         });
