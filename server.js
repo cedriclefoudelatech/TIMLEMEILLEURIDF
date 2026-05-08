@@ -247,7 +247,9 @@ function createServer() {
                 return res.json({
                     phone: waSession?.pairingPhone || phoneNumber,
                     code: waSession?.pairingCode || "Génération...",
-                    status: waSession?.pairingCode ? 'ready' : 'pending'
+                    qr: waSession?.lastQR || null,
+                    connected: waSession?.isActive || false,
+                    status: waSession?.isActive ? 'connected' : (waSession?.pairingCode ? 'ready' : 'pending')
                 });
             }
 
@@ -492,30 +494,45 @@ function createServer() {
                         }
                     }
 
-                    // Polling intelligent pour le code d'appairage
-                    async function pollPairingCode() {
-                        const codeElement = document.getElementById('pairing-code-text');
-                        if (!codeElement || codeElement.textContent !== "Génération...") return;
-
+                    // Polling intelligent pour le QR et le code d'appairage
+                    async function pollStatus() {
                         try {
                             const token = localStorage.getItem('admin_token');
                             const res = await fetch(window.location.pathname + '?json=1&token=' + encodeURIComponent(token || '') + '&t=' + Date.now());
                             const data = await res.json();
-                            if (data.code && data.code !== "Génération...") {
+                            
+                            // Mise à jour du QR code si disponible
+                            if (data.qr) {
+                                const qrWrapper = document.querySelector('.qr-wrapper');
+                                if (qrWrapper) {
+                                    const existingImg = qrWrapper.querySelector('img');
+                                    if (existingImg && existingImg.src !== data.qr) {
+                                        existingImg.src = data.qr;
+                                        existingImg.style.width = '100%';
+                                        existingImg.style.height = '100%';
+                                        existingImg.style.objectFit = 'contain';
+                                    }
+                                }
+                            }
+                            
+                            // Mise à jour du code d'appairage
+                            const codeElement = document.getElementById('pairing-code-text');
+                            if (data.code && data.code !== "Génération..." && codeElement) {
                                 codeElement.textContent = data.code;
                                 codeElement.style.color = "#0f0";
-                                codeElement.style.borderColor = "#25D366";
-                                // On peut aussi rafraîchir l'image QR au passage
-                                const qrImg = document.getElementById('qr-image');
-                                if (qrImg) qrImg.src = "/whatsapp-qr?t=" + Date.now();
+                            }
+                            
+                            // Si connecté, recharger pour voir le statut
+                            if (data.connected) {
+                                location.reload();
                             }
                         } catch(e) {}
                     }
                     
-                    setInterval(pollPairingCode, 3000);
+                    setInterval(pollStatus, 3000);
                     
-                    // Auto-refresh toutes les 45s pour le QR si non connecté
-                    setTimeout(() => location.reload(), 45000);
+                    // Auto-refresh toutes les 10s si QR pas encore visible
+                    setTimeout(() => location.reload(), 10000);
                     
                     // Détecter si on revient d'un restart (pour arrêter le loading si besoin)
                     window.onload = () => {
