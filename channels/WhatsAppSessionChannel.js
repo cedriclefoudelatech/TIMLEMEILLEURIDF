@@ -134,6 +134,14 @@ class WhatsAppSessionChannel extends Channel {
         waLog(`[WA] Using version v${version.join('.')}`);
 
         const logger = pino({ level: 'silent' });
+        
+        // [🛡️ RETRY] Cache pour les retries de déchiffrement
+        // Quand un message ne peut pas être déchiffré, Baileys demande au sender de le renvoyer
+        if (!this._msgRetryCounterCache) {
+            this._msgRetryCounterCache = new Map();
+            this._msgRetryCounterCache.del = this._msgRetryCounterCache.delete.bind(this._msgRetryCounterCache);
+        }
+        
         this.sock = makeWASocket({
             version,
             auth: {
@@ -150,7 +158,13 @@ class WhatsAppSessionChannel extends Channel {
             emitOwnEvents: true,
             retryRequestDelayMs: 2000,
             transactionOpts: { maxRetries: 5, delayBetweenTriesMs: 2000 },
-            getMessage: async () => ({ conversation: '' })
+            msgRetryCounterCache: this._msgRetryCounterCache,
+            getMessage: async (key) => {
+                // Callback utilisé par Baileys pour les retries de déchiffrement
+                // On retourne undefined pour forcer Baileys à demander au sender de renvoyer
+                waLog(`[WA-RETRY] getMessage demandé pour ${key?.remoteJid} (id=${key?.id?.substring(0,12)})`);
+                return undefined;
+            }
         });
 
         // [🛡️ STABILITÉ] On ne libère plus _isStarting ici, mais dans connection.update (open ou close)
