@@ -2509,8 +2509,9 @@ async function useSupabaseAuthState(sessionId) {
                 return JSON.parse(JSON.stringify(data.value), BufferJSON.reviver);
             }
 
-            // [🛡️ REDONDANCE] Si la session principale est vide, on cherche dans le backup
-            // On ignore le backup si on est en train de purger
+            // [🛡️ REDONDANCE] On ne restaure QUE les 'creds' depuis le backup. 
+            // Restaurer d'anciennes clés Signal (session/pre-key) garantit un échec de déchiffrement.
+            if (key !== 'creds') return null;
             if (global._wa_purging === sessionId) return null;
 
             const backupId = `wa_backup::${sessionId}::${key}`;

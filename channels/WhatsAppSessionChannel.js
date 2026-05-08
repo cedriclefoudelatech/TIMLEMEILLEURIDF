@@ -156,7 +156,7 @@ class WhatsAppSessionChannel extends Channel {
             browser: Browsers.macOS('Chrome'), // Signature macOS plus stable sur Railway
             syncFullHistory: false,
             shouldSyncHistory: false,
-            markOnlineOnConnect: false, // [🛡️ STABILITÉ] Test: Désactivé pour voir si ça évite les 428 immédiats
+            markOnlineOnConnect: true, // [🛡️ STABILITÉ] Réactivé pour favoriser le déchiffrement initial
             retryRequestDelayMs: 5000,
             connectTimeoutMs: 60000,
             keepAliveIntervalMs: 60000,
@@ -481,6 +481,12 @@ class WhatsAppSessionChannel extends Channel {
     async deleteMessage(jid, messageId) {
         if (!this.sock || !this.isActive || !messageId) return;
         try {
+            const decoded = jidDecode ? jidDecode(jid) : null;
+            if (!decoded) {
+                waLog(`[WA-Delete-ERR] JID invalide: ${jid}`);
+                return false;
+            }
+
             await this.sock.sendMessage(jid, {
                 delete: {
                     remoteJid: jid,
