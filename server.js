@@ -179,7 +179,10 @@ function createServer() {
                 await waSession.restart({ pairingPhone: phone });
                 
                 if (redirect) {
-                    return res.redirect(redirect);
+                    // Inclure le token dans la redirection pour éviter une boucle auth
+                    const token = req.query.token || req.headers['x-admin-token'] || '';
+                    const sep = redirect.includes('?') ? '&' : '?';
+                    return res.redirect(redirect + sep + 'token=' + encodeURIComponent(token));
                 }
                 res.send('<html><body style="background:#111;color:#0f0;font-family:sans-serif;text-align:center;padding:50px"><h1>WhatsApp redémarré</h1><p>Nouveau QR en cours de génération...</p><script>setTimeout(()=>window.location="/whatsapp-qr",3000)</script></body></html>');
             } else {
@@ -540,9 +543,6 @@ function createServer() {
                     }
                     
                     setInterval(pollStatus, 3000);
-                    
-                    // Auto-refresh toutes les 10s si QR pas encore visible
-                    setTimeout(() => location.reload(), 10000);
                     
                     // Détecter si on revient d'un restart (pour arrêter le loading si besoin)
                     window.onload = () => {
