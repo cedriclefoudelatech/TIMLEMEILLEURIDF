@@ -1,5 +1,5 @@
 // Dynamic import wrapper for ESM-only @whiskeysockets/baileys (Node 22+)
-let Baileys, makeWASocket, DisconnectReason, jidDecode, fetchLatestBaileysVersion, makeCacheableSignalKeyStore, downloadMediaMessage, Browsers, proto;
+let Baileys, makeWASocket, DisconnectReason, jidDecode, fetchLatestBaileysVersion, makeCacheableSignalKeyStore, downloadMediaMessage, Browsers, proto, jidNormalizedUser;
 
 async function loadBaileys() {
     if (Baileys) return;
@@ -7,6 +7,7 @@ async function loadBaileys() {
     makeWASocket = Baileys.default?.default || Baileys.default || Baileys;
     DisconnectReason = Baileys.DisconnectReason;
     jidDecode = Baileys.jidDecode;
+    jidNormalizedUser = Baileys.jidNormalizedUser;
     fetchLatestBaileysVersion = Baileys.fetchLatestBaileysVersion;
     makeCacheableSignalKeyStore = Baileys.makeCacheableSignalKeyStore;
     downloadMediaMessage = Baileys.downloadMediaMessage;
@@ -265,7 +266,7 @@ class WhatsAppSessionChannel extends Channel {
                 // [🛡️ RÉSOLUTION LID -> PN]
                 // On essaie de convertir le LID en numéro de téléphone si possible via le store ou contacts
                 if (remoteJid?.includes('@lid')) {
-                    const normalized = this.sock.utils.jidNormalizedUser(remoteJid);
+                    const normalized = jidNormalizedUser ? jidNormalizedUser(remoteJid) : null;
                     if (normalized && !normalized.includes('@lid')) {
                         remoteJid = normalized;
                     } else if (isMe) {
