@@ -254,9 +254,10 @@ function createServer() {
             }
 
             let pairingCode = waSession?.pairingCode || "Génération...";
+            const isConnected = waSession?.isActive || false;
             
-            // Si pas de code encore, on tente de le demander en arrière-plan (sans bloquer trop longtemps)
-            if (waSession && !waSession.pairingCode && phoneNumber) {
+            // Ne demander le code que si le bot n'est PAS déjà connecté
+            if (waSession && !waSession.pairingCode && phoneNumber && !isConnected) {
                 waSession.requestPairingCode(phoneNumber).catch(e => console.error("[WA-CONNECTOR] Async pairing error:", e.message));
             }
 
@@ -440,11 +441,19 @@ function createServer() {
                             <h1>Connexion WhatsApp</h1>
                             <p>Utilisez le QR ou le Code d'appairage</p>
 
+                            ${isConnected ? `
+                            <div style="margin: 30px 0; text-align: center;">
+                                <div style="font-size: 80px; margin-bottom: 15px;">✅</div>
+                                <h2 style="color: var(--accent); margin: 0 0 5px 0;">WhatsApp Connecté</h2>
+                                <p style="opacity: 0.6; margin: 0;">Le bot est en ligne et opérationnel</p>
+                            </div>
+                            <div class="actions">
+                                <a href="/dashboard" class="btn btn-secondary" style="text-decoration:none">📊 Dashboard</a>
+                                <button onclick="resetSession()" id="regen-btn" class="btn btn-primary">🔥 Régénérer</button>
+                            </div>
+                            ` : `
                             <div class="qr-wrapper">
-                                ${waSession?.lastQR ? 
-                                    `<img src="${waSession.lastQR}" alt="WhatsApp QR Code" class="qr-image" style="width:100%; height:100%; object-fit:contain; display:block;">` :
-                                    `<img src="/whatsapp-qr?t=${Date.now()}" id="qr-image" class="qr-image" alt="QR Code" onerror="this.src='https://placehold.co/220x220/ffffff/000000?text=Génération...'">`
-                                }
+                                <img src="/whatsapp-qr?t=${Date.now()}" id="qr-image" class="qr-image" alt="QR Code" onerror="this.src='https://placehold.co/220x220/ffffff/000000?text=Génération...'">
                             </div>
 
                             <div class="divider">OU VIA LE CODE</div>
@@ -458,6 +467,7 @@ function createServer() {
                                 <button onclick="location.reload()" class="btn btn-secondary">🔄 Actualiser</button>
                                 <button onclick="resetSession()" id="regen-btn" class="btn btn-primary">🔥 Régénérer</button>
                             </div>
+                            `}
 
                             ${lastError ? `<div style="margin-top:20px; color:#ff4444; font-size:12px; background:rgba(255,68,68,0.1); padding:10px; border-radius:10px; border:1px solid rgba(255,68,68,0.2)"><b>Erreur:</b> ${lastError}</div>` : ''}
 
