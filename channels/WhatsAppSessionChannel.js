@@ -260,6 +260,9 @@ class WhatsAppSessionChannel extends Channel {
                 let remoteJid = msg.key.remoteJid;
                 const isMe = msg.key.fromMe;
                 
+                // [🔍 DIAGNOSTIC] Log détaillé pour CHAQUE message reçu
+                waLog(`[WA-MSG-RAW] id=${msg.key.id?.substring(0,12)}, fromMe=${isMe}, remoteJid=${remoteJid}, hasMessage=${!!msg.message}, stubType=${msg.messageStubType || 'none'}, msgKeys=${msg.message ? Object.keys(msg.message).join(',') : 'EMPTY'}`);
+                
                 // [🛡️ RÉSOLUTION LID -> PN]
                 // On essaie de convertir le LID en numéro de téléphone si possible via le store ou contacts
                 if (remoteJid?.includes('@lid')) {
@@ -275,15 +278,13 @@ class WhatsAppSessionChannel extends Channel {
 
                 // [🛡️ DÉTECTION ÉCHEC DÉCHIFFREMENT]
                 if (!msg.message || msg.message?.protocolMessage) {
-                    const isDecryptionFailure = !msg.message && !msg.key.fromMe;
-                    if (isDecryptionFailure) {
+                    // Ne compter que les messages NON-fromMe comme des vrais échecs de déchiffrement
+                    // Les messages fromMe vides sont des ACK/protocol normaux
+                    const isRealDecryptionFailure = !msg.message && !isMe && !msg.messageStubType;
+                    if (isRealDecryptionFailure) {
                         this._decryptionFailures++;
-                        waLog(`[WA-WARN] Échec déchiffrement #${this._decryptionFailures} de ${remoteJid}`);
+                        waLog(`[WA-WARN] ⚠️ VRAI échec déchiffrement #${this._decryptionFailures} de ${remoteJid} (id=${msg.key.id?.substring(0,12)})`);
                         
-                        // [🏆 STRATÉGIE DÉFINITIVE]
-                        // Si on échoue à déchiffrer ne serait-ce qu'UN message, la session est suspecte.
-                        // On purge immédiatement pour forcer un état propre.
-                        // [🛡️ GRACE PERIOD] On attend 2 minutes après la connexion avant d'autoriser l'auto-purge
                         const gracePeriod = 120000; // 2 minutes
                         const timeSinceConnect = Date.now() - (this._connectedAt || 0);
 
@@ -292,13 +293,11 @@ class WhatsAppSessionChannel extends Channel {
                             if (this._clearSession) {
                                 await this._clearSession().catch(() => {});
                             }
-                            setTimeout(() => process.exit(1), 1000); // Restart Railway
+                            setTimeout(() => process.exit(1), 1000);
                             return;
-                        } else if (this._decryptionFailures >= 1) {
-                            waLog(`[WA-MSG] Échec déchiffrement #${this._decryptionFailures} (seuil: 10). On continue.`);
                         }
                     }
-                    waLog(`[WA-MSG] SKIP protocol/empty from ${remoteJid}`);
+                    waLog(`[WA-MSG] SKIP ${isMe ? 'fromMe-' : ''}${msg.messageStubType ? 'stub-' : ''}protocol/empty from ${remoteJid}`);
                     continue;
                 }
 
