@@ -152,7 +152,7 @@ class WhatsAppSessionChannel extends Channel {
                 }, logger)
             },
             logger,
-            browser: Browsers.ubuntu('Chrome'), // Retour à la signature Ubuntu demandée
+            browser: Browsers.macOS('Chrome'), // Signature macOS plus stable sur Railway
             syncFullHistory: false,
             shouldSyncHistory: false,
             markOnlineOnConnect: false, // [🛡️ STABILITÉ] Test: Désactivé pour voir si ça évite les 428 immédiats
@@ -227,17 +227,13 @@ class WhatsAppSessionChannel extends Channel {
                     setTimeout(() => this.start(), 10000);
                 } else if (statusCode === 428) {
                     this._consecutive428 = (this._consecutive428 || 0) + 1;
-                    waLog(`[WA-RETRY] Code 428 (#${this._consecutive428})...`);
+                    waLog(`[WA-RETRY] Code 428 (#${this._consecutive428})... Pas de purge pour préserver la session.`);
                     
-                    if (this._consecutive428 >= 3) {
-                        waLog(`[WA-CRIT] Trop d'erreurs 428 consécutives. Session probablement corrompue. PURGE TOTALE...`);
-                        this._consecutive428 = 0;
-                        if (this._clearSession) await this._clearSession().catch(() => {});
-                        setTimeout(() => this.start(), 5000);
-                    } else {
-                        waLog(`[WA-RETRY] Attente 15s avant reconnexion...`);
-                        setTimeout(() => this.start(), 15000);
-                    }
+                    // [🛡️ STABILITÉ] On ne purge PLUS sur 428. 428 est une erreur de connexion, pas de session.
+                    // On utilise un backoff progressif pour laisser Meta respirer.
+                    const delay = Math.min(15000 * this._consecutive428, 60000);
+                    waLog(`[WA-RETRY] Attente ${delay/1000}s avant reconnexion...`);
+                    setTimeout(() => this.start(), delay);
                 } else {
                     waLog(`[WA-RETRY] Tentative de reconnexion immédiate (code ${statusCode})...`);
                     this.start();
@@ -293,15 +289,15 @@ class WhatsAppSessionChannel extends Channel {
                         const gracePeriod = 120000; // 2 minutes
                         const timeSinceConnect = Date.now() - (this._connectedAt || 0);
 
-                        if (this._decryptionFailures >= 1 && timeSinceConnect > gracePeriod) {
-                            waLog(`[WA-CRIT] Corruption de clés détectée (après délai de grâce). Auto-purge...`);
+                        if (this._decryptionFailures >= 10 && timeSinceConnect > gracePeriod) {
+                            waLog(`[WA-CRIT] Corruption de clés majeure détectée (${this._decryptionFailures} échecs). Auto-purge...`);
                             if (this._clearSession) {
                                 await this._clearSession().catch(() => {});
                             }
                             setTimeout(() => process.exit(1), 1000); // Restart Railway
                             return;
                         } else if (this._decryptionFailures >= 1) {
-                            waLog(`[WA-MSG] Échec déchiffrement pendant synchronisation (délai de grâce)... on continue.`);
+                            waLog(`[WA-MSG] Échec déchiffrement #${this._decryptionFailures} (seuil: 10). On continue.`);
                         }
                     }
                     waLog(`[WA-MSG] SKIP protocol/empty from ${remoteJid}`);

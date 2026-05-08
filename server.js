@@ -115,7 +115,14 @@ function createServer() {
 
     async function authMiddleware(req, res, next) {
         const raw = req.headers.authorization?.replace('Bearer ', '') || req.query.token;
-        if (!raw) return res.status(401).json({ error: 'Token manquant' });
+        
+        if (!raw) {
+            // Si c'est une requête de page (GET) et pas une API, on redirige vers le login
+            if (req.method === 'GET' && !req.url.startsWith('/api/')) {
+                return res.redirect(`/login?next=${encodeURIComponent(req.originalUrl)}`);
+            }
+            return res.status(401).json({ error: 'Token manquant' });
+        }
 
         // 1. Essai JWT signé
         try {
@@ -123,8 +130,7 @@ function createServer() {
             return next();
         } catch (_) {}
 
-        // 2. Rétrocompatibilité : token = mot de passe en clair (ancien comportement)
-        // Conservé uniquement pour la migration — supprimé après déploiement stable
+        // 2. Rétrocompatibilité : token = mot de passe en clair
         try {
             const settings = await getAppSettings();
             if (raw === settings.admin_password || raw === ADMIN_PASSWORD) {
@@ -132,7 +138,9 @@ function createServer() {
             }
         } catch (_) {}
 
-        console.warn(`[AUTH] Accès refusé — jeton invalide (IP: ${req.ip})`);
+        if (req.method === 'GET' && !req.url.startsWith('/api/')) {
+            return res.redirect(`/login?error=invalid_token&next=${encodeURIComponent(req.originalUrl)}`);
+        }
         res.status(401).json({ error: 'Non autorisé' });
     }
 

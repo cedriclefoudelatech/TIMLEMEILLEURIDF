@@ -247,8 +247,18 @@
   </div>
 
   <script>
+    const urlParams = new URLSearchParams(window.location.search);
+    const nextUrl = urlParams.get('next') || '/dashboard';
+    const errorParam = urlParams.get('error');
+
+    if (errorParam === 'invalid_token') {
+        const errorMsg = document.getElementById('errorMsg');
+        errorMsg.textContent = 'Votre session a expiré ou est invalide. Veuillez vous reconnecter.';
+        errorMsg.style.display = 'block';
+    }
+
     const token = localStorage.getItem('admin_token');
-    if (token) window.location.href = '/dashboard';
+    if (token && !errorParam) window.location.href = nextUrl;
 
     document.getElementById('loginForm').addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -271,7 +281,7 @@
 
         if (res.ok && data.token) {
           localStorage.setItem('admin_token', data.token);
-          window.location.href = '/dashboard';
+          window.location.href = nextUrl;
         } else {
           errorMsg.style.display = 'block';
         }
