@@ -251,13 +251,14 @@ function createServer() {
                     phone: waSession?.pairingPhone || phoneNumber,
                     code: waSession?.pairingCode || "Génération...",
                     qr: waSession?.lastQR || null,
-                    connected: waSession?.isActive || false,
-                    status: waSession?.isActive ? 'connected' : (waSession?.pairingCode ? 'ready' : 'pending')
+                    connected: (waSession?.isActive && !waSession?.lastQR) || false,
+                    status: (waSession?.isActive && !waSession?.lastQR) ? 'connected' : (waSession?.pairingCode ? 'ready' : 'pending')
                 });
             }
 
             let pairingCode = waSession?.pairingCode || "Génération...";
-            const isConnected = waSession?.isActive || false;
+            // Si un QR est en attente de scan, on n'est PAS connecté même si isActive est stale
+            const isConnected = (waSession?.isActive && !waSession?.lastQR) || false;
             
             // Ne demander le code que si le bot n'est PAS déjà connecté
             if (waSession && !waSession.pairingCode && phoneNumber && !isConnected) {

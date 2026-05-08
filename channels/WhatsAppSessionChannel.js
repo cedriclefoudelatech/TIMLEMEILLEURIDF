@@ -208,6 +208,13 @@ class WhatsAppSessionChannel extends Channel {
 
                 waLog(`[WA] Connexion fermée: ${statusCode}. Reconnexion: ${shouldReconnect}`);
 
+                // [🛡️ STABILITÉ] Si un restart() est en cours, on ne relance PAS ici.
+                // C'est restart() qui appellera start() après la purge.
+                if (this._restarting) {
+                    waLog('[WA] Restart en cours — auto-reconnexion bloquée.');
+                    return;
+                }
+
                 if (statusCode === DisconnectReason.loggedOut) {
                     waLog('[WA-CRIT] Déconnecté (401)! Nettoyage de la session...');
                     if (this._clearSession) await this._clearSession().catch(() => {});
@@ -235,6 +242,7 @@ class WhatsAppSessionChannel extends Channel {
                 this._consecutive428 = 0; // Reset success
                 this._decryptionFailures = 0;
                 this._connectedAt = Date.now();
+                this.lastQR = null; // Plus besoin du QR une fois connecté
             }
         });
 
