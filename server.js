@@ -174,7 +174,7 @@ function createServer() {
             
             if (waSession && waSession.restart) {
                 // On peut passer le numéro de téléphone pour le pairing directement dans le restart
-                const phone = req.query.phone || (await getAppSettings().then(s => s.private_contact_wa_url?.replace(/[^0-9]/g, ''))).catch(() => null);
+                const phone = req.query.phone || await getAppSettings().then(s => s.private_contact_wa_url?.replace(/[^0-9]/g, '')).catch(() => null);
                 
                 await waSession.restart({ pairingPhone: phone });
                 
