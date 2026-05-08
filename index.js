@@ -443,3 +443,32 @@ async function runAutomatedSync(bot) {
 }
 
 main().catch(console.error);
+
+// [🛡️ STABILITÉ] Graceful Shutdown
+// Garantit que les clés Signal sont sauvegardées avant que Railway ne coupe le processus
+async function gracefulShutdown(signal) {
+    console.log(`\n[Système] Signal ${signal} reçu. Arrêt propre en cours...`);
+    
+    try {
+        const waSession = registry.query('whatsapp');
+        if (waSession && waSession.sock) {
+            console.log('[Système] Fermeture de la connexion WhatsApp pour flush des clés...');
+            waSession.isActive = false;
+            // On signale qu'on est en arrêt pour éviter l'auto-reconnexion
+            waSession._restarting = true; 
+            waSession.sock.end();
+            
+            // On laisse 2 secondes à Supabase pour flusher les clés (saveCreds)
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            console.log('[Système] Flush terminé.');
+        }
+    } catch (e) {
+        console.error('[Système] Erreur lors de la fermeture WhatsApp :', e.message);
+    }
+    
+    console.log('[Système] Arrêt du processus.');
+    process.exit(0);
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
