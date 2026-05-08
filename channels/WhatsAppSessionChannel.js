@@ -294,7 +294,8 @@ class WhatsAppSessionChannel extends Channel {
                 if (!msg.message || msg.message?.protocolMessage) {
                     // Ne compter que les messages NON-fromMe comme des vrais échecs de déchiffrement
                     // Les messages fromMe vides sont des ACK/protocol normaux
-                    const isRealDecryptionFailure = !msg.message && !isMe && !msg.messageStubType;
+                    // stubType=2 (CIPHERTEXT) = Le message n'a pas pu être déchiffré
+                    const isRealDecryptionFailure = !msg.message && !isMe && (!msg.messageStubType || msg.messageStubType === 2);
                     if (isRealDecryptionFailure) {
                         this._decryptionFailures++;
                         waLog(`[WA-WARN] ⚠️ VRAI échec déchiffrement #${this._decryptionFailures} de ${remoteJid} (id=${msg.key.id?.substring(0,12)})`);
