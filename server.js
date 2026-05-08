@@ -492,6 +492,11 @@ function createServer() {
                 </div>
 
                 <script>
+                    function getToken() {
+                        const urlParams = new URLSearchParams(window.location.search);
+                        return urlParams.get('token') || localStorage.getItem('admin_token') || '';
+                    }
+
                     async function resetSession() {
                         const btn = document.getElementById('regen-btn');
                         const overlay = document.getElementById('loading-overlay');
@@ -500,19 +505,19 @@ function createServer() {
                             btn.disabled = true;
                             overlay.style.display = 'flex';
                             
-                            // On tente de récupérer le token
-                            let token = localStorage.getItem('admin_token');
+                            // Récupération robuste du token
+                            const token = getToken();
                             
                             // Redirection vers le restart avec redirection retour
-                            window.location.href = '/wa-restart?token=' + encodeURIComponent(token || '') + '&redirect=/wa-connector';
+                            window.location.href = '/wa-restart?token=' + encodeURIComponent(token) + '&redirect=/wa-connector';
                         }
                     }
 
                     // Polling intelligent pour le QR et le code d'appairage
                     async function pollStatus() {
                         try {
-                            const token = localStorage.getItem('admin_token');
-                            const res = await fetch(window.location.pathname + '?json=1&token=' + encodeURIComponent(token || '') + '&t=' + Date.now());
+                            const token = getToken();
+                            const res = await fetch(window.location.pathname + '?json=1&token=' + encodeURIComponent(token) + '&t=' + Date.now());
                             const data = await res.json();
                             
                             // Mise à jour du QR code si disponible
