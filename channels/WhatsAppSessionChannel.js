@@ -138,7 +138,7 @@ class WhatsAppSessionChannel extends Channel {
             version,
             auth: {
                 creds: state.creds,
-                keys: state.keys
+                keys: makeCacheableSignalKeyStore(state.keys, logger)
             },
             logger,
             browser: Browsers.macOS('Chrome'), // Signature macOS plus stable sur Railway
@@ -470,10 +470,9 @@ class WhatsAppSessionChannel extends Channel {
     async deleteMessage(jid, messageId) {
         if (!this.sock || !this.isActive || !messageId) return;
         try {
-            const decoded = jidDecode ? jidDecode(jid) : null;
-            if (!decoded) {
-                waLog(`[WA-Delete-ERR] JID invalide: ${jid}`);
-                return false;
+            // Normaliser le JID : ajouter @s.whatsapp.net si absent
+            if (jid && !jid.includes('@')) {
+                jid = jid + '@s.whatsapp.net';
             }
 
             await this.sock.sendMessage(jid, {
