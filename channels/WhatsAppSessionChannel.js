@@ -125,10 +125,13 @@ class WhatsAppSessionChannel extends Channel {
              await claimLock(myInstanceId).catch(() => {});
         }, 15000);
 
-        // [🛡️ REDONDANCE] Récupération de la dernière version Baileys pour éviter le rejet 405/428
-        // [🛡️ STABILITÉ] On force une version connue pour sa stabilité sur Railway
-        const version = [2, 2412, 54];
-        waLog(`[WA] Using FIXED version v${version.join('.')}`);
+        // [🛡️ STABILITÉ] Récupération de la dernière version avec fallback
+        let version = [2, 3000, 1015901307];
+        try {
+            const latest = await fetchLatestBaileysVersion().catch(() => null);
+            if (latest && latest.version) version = latest.version;
+        } catch (e) {}
+        waLog(`[WA] Using version v${version.join('.')}`);
 
         const logger = pino({ level: 'silent' });
         this.sock = makeWASocket({
