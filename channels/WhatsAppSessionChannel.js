@@ -135,20 +135,14 @@ class WhatsAppSessionChannel extends Channel {
 
         const logger = pino({ level: 'silent' });
         
-        // [🛡️ RETRY] Cache pour les retries de déchiffrement
-        // Quand un message ne peut pas être déchiffré, Baileys demande au sender de le renvoyer
-        if (!this._msgRetryCounterCache) {
-            this._msgRetryCounterCache = new Map();
-            this._msgRetryCounterCache.del = this._msgRetryCounterCache.delete.bind(this._msgRetryCounterCache);
-        }
-        
+        // [🛡️ CRITIQUE] Configuration IDENTIQUE à La Frappe (qui fonctionne)
+        // Supprimé: emitOwnEvents, msgRetryCounterCache custom, retryRequestDelayMs, transactionOpts
+        // Ces options n'existent PAS dans La Frappe et interfèrent avec le mécanisme de retry Signal
         this.sock = makeWASocket({
             version,
             auth: {
                 creds: state.creds,
                 // [🛡️ CRITIQUE] Wrapping des clés Signal avec proto.Message.AppStateSyncKeyData.fromObject()
-                // Sans ça, les clés app-state-sync-key sont des objets JSON bruts au lieu de protobuf
-                // → Baileys ne peut PAS déchiffrer les messages entrants (stubType=2)
                 keys: makeCacheableSignalKeyStore({
                     get: async (type, ids) => {
                         const data = await state.keys.get(type, ids);
@@ -163,22 +157,13 @@ class WhatsAppSessionChannel extends Channel {
                 }, logger)
             },
             logger,
-            browser: ["Ubuntu", "Chrome", "115.0.0.0"], // Format tableau comme La Frappe (pas Browsers.ubuntu)
+            browser: ["Ubuntu", "Chrome", "115.0.0.0"],
             syncFullHistory: false,
             shouldSyncHistory: false,
-            markOnlineOnConnect: true, // [🛡️ STABILITÉ] Réactivé pour favoriser le déchiffrement initial
-            connectTimeoutMs: 90000,
-            keepAliveIntervalMs: 30000,
-            emitOwnEvents: true,
-            retryRequestDelayMs: 2000,
-            transactionOpts: { maxRetries: 5, delayBetweenTriesMs: 2000 },
-            msgRetryCounterCache: this._msgRetryCounterCache,
-            getMessage: async (key) => {
-                // [🛡️ CRITIQUE] Retourner un objet message vide pour permettre le retry de déchiffrement
-                // Si on retourne undefined, Baileys abandonne le retry et le message est perdu
-                waLog(`[WA-RETRY] getMessage demandé pour ${key?.remoteJid} (id=${key?.id?.substring(0,12)})`);
-                return { conversation: '' };
-            }
+            markOnlineOnConnect: true,
+            linkPreviewImageThumbnailWidth: 192,
+            generateHighQualityLinkPreview: false,
+            getMessage: async () => ({ conversation: '' })
         });
 
         // [🛡️ STABILITÉ] On ne libère plus _isStarting ici, mais dans connection.update (open ou close)

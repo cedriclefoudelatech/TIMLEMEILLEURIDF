@@ -235,6 +235,22 @@ function createServer() {
         }
     });
 
+    // [🛡️ RESET] Endpoint POST pour purger la session WhatsApp et relancer proprement
+    app.post('/wa-connector/reset', authMiddleware, async (req, res) => {
+        try {
+            const waSession = registry.query('whatsapp');
+            if (waSession) {
+                console.log('[WA-RESET] Purge de session demandée via dashboard...');
+                await waSession.restart({ pairingPhone: waSession.pairingPhone });
+                res.json({ success: true, message: 'Session purgée et relancée' });
+            } else {
+                res.json({ success: false, message: 'WhatsApp non trouvé' });
+            }
+        } catch (e) {
+            res.status(500).json({ success: false, error: e.message });
+        }
+    });
+
     // Page de connexion Premium (Style La Frappe) - QR + Pairing + Reset
     app.get('/wa-connector', authMiddleware, async (req, res) => {
         try {
