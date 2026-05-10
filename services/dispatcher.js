@@ -40,15 +40,11 @@ class Dispatcher {
     }
 
     // Permet aux fonctions externes (notifyUser) d'enregistrer des boutons pour le fallback numérique WA
-    setUserLastButtons(userId, buttons) {
-        const id = this._normalizeId(userId);
-        if (buttons && buttons.length > 0) {
-            console.log(`[Dispatcher] setLastButtons pour ${id} : ${JSON.stringify(buttons.map(b => b.id || (b.web_app ? 'WebApp' : 'Texte')))}`);
-            this.userLastButtons.set(id, buttons);
-        } else {
-            console.log(`[Dispatcher] Effacement des boutons pour ${id}`);
-            this.userLastButtons.delete(id);
-        }
+    setUserLastButtons(id, buttons) {
+        if (!id || !buttons) return;
+        const normalizedId = this._normalizeId(id);
+        this.userLastButtons.set(normalizedId, buttons);
+        console.log(`[Dispatcher] Buttons cache hydrated for ${normalizedId} (${buttons.length} buttons)`);
     }
 
     // --- Interface pour simuler Telegraf ---
@@ -529,8 +525,7 @@ class Dispatcher {
         }
 
         // 3b. WhatsApp: Fallback numérique (AVANT l'auto-accueil pour intercepter les choix de menus)
-        const shortId = String(userId).replace(/^(telegram_|whatsapp_)/, '').split('@')[0];
-        const lastButtons = this.userLastButtons.get(shortId);
+        const lastButtons = this.userLastButtons.get(userId);
 
         if (ctx.channel.type === 'whatsapp' && /^\d+$/.test(lowerText) && !ctx._handled) {
             const index = parseInt(lowerText) - 1;
@@ -554,7 +549,7 @@ class Dispatcher {
 
         // 3c. WhatsApp: auto-accueil si premier message (pas besoin de /start)
         if (ctx.platform === 'whatsapp' && !lastButtons && !ctx._handled) {
-            console.log(`[${platform}] 🤝 Auto-accueil (premier message ID: ${shortId})`);
+            console.log(`[${platform}] 🤝 Auto-accueil (premier message ID: ${userId})`);
             if (this.commands.has('start')) return await this.commands.get('start')(ctx);
         }
 
