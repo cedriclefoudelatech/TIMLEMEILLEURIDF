@@ -529,7 +529,7 @@ class Dispatcher {
 
         if (ctx.channel.type === 'whatsapp' && /^\d+$/.test(lowerText) && !ctx._handled) {
             const index = parseInt(lowerText) - 1;
-            waLog(`[${platform}] 🔢 Raccourci numérique "${lowerText}" (index ${index}) — UserShortID: ${shortId}`);
+            waLog(`[${platform}] 🔢 Raccourci numérique "${lowerText}" (index ${index}) — UserShortID: ${userId}`);
             waLog(`[${platform}] 🗂️ Boutons mémorisés: ${lastButtons ? lastButtons.map(b=>b.id || 'btn').join(', ') : 'AUCUN'}`);
 
             if (lastButtons && lastButtons[index]) {
@@ -541,7 +541,7 @@ class Dispatcher {
                     return await this._routeAction(ctx, trigger);
                 }
             } else if (!lastButtons) {
-                waLog(`[${platform}] ❌ Pas de boutons mémorisés pour ${shortId} — envoi /start via auto-welcome possible`);
+                waLog(`[${platform}] ❌ Pas de boutons mémorisés pour ${userId} — envoi /start via auto-welcome possible`);
             } else {
                 waLog(`[${platform}] ❌ Index ${index} hors limite (${lastButtons.length} boutons disponibles)`);
             }
