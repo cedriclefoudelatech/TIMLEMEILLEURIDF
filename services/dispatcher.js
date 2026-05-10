@@ -78,7 +78,7 @@ class Dispatcher {
             }
         }
 
-        const fromRaw = String(msg.from || '');
+
         const userId = this._normalizeId(fromRaw, channel.type);
         const isCallback = !!msg.isAction;
 
