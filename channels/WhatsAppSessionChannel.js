@@ -146,10 +146,24 @@ class WhatsAppSessionChannel extends Channel {
             version,
             auth: {
                 creds: state.creds,
-                keys: makeCacheableSignalKeyStore(state.keys, logger)
+                // [🛡️ CRITIQUE] Wrapping des clés Signal avec proto.Message.AppStateSyncKeyData.fromObject()
+                // Sans ça, les clés app-state-sync-key sont des objets JSON bruts au lieu de protobuf
+                // → Baileys ne peut PAS déchiffrer les messages entrants (stubType=2)
+                keys: makeCacheableSignalKeyStore({
+                    get: async (type, ids) => {
+                        const data = await state.keys.get(type, ids);
+                        for (const id in data) {
+                            if (type === 'app-state-sync-key' && data[id]) {
+                                data[id] = proto.Message.AppStateSyncKeyData.fromObject(data[id]);
+                            }
+                        }
+                        return data;
+                    },
+                    set: (data) => state.keys.set(data)
+                }, logger)
             },
             logger,
-            browser: Browsers.ubuntu('Chrome'), // Signature Ubuntu plus stable sur Railway (évite les 401)
+            browser: ["Ubuntu", "Chrome", "115.0.0.0"], // Format tableau comme La Frappe (pas Browsers.ubuntu)
             syncFullHistory: false,
             shouldSyncHistory: false,
             markOnlineOnConnect: true, // [🛡️ STABILITÉ] Réactivé pour favoriser le déchiffrement initial
