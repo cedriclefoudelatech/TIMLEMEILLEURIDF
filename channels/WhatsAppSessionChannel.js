@@ -186,6 +186,7 @@ class WhatsAppSessionChannel extends Channel {
                     if (this.pairingPhone && !this.sock.authState.creds.registered && !this.pairingCode && !this._pairingRequested) {
                         this._pairingRequested = true;
                         const retryPairing = async (attempt = 1) => {
+                            if (!this._pairingRequested) return; // Annulé suite à une connexion QR réussie !
                             if (attempt > 3 || this.pairingCode) return;
                             waLog(`[WA-Pairing] Tentative ${attempt}/3 (Méthode Le Relais) : demande de code pour ${this.pairingPhone}...`);
                             try {
