@@ -297,13 +297,15 @@ class WhatsAppSessionChannel extends Channel {
                     // stubType=2 (CIPHERTEXT) = Le message n'a pas pu être déchiffré
                     const isRealDecryptionFailure = !msg.message && !isMe && (!msg.messageStubType || msg.messageStubType === 2);
                     if (isRealDecryptionFailure) {
-                        this._decryptionFailures++;
-                        waLog(`[WA-WARN] ⚠️ VRAI échec déchiffrement #${this._decryptionFailures} de ${remoteJid} (id=${msg.key.id?.substring(0,12)})`);
+                        if (!this._decryptionFailuresMap) this._decryptionFailuresMap = new Map();
+                        const fails = (this._decryptionFailuresMap.get(remoteJid) || 0) + 1;
+                        this._decryptionFailuresMap.set(remoteJid, fails);
+                        
+                        waLog(`[WA-WARN] ⚠️ VRAI échec déchiffrement #${fails} de ${remoteJid} (id=${msg.key.id?.substring(0,12)})`);
 
                         // [🛡️ AUTO-RÉPARATION GLOBALE] 
-                        // Si l'échec persiste, la session Signal est désynchronisée. 
                         // On force la synchronisation de notre nouvelle clé d'identité en envoyant un message invisible.
-                        if (this._decryptionFailures === 2 || this._decryptionFailures === 5) {
+                        if (fails === 1 || fails === 3) {
                             waLog(`[WA-FIX] Tentative de forçage de clé Signal pour ${remoteJid}...`);
                             try {
                                 // Envoi d'un caractère vide invisible pour forcer la mise à jour de session Signal
@@ -314,8 +316,8 @@ class WhatsAppSessionChannel extends Channel {
                         const gracePeriod = 120000; // 2 minutes
                         const timeSinceConnect = Date.now() - (this._connectedAt || 0);
 
-                        if (this._decryptionFailures >= 10 && timeSinceConnect > gracePeriod) {
-                            waLog(`[WA-CRIT] Corruption de clés majeure détectée (${this._decryptionFailures} échecs). Auto-purge...`);
+                        if (fails >= 10 && timeSinceConnect > gracePeriod) {
+                            waLog(`[WA-CRIT] Corruption de clés majeure détectée (${fails} échecs). Auto-purge...`);
                             if (this._clearSession) {
                                 await this._clearSession().catch(() => {});
                             }
@@ -327,8 +329,8 @@ class WhatsAppSessionChannel extends Channel {
                     continue;
                 }
 
-                // Succès : on remet le compteur à zéro
-                this._decryptionFailures = 0;
+                // Succès : on remet le compteur à zéro pour ce JID
+                if (this._decryptionFailuresMap) this._decryptionFailuresMap.delete(remoteJid);
 
                 const selfJidClean = selfJid?.split(':')[0]?.split('@')[0];
                 const remoteJidClean = remoteJid?.split('@')[0].split(':')[0];
