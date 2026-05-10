@@ -62,6 +62,9 @@ class Dispatcher {
     // --- Gestion des messages entrants ---
     async handleUpdate(channel, msg) {
         // 0. Dé-duplication (Baileys envoie parfois plusieurs fois le même message)
+        const fromRaw = String(msg.from || '');
+        if (fromRaw === 'status@broadcast') return; // Ignorer les statuts WhatsApp
+        
         const msgId = msg.message_id || msg.rawId;
         if (msgId && this.processedMessages.has(msgId)) {
             console.log(`[Dispatcher] Message en double ignoré : ${msgId}`);

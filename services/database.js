@@ -2547,11 +2547,12 @@ async function useSupabaseAuthState(sessionId) {
 
     async function writeData(key, value) {
         const id = makeId(key);
-        const queueKey = sessionId; // Une seule file par bot pour garantir la cohérence Signal
+        const queueKey = sessionId;
         
         if (!global.wa_session_queues[queueKey]) global.wa_session_queues[queueKey] = Promise.resolve();
 
-        global.wa_session_queues[queueKey] = global.wa_session_queues[queueKey].then(async () => {
+        // [⚡ OPTIMISATION] On retourne une promesse qui se résout dès que la MaJ PRINCIPALE est faite
+        const task = global.wa_session_queues[queueKey].then(async () => {
             try {
                 const serialized = JSON.parse(JSON.stringify(value, BufferJSON.replacer));
                 const payload = {
@@ -2573,6 +2574,16 @@ async function useSupabaseAuthState(sessionId) {
         });
         
         return global.wa_session_queues[queueKey];
+    }
+
+    // [⏳ DEBOUNCE] Éviter de saturer Supabase sur les creds.update fréquents
+    let credsTimeout = null;
+    function debouncedSaveCreds() {
+        if (credsTimeout) return;
+        credsTimeout = setTimeout(async () => {
+            await writeData('creds', creds);
+            credsTimeout = null;
+        }, 5000); 
     }
 
     async function removeData(key) {
@@ -2660,7 +2671,7 @@ async function useSupabaseAuthState(sessionId) {
                 }
             }
         },
-        saveCreds: () => writeData('creds', creds),
+        saveCreds: debouncedSaveCreds,
         clearSession: clearAllData,
         claimLock: (ownerId) => claimLock(`wa_lock::${sessionId}`, ownerId),
         checkLock: () => checkLock(`wa_lock::${sessionId}`),

@@ -276,8 +276,10 @@ async function main() {
     // 3. Liaison Canaux -> Dispatcher
     const channels = registry.query();
     for (const channel of channels) {
-        channel.onMessage(async (msg) => {
-            await dispatcher.handleUpdate(channel, msg);
+        channel.onMessage((msg) => {
+            dispatcher.handleUpdate(channel, msg).catch(err => {
+                console.error(`[Main-Handler-Error] ${channel.type}:`, err.message);
+            });
         });
         if (channel.type === 'telegram') {
             const bot = channel.getBotInstance ? channel.getBotInstance() : null;
