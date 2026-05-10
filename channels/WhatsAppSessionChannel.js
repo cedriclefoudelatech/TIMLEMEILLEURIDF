@@ -333,13 +333,19 @@ class WhatsAppSessionChannel extends Channel {
                             this._decryptionFailuresMap.set(remoteJid, fails);
                             waLog(`[WA-WARN] ⚠️ Échec déchiffrement #${fails} de ${remoteJid} (id=${msgId?.substring(0,12)})`);
 
-                            // [🛡️ AUTO-RÉPARATION] Envoyer un message invisible pour forcer la synchro Signal
-                            // UNIQUEMENT vers les numéros @s.whatsapp.net (PAS les @lid qui ne sont pas résolvables)
-                            if ((fails === 1 || fails === 3) && !remoteJid.includes('@lid')) {
-                                waLog(`[WA-FIX] Tentative de forçage de clé Signal pour ${remoteJid}...`);
+                            // [🛡️ AUTO-RÉPARATION SIGNAL] Forcer l'établissement de session
+                            // En envoyant un message, Baileys va chercher les pre-keys sur le serveur
+                            // et établir une session Signal propre avec l'expéditeur
+                            if (fails === 1) {
+                                waLog(`[WA-FIX] Force établissement session Signal pour ${remoteJid}...`);
                                 try {
-                                    this.sock.sendMessage(remoteJid, { text: "\u200E" }).catch(() => {});
-                                } catch (e) {}
+                                    await this.sock.sendMessage(remoteJid, { 
+                                        text: "⏳ Session de sécurité en cours de synchronisation. Veuillez renvoyer votre message." 
+                                    });
+                                    waLog(`[WA-FIX] ✅ Message de session envoyé à ${remoteJid}`);
+                                } catch (e) {
+                                    waLog(`[WA-FIX] ❌ Échec envoi session fix à ${remoteJid}: ${e.message}`);
+                                }
                             }
                         }
                         // [🛡️ STABILITÉ] PAS d'auto-purge — les échecs LID sont normaux en multi-device
@@ -412,6 +418,12 @@ class WhatsAppSessionChannel extends Channel {
     }
 
     async requestPairingCode(phoneNumber) {
+        // [🛡️ SÉCURITÉ] Ne JAMAIS demander un code si déjà connecté (cause 503 → 401 → déconnexion)
+        if (this.isActive && this.sock?.authState?.creds?.registered) {
+            waLog(`[WA-Pairing] BLOQUÉ: Déjà connecté et enregistré, pas de code nécessaire.`);
+            return this.pairingCode || 'CONNECTED';
+        }
+
         if (phoneNumber) {
             this.pairingPhone = phoneNumber;
             this.pairingCode = null;
