@@ -260,9 +260,17 @@ function createServer() {
             // Si un QR est en attente de scan, on n'est PAS connecté même si isActive est stale
             const isConnected = (waSession?.isActive && !waSession?.lastQR) || false;
 
-            // Ne demander le code que si le bot n'est PAS déjà connecté
-            if (waSession && !waSession.pairingCode && phoneNumber && !isConnected) {
-                waSession.requestPairingCode(phoneNumber).catch(e => console.error("[WA-CONNECTOR] Async pairing error:", e.message));
+            // [🛡️ STABILITÉ] Ne demander le code que si :
+            // 1. Le bot n'est PAS connecté
+            // 2. Le bot n'a PAS déjà un code en attente
+            // 3. Le bot n'est PAS en train de se connecter (lastQR = on a un QR actif)
+            // IMPORTANT: NE JAMAIS demander un code sur une session ouverte (cause 503 → 401 → déconnexion)
+            if (waSession && !waSession.pairingCode && phoneNumber && !isConnected && !waSession._pairingRequested) {
+                // Vérifier aussi que les credentials ne sont pas déjà registered (session active)
+                const isRegistered = waSession.sock?.authState?.creds?.registered;
+                if (!isRegistered) {
+                    waSession.requestPairingCode(phoneNumber).catch(e => console.error("[WA-CONNECTOR] Async pairing error:", e.message));
+                }
             }
 
             const { waLogs } = require('./services/wa_log_shared');

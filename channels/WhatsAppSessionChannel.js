@@ -299,33 +299,28 @@ class WhatsAppSessionChannel extends Channel {
                     // stubType=2 (CIPHERTEXT) = Le message n'a pas pu être déchiffré
                     const isRealDecryptionFailure = !msg.message && !isMe && (!msg.messageStubType || msg.messageStubType === 2);
                     if (isRealDecryptionFailure) {
-                        if (!this._decryptionFailuresMap) this._decryptionFailuresMap = new Map();
-                        const fails = (this._decryptionFailuresMap.get(remoteJid) || 0) + 1;
-                        this._decryptionFailuresMap.set(remoteJid, fails);
-                        
-                        waLog(`[WA-WARN] ⚠️ VRAI échec déchiffrement #${fails} de ${remoteJid} (id=${msg.key.id?.substring(0,12)})`);
+                        // [🛡️ STABILITÉ] Compteur par MESSAGE UNIQUE (pas par retry)
+                        // Baileys retente le même message plusieurs fois — on ne compte qu'une fois par ID
+                        if (!this._seenFailedMsgIds) this._seenFailedMsgIds = new Set();
+                        const msgId = msg.key.id;
+                        if (!this._seenFailedMsgIds.has(msgId)) {
+                            this._seenFailedMsgIds.add(msgId);
+                            if (!this._decryptionFailuresMap) this._decryptionFailuresMap = new Map();
+                            const fails = (this._decryptionFailuresMap.get(remoteJid) || 0) + 1;
+                            this._decryptionFailuresMap.set(remoteJid, fails);
+                            waLog(`[WA-WARN] ⚠️ Échec déchiffrement #${fails} de ${remoteJid} (id=${msgId?.substring(0,12)})`);
 
-                        // [🛡️ AUTO-RÉPARATION GLOBALE] 
-                        // On force la synchronisation de notre nouvelle clé d'identité en envoyant un message invisible.
-                        if (fails === 1 || fails === 3) {
-                            waLog(`[WA-FIX] Tentative de forçage de clé Signal pour ${remoteJid}...`);
-                            try {
-                                // Envoi d'un caractère vide invisible pour forcer la mise à jour de session Signal
-                                this.sock.sendMessage(remoteJid, { text: "‎" }).catch(() => {});
-                            } catch (e) {}
-                        }
-                        
-                        const gracePeriod = 120000; // 2 minutes
-                        const timeSinceConnect = Date.now() - (this._connectedAt || 0);
-
-                        if (fails >= 10 && timeSinceConnect > gracePeriod) {
-                            waLog(`[WA-CRIT] Corruption de clés majeure détectée (${fails} échecs). Auto-purge...`);
-                            if (this._clearSession) {
-                                await this._clearSession().catch(() => {});
+                            // [🛡️ AUTO-RÉPARATION] Envoyer un message invisible pour forcer la synchro Signal
+                            // UNIQUEMENT vers les numéros @s.whatsapp.net (PAS les @lid qui ne sont pas résolvables)
+                            if ((fails === 1 || fails === 3) && !remoteJid.includes('@lid')) {
+                                waLog(`[WA-FIX] Tentative de forçage de clé Signal pour ${remoteJid}...`);
+                                try {
+                                    this.sock.sendMessage(remoteJid, { text: "\u200E" }).catch(() => {});
+                                } catch (e) {}
                             }
-                            setTimeout(() => process.exit(1), 1000);
-                            return;
                         }
+                        // [🛡️ STABILITÉ] PAS d'auto-purge — les échecs LID sont normaux en multi-device
+                        // L'ancienne logique d'auto-purge à 10 échecs détruisait la session inutilement
                     }
                     waLog(`[WA-MSG] SKIP ${isMe ? 'fromMe-' : ''}${msg.messageStubType ? 'stub-' : ''}protocol/empty from ${remoteJid}`);
                     continue;
