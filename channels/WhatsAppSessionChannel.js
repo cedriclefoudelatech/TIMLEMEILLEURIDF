@@ -160,10 +160,10 @@ class WhatsAppSessionChannel extends Channel {
             transactionOpts: { maxRetries: 5, delayBetweenTriesMs: 2000 },
             msgRetryCounterCache: this._msgRetryCounterCache,
             getMessage: async (key) => {
-                // Callback utilisé par Baileys pour les retries de déchiffrement
-                // On retourne undefined pour forcer Baileys à demander au sender de renvoyer
+                // [🛡️ CRITIQUE] Retourner un objet message vide pour permettre le retry de déchiffrement
+                // Si on retourne undefined, Baileys abandonne le retry et le message est perdu
                 waLog(`[WA-RETRY] getMessage demandé pour ${key?.remoteJid} (id=${key?.id?.substring(0,12)})`);
-                return undefined;
+                return { conversation: '' };
             }
         });
 
@@ -254,11 +254,20 @@ class WhatsAppSessionChannel extends Channel {
                 waLog('✅ [WA] WhatsApp connecté avec succès !');
                 this.isActive = true;
                 this._isStarting = false;
-                this._pairingRequested = false; // Annuler toute demande de code d'appairage en attente (évite le ban 401 de Meta)
-                this._consecutive428 = 0; // Reset success
+                this._pairingRequested = false;
+                this._consecutive428 = 0;
                 this._decryptionFailures = 0;
                 this._connectedAt = Date.now();
-                this.lastQR = null; // Plus besoin du QR une fois connecté
+                this.lastQR = null;
+                
+                // [🛡️ CRITIQUE] Envoyer notre présence pour forcer la distribution des clés Signal
+                // Sans ça, les autres appareils ne savent pas qu'on a de nouvelles clés
+                try {
+                    await this.sock.sendPresenceUpdate('available');
+                    waLog('[WA] Présence "available" envoyée — clés Signal distribuées');
+                } catch (e) {
+                    waLog(`[WA] Erreur envoi présence: ${e.message}`);
+                }
             }
         });
 
@@ -331,10 +340,13 @@ class WhatsAppSessionChannel extends Channel {
 
                 const selfJidClean = selfJid?.split(':')[0]?.split('@')[0];
                 const remoteJidClean = remoteJid?.split('@')[0].split(':')[0];
-                const isMessageToSelf = remoteJidClean === selfJidClean || msg.key.remoteJid?.endsWith('@lid') || msg.key.remoteJid === selfJidClean + '@s.whatsapp.net';
+                // [🛡️ CRITIQUE] Ne PAS traiter tous les @lid comme des self-messages !
+                // Les messages d'utilisateurs externes arrivent souvent via LID en multi-device
+                const isMessageToSelf = remoteJidClean === selfJidClean || remoteJid === selfJidClean + '@s.whatsapp.net';
 
                 // Détecter si le message vient d'un BOT (Baileys ou autre bot instance)
-                const isBotId = msg.key.id.startsWith('BAE5') || msg.key.id.startsWith('3EB0') || msg.key.id.length > 20;
+                // NOTE: Ne PAS utiliser id.length > 20 — les IDs WhatsApp normaux font souvent plus de 20 chars
+                const isBotId = msg.key.id.startsWith('BAE5') || msg.key.id.startsWith('3EB0');
 
                 waLog(`[WA-MSG] fromMe=${isMe}, isBotId=${isBotId}, remoteJid=${remoteJid}, toSelf=${isMessageToSelf}`);
 
