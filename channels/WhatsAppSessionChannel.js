@@ -253,6 +253,7 @@ class WhatsAppSessionChannel extends Channel {
                 waLog('✅ [WA] WhatsApp connecté avec succès !');
                 this.isActive = true;
                 this._isStarting = false;
+                this._pairingRequested = false; // Annuler toute demande de code d'appairage en attente (évite le ban 401 de Meta)
                 this._consecutive428 = 0; // Reset success
                 this._decryptionFailures = 0;
                 this._connectedAt = Date.now();
