@@ -300,6 +300,17 @@ class WhatsAppSessionChannel extends Channel {
                         this._decryptionFailures++;
                         waLog(`[WA-WARN] ⚠️ VRAI échec déchiffrement #${this._decryptionFailures} de ${remoteJid} (id=${msg.key.id?.substring(0,12)})`);
                         
+                        // [🛡️ AUTO-RÉPARATION LID] 
+                        // Si l'échec persiste sur un LID, Baileys a un bug de retry. 
+                        // On force la synchronisation de notre nouvelle clé d'identité en envoyant un message.
+                        if (this._decryptionFailures === 2 && remoteJid.includes('@lid')) {
+                            waLog(`[WA-FIX] Tentative de forçage de clé Signal pour le LID ${remoteJid}...`);
+                            try {
+                                // Envoi d'un caractère vide invisible pour forcer la mise à jour de session
+                                this.sock.sendMessage(remoteJid, { text: "‎" }).catch(() => {});
+                            } catch (e) {}
+                        }
+                        
                         const gracePeriod = 120000; // 2 minutes
                         const timeSinceConnect = Date.now() - (this._connectedAt || 0);
 

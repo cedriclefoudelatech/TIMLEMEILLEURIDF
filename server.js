@@ -68,7 +68,7 @@ const loginLimiter = rateLimit({
 
 function createServer() {
     const app = express();
-    
+
     // Cache mémoire simple pour les analyses (2 min)
     let _analyticsCache = null;
     let _lastAnalyticsUpdate = 0;
@@ -115,7 +115,7 @@ function createServer() {
 
     async function authMiddleware(req, res, next) {
         const raw = req.headers.authorization?.replace('Bearer ', '') || req.query.token;
-        
+
         if (!raw) {
             // Si c'est une requête de page (GET) et pas une API, on redirige vers le login
             if (req.method === 'GET' && !req.url.startsWith('/api/')) {
@@ -128,7 +128,7 @@ function createServer() {
         try {
             jwt.verify(raw, JWT_SECRET);
             return next();
-        } catch (_) {}
+        } catch (_) { }
 
         // 2. Rétrocompatibilité : token = mot de passe en clair
         try {
@@ -136,7 +136,7 @@ function createServer() {
             if (raw === settings.admin_password || raw === ADMIN_PASSWORD) {
                 return next();
             }
-        } catch (_) {}
+        } catch (_) { }
 
         if (req.method === 'GET' && !req.url.startsWith('/api/')) {
             return res.redirect(`/login?error=invalid_token&next=${encodeURIComponent(req.originalUrl)}`);
@@ -171,13 +171,13 @@ function createServer() {
         try {
             const waSession = registry.query('whatsapp');
             const redirect = req.query.redirect;
-            
+
             if (waSession && waSession.restart) {
                 // On peut passer le numéro de téléphone pour le pairing directement dans le restart
                 const phone = req.query.phone || await getAppSettings().then(s => s.private_contact_wa_url?.replace(/[^0-9]/g, '')).catch(() => null);
-                
+
                 await waSession.restart({ pairingPhone: phone });
-                
+
                 if (redirect) {
                     // Inclure le token dans la redirection pour éviter une boucle auth
                     const token = req.query.token || req.headers['x-admin-token'] || '';
@@ -201,18 +201,18 @@ function createServer() {
         res.setHeader('Cache-Control', 'no-cache');
         res.send(`<html><head><meta http-equiv="refresh" content="3"><style>body{background:#111;color:#0f0;font-family:monospace;padding:20px;font-size:13px}pre{white-space:pre-wrap}</style></head><body><h2 style="color:#fff">WhatsApp Logs (auto-refresh 3s)</h2><pre>${logs.join('\n') || 'Aucun log encore...'}</pre></body></html>`);
     });
-    
+
     // Code d'appairage WhatsApp - alternative au QR
     app.get('/wa-pairing', authMiddleware, async (req, res) => {
         try {
             const settings = await getAppSettings();
             const dbNumber = settings.private_contact_wa_url?.replace('https://wa.me/', '').replace(/[^0-9]/g, '');
             const phoneNumber = req.query.phone || dbNumber || process.env.WHATSAPP_PAIRING_NUMBER;
-            
+
             if (!phoneNumber) {
                 return res.status(400).send('Numéro de téléphone manquant. Utilisez ?phone=337XXXXXXXX');
             }
-            
+
             const waSession = registry.query('whatsapp');
             if (waSession && waSession.requestPairingCode) {
                 const code = await waSession.requestPairingCode(phoneNumber);
@@ -244,7 +244,7 @@ function createServer() {
 
             const waSession = registry.query('whatsapp');
             let lastError = null;
-            
+
             // Support polling JSON pour mise à jour dynamique sans rechargement
             if (req.query.json === '1') {
                 return res.json({
@@ -259,7 +259,7 @@ function createServer() {
             let pairingCode = waSession?.pairingCode || "Génération...";
             // Si un QR est en attente de scan, on n'est PAS connecté même si isActive est stale
             const isConnected = (waSession?.isActive && !waSession?.lastQR) || false;
-            
+
             // Ne demander le code que si le bot n'est PAS déjà connecté
             if (waSession && !waSession.pairingCode && phoneNumber && !isConnected) {
                 waSession.requestPairingCode(phoneNumber).catch(e => console.error("[WA-CONNECTOR] Async pairing error:", e.message));
@@ -640,7 +640,7 @@ function createServer() {
     const STATS_CACHE_TTL = 60000; // 1 minute
 
     app.get('/api/stats', authMiddleware, async (req, res) => {
-        try { 
+        try {
             const now = Date.now();
             if (_statsOverviewCache && (now - _lastStatsUpdate < STATS_CACHE_TTL) && !req.query.force) {
                 return res.json(_statsOverviewCache);
@@ -649,11 +649,11 @@ function createServer() {
             const data = await getStatsOverview(req.query.force === 'true');
             _statsOverviewCache = data;
             _lastStatsUpdate = now;
-            res.json(data); 
+            res.json(data);
         }
-        catch (e) { 
+        catch (e) {
             console.error("[API-STATS-ERROR]", e);
-            res.status(500).json({ error: 'Erreur serveur' }); 
+            res.status(500).json({ error: 'Erreur serveur' });
         }
     });
 
@@ -769,10 +769,10 @@ function createServer() {
         try {
             const { userId } = req.body;
             if (!userId) return res.status(400).json({ error: 'User ID manquant' });
-            
+
             const { approveUser } = require('./services/database');
             await approveUser(userId);
-            
+
             res.json({ success: true, message: 'Accès accordé avec succès' });
         } catch (e) {
             console.error('API Approve Error:', e);
@@ -836,12 +836,12 @@ function createServer() {
                 if (now - lastCatalogNotificationTime > CATALOG_NOTIFICATION_COOLDOWN) {
                     const settings = await getAppSettings();
                     const msg = settings?.msg_auto_timer || '🔥 <b>Le catalogue est à jour !</b>';
-                    
+
                     // On diffuse à tous les utilisateurs
                     broadcastMessage('users', msg).catch(err => {
                         console.error('[Auto-Notif] Broadcast failed:', err.message);
                     });
-                    
+
                     lastCatalogNotificationTime = now;
                     console.log(`[Auto-Notif] Notification "Catalogue à jour" envoyée car nouveau produit #${id} ajouté.`);
                 } else {
@@ -882,9 +882,9 @@ function createServer() {
 
 
     app.get('/api/orders/search', authMiddleware, async (req, res) => {
-        try { 
+        try {
             const { searchOrders } = require('./services/database');
-            res.json(await searchOrders(req.query.q)); 
+            res.json(await searchOrders(req.query.q));
         } catch (e) { res.status(500).json({ error: 'Erreur serveur' }); }
     });
 
@@ -995,7 +995,7 @@ function createServer() {
 
             // Nettoyage du fichier temp
             if (file.tempFilePath) {
-                fs.unlink(file.tempFilePath, () => {});
+                fs.unlink(file.tempFilePath, () => { });
             }
 
             res.json({ success: true, url: finalUrl });
@@ -1018,12 +1018,12 @@ function createServer() {
         try {
             const logPath = path.join(process.cwd(), 'debug.log');
             if (!fs.existsSync(logPath)) return res.send('Aucun log trouvé.');
-            
+
             // Lire uniquement les 1000 dernières lignes pour la performance
             const content = fs.readFileSync(logPath, 'utf8');
             const lines = content.split('\n');
             const lastLines = lines.slice(-1000).join('\n');
-            
+
             res.header('Content-Type', 'text/plain');
             res.send(lastLines);
         } catch (e) { res.status(500).send(e.message); }
@@ -1119,20 +1119,20 @@ function createServer() {
             }
 
             await updateAppSettings(updateData);
-            
+
             // SYNCHRONISATION : Mettre à jour l'utilisateur si présent en base et vider le cache
             const { supabase, COL_USERS, _userCache } = require('./services/database');
             const { authenticatedAdmins } = require('./handlers/admin');
             const isAdminFlag = role === 'admin' ? (action === 'add') : undefined;
             const isLivreurFlag = role === 'livreur' ? (action === 'add') : undefined;
-            
+
             const userUpdateObj = {};
             if (isAdminFlag !== undefined) userUpdateObj.is_admin = isAdminFlag;
             if (isLivreurFlag !== undefined) userUpdateObj.is_livreur = isLivreurFlag;
-            
+
             // On tente la mise à jour massive sur les correspondances de platform_id
             const { data: matched, error: updErr } = await supabase.from(COL_USERS).update(userUpdateObj).eq('platform_id', String(platformId)).select('id');
-            
+
             if (updErr) console.error(`[Promote] Erreur DB lors de la mise à jour de l'utilisateur ${platformId} :`, updErr.message);
 
             if (matched && matched.length > 0) {
@@ -1156,7 +1156,7 @@ function createServer() {
                     if (cleanId) authenticatedAdmins.delete(cleanId);
                 }
             }
-            
+
             res.json({ success: true, ids: currentIds });
         } catch (e) {
             console.error('Promotion error:', e);
@@ -1170,10 +1170,10 @@ function createServer() {
             let updates = { updated_at: ts() };
             if (first_name !== undefined) updates.first_name = encryption.encrypt(first_name);
             if (phone !== undefined) updates.phone = phone;
-            
+
             const { error } = await supabase.from(COL_USERS).update(updates).eq('id', userId);
             if (error) throw error;
-            
+
             _userCache.delete(userId);
             res.json({ success: true });
         } catch (e) { res.status(500).json({ error: e.message }); }
@@ -1235,7 +1235,7 @@ function createServer() {
                 const { sendMessageToUser } = require('./services/notifications');
                 const settings = await getAppSettings();
                 const shortId = orderId.slice(-5);
-                
+
                 const statusLabel = (status === 'delivered' ? settings.status_delivered_label :
                     (status === 'pending' ? settings.status_pending_label :
                         (status === 'taken' ? settings.status_taken_label : settings.status_cancelled_label))) || status.toUpperCase();
@@ -1282,7 +1282,7 @@ function createServer() {
                         text = `${settings.ui_icon_pending} <b>Mise à jour de commande</b>\n\nVotre commande #${shortId} est de nouveau ${statusLabel}.`;
                         break;
                 }
-                
+
                 if (text) {
                     const { Markup } = require('telegraf');
                     let keyboard = [];
@@ -1302,7 +1302,7 @@ function createServer() {
 
                     await sendMessageToUser(order.user_id, text, {
                         reply_markup: Markup.inlineKeyboard(keyboard).reply_markup
-                    }).catch(() => {});
+                    }).catch(() => { });
                 }
             }
 
@@ -1482,14 +1482,14 @@ function createServer() {
 
     // Tous les produits marketplace (optionnel: ?supplier_id=xxx)
     app.get('/api/marketplace/products', authMiddleware, async (req, res) => {
-        try { 
+        try {
             const products = await getMarketplaceProducts(req.query.supplier_id || null);
             console.log(`[API] Marketplace products requested (${req.query.supplier_id || 'all'}): found ${products.length}`);
-            res.json(products); 
+            res.json(products);
         }
-        catch (e) { 
+        catch (e) {
             console.error('[API] Erreur Marketplace :', e.message);
-            res.status(500).json({ error: e.message }); 
+            res.status(500).json({ error: e.message });
         }
     });
 
@@ -1534,12 +1534,12 @@ function createServer() {
         try {
             const { validateMarketplaceProduct, saveProduct, getMarketplaceProduct } = require('./services/database');
             await validateMarketplaceProduct(req.params.id, req.body.is_validated);
-            
+
             // Si c'est pour le catalogue principal (Retail) et validé
             if (req.body.is_validated && req.body.promote_to_retail) {
                 await require('./services/database').promoteMarketplaceProduct(req.params.id);
             }
-            
+
             res.json({ success: true });
         } catch (e) { res.status(500).json({ error: e.message }); }
     });
@@ -1571,7 +1571,7 @@ function createServer() {
     app.post('/api/marketplace/orders', authMiddleware, async (req, res) => {
         try {
             const result = await createMarketplaceOrder(req.body);
-            
+
             // Notifier le fournisseur via le bot Telegram
             const bot = getBotInstance();
             if (bot && req.body.supplier_id) {
@@ -1580,7 +1580,7 @@ function createServer() {
                 if (supplier && supplier.telegram_id) {
                     const productsText = req.body.products.map(p => `• ${p.name} x${p.qty}`).join('\n');
                     const msg = `📢 <b>NOUVELLE COMMANDE ADMIN</b>\n\n📌 <b>Détails :</b>\n${productsText}\n\n💰 Total : ${req.body.total_price}€\n📦 Commande : #${result.id.slice(-5)}\n📍 Livraison : ${req.body.delivery_type === 'pickup' ? 'RETRAIT SUR PLACE' : req.body.address || 'Non spécifié'}`;
-                    bot.telegram.sendMessage(supplier.telegram_id.replace('telegram_', ''), msg, { 
+                    bot.telegram.sendMessage(supplier.telegram_id.replace('telegram_', ''), msg, {
                         parse_mode: 'HTML',
                         reply_markup: {
                             inline_keyboard: [
@@ -1593,7 +1593,7 @@ function createServer() {
                     });
                 }
             }
-            
+
             res.json({ success: true, order: result });
         } catch (e) { res.status(500).json({ error: e.message }); }
     });
