@@ -157,7 +157,7 @@ class WhatsAppSessionChannel extends Channel {
                 }, logger)
             },
             logger,
-            browser: ["Ubuntu", "Chrome", "115.0.0.0"],
+            browser: ["macOS", "Chrome", "130.0.6723.70"],
             syncFullHistory: false,
             shouldSyncHistory: false,
             markOnlineOnConnect: true,
@@ -204,8 +204,8 @@ class WhatsAppSessionChannel extends Channel {
                                 }
                             }
                         };
-                        // Petit délai de sécurité (30s) pour éviter d'être flaggé comme spam par Meta
-                        setTimeout(() => retryPairing(1), 30000);
+                        // Petit délai de sécurité (10s) pour éviter d'être flaggé comme spam par Meta
+                        setTimeout(() => retryPairing(1), 10000);
                     }
                 } catch (err) {
                     console.error('❌ Erreur génération image QR:', err);
