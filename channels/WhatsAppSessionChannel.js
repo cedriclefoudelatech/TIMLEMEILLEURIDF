@@ -687,7 +687,7 @@ class WhatsAppSessionChannel extends Channel {
             return s.split(':')[0].split('@')[0] + '@s.whatsapp.net';
         }
         if (s.includes('@lid')) {
-            return s.split(':')[0].split('@')[0] + '@s.whatsapp.net';
+            return s.split(':')[0].split('@')[0] + '@lid';
         }
         
         // Default to s.whatsapp.net if no suffix
