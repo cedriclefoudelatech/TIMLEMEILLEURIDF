@@ -138,9 +138,9 @@ async function registerUser(platformUser, platform = 'telegram', referrerId = nu
             const altSuffix = rawId.includes('@lid') ? '@s.whatsapp.net' : '@lid';
             const altId = `whatsapp_${phoneNum}${altSuffix}`;
             
-            // On cherche par ID (docId) ou par platform_id brut
+            // On cherche par ID (docId) ou par platform_id brut (avec l'autre suffixe OU sans suffixe du tout)
             const { data: altArray } = await supabase.from(COL_USERS).select('*')
-                .or(`id.eq.${altId},platform_id.eq.${phoneNum}${altSuffix}`)
+                .or(`id.eq.${altId},platform_id.eq.${phoneNum}${altSuffix},id.eq.whatsapp_${phoneNum},platform_id.eq.${phoneNum}`)
                 .limit(1);
 
             if (altArray && altArray.length > 0) {

@@ -18,12 +18,19 @@ class Dispatcher {
     // Normalise les IDs utilisateurs (surtout WhatsApp : retire le suffixe de session :1, :2...)
     _normalizeId(id, platform = null) {
         if (!id) return id;
-        // 1. Convertir en string et enlever les préfixes de classe
         let s = String(id).replace(/^(telegram_|whatsapp_)/, '');
         
-        // 2. Extraire la partie avant le @ ou le : (le numéro pur)
-        s = s.split('@')[0].split(':')[0];
+        // Supprimer les suffixes de session (:1, :2)
+        s = s.split(':')[0];
 
+        if (s.includes('@s.whatsapp.net') || s.includes('@lid')) {
+            return s;
+        }
+
+        // Pour les IDs numériques purs venant de WhatsApp via notifications.js ou dispatcher
+        if (platform === 'whatsapp' || (!platform && s.length >= 8 && /^\d+$/.test(s) && !s.includes('@'))) {
+            return s + '@s.whatsapp.net';
+        }
         return s;
     }
 
