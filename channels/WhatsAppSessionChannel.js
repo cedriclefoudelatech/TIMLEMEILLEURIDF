@@ -551,9 +551,8 @@ class WhatsAppSessionChannel extends Channel {
             return { success: false, sentIds: [], error: 'Not connected' };
         }
 
-        // [🛡️ NORMALISATION LID]
-        let jid = (userId.includes('@')) ? userId : `${userId}@s.whatsapp.net`;
-        if (jid.includes('@lid')) jid = jid.split(':')[0].split('@')[0] + '@s.whatsapp.net';
+        // [🛡️ NORMALISATION] Utiliser le normaliseur centralisé qui gère correctement les @lid
+        const jid = this._normalizeId(userId);
         
         const sentIds = [];
         console.log(`[WA-Interactive] To: ${jid}, Buttons: ${buttons.length}, HasMedia: ${!!options.media_url}`);
