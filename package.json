@@ -21,7 +21,7 @@
   "license": "ISC",
   "dependencies": {
     "@supabase/supabase-js": "^2.98.0",
-    "@whiskeysockets/baileys": "^7.0.2",
+    "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "axios": "^1.13.6",
     "chart.js": "^4.4.1",
     "cors": "^2.8.5",

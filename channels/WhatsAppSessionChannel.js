@@ -125,8 +125,8 @@ class WhatsAppSessionChannel extends Channel {
              await claimLock(myInstanceId).catch(() => {});
         }, 15000);
 
-        // [🛡️ STABILITÉ] Récupération de la dernière version avec fallback (Mis à jour pour Android)
-        let version = [2, 3000, 1017539726];
+        // [🛡️ STABILITÉ] Récupération de la dernière version avec fallback
+        let version = [2, 3000, 1015901307];
         try {
             const latest = await fetchLatestBaileysVersion().catch(() => null);
             if (latest && latest.version) version = latest.version;
@@ -157,7 +157,7 @@ class WhatsAppSessionChannel extends Channel {
                 }, logger)
             },
             logger,
-            browser: ["Ubuntu", "Chrome", "115.0.0.0"],
+            browser: ["macOS", "Chrome", "115.0.0.0"],
             syncFullHistory: false,
             shouldSyncHistory: false,
             markOnlineOnConnect: true,
