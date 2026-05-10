@@ -2618,6 +2618,8 @@ async function useSupabaseAuthState(sessionId) {
     if (!credsRaw) console.log(`[WA-DB] ✨ Session ${sessionId} démarrée à NEUF`);
     else console.log(`[WA-DB] 📂 Session ${sessionId} chargée (nouveau: false)`);
 
+    const _keysCache = new Map(); // [🛡️ STABILITÉ] Cache mémoire anti-race condition
+
     return {
         state: {
             creds,
@@ -2625,8 +2627,17 @@ async function useSupabaseAuthState(sessionId) {
                 get: async (type, ids) => {
                     const data = {};
                     await Promise.all(ids.map(async (id) => {
-                        const value = await readData(`${type}-${id}`);
-                        if (value !== null && value !== undefined) data[id] = value;
+                        const cacheKey = `${type}-${id}`;
+                        if (_keysCache.has(cacheKey)) {
+                            const val = _keysCache.get(cacheKey);
+                            if (val) data[id] = val;
+                            return;
+                        }
+                        const value = await readData(cacheKey);
+                        if (value !== null && value !== undefined) {
+                            _keysCache.set(cacheKey, value);
+                            data[id] = value;
+                        }
                     }));
                     return data;
                 },
@@ -2635,8 +2646,14 @@ async function useSupabaseAuthState(sessionId) {
                     for (const cat in data) {
                         for (const id in data[cat]) {
                             const val = data[cat][id];
-                            if (val) tasks.push(writeData(`${cat}-${id}`, val));
-                            else tasks.push(removeData(`${cat}-${id}`));
+                            const cacheKey = `${cat}-${id}`;
+                            if (val) {
+                                _keysCache.set(cacheKey, val); // MaJ immédiate
+                                tasks.push(writeData(cacheKey, val));
+                            } else {
+                                _keysCache.delete(cacheKey);
+                                tasks.push(removeData(cacheKey));
+                            }
                         }
                     }
                     await Promise.all(tasks);
