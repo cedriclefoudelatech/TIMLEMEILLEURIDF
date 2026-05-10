@@ -149,7 +149,7 @@ class WhatsAppSessionChannel extends Channel {
                 keys: makeCacheableSignalKeyStore(state.keys, logger)
             },
             logger,
-            browser: Browsers.macOS('Chrome'), // Signature macOS plus stable sur Railway
+            browser: Browsers.ubuntu('Chrome'), // Signature Ubuntu plus stable sur Railway (évite les 401)
             syncFullHistory: false,
             shouldSyncHistory: false,
             markOnlineOnConnect: true, // [🛡️ STABILITÉ] Réactivé pour favoriser le déchiffrement initial
