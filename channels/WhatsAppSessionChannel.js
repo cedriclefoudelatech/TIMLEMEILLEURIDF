@@ -95,7 +95,6 @@ class WhatsAppSessionChannel extends Channel {
         // Prendre le lock
         await claimLock(myInstanceId).catch(e => waLog(`[WA-LOCK-ERR] Claim failed: ${e.message}`));
         waLog(`[WA-LOCK] Session locked for our instance: ${myInstanceId}`);
-        this.isActive = true; 
 
         // [🛡️ REDONDANCE] Heartbeat pour garder le lock vivant
         if (this._lockHeartbeat) clearInterval(this._lockHeartbeat);
