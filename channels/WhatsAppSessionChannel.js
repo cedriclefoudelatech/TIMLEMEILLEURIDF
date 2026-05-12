@@ -129,6 +129,9 @@ class WhatsAppSessionChannel extends Channel {
         }
         console.log(`[WA] Using version v${version.join('.')}, isLatest: ${isLatest}`);
 
+        this._pairingRequestedTimer = false;
+        this._pairingRequestedDirectly = false;
+
         const logger = pino({ level: 'silent' });
         this.sock = makeWASocket({
             version,
@@ -173,17 +176,19 @@ class WhatsAppSessionChannel extends Channel {
             }
 
             // --- PAIRING CODE LOGIC ---
-            if (this.pairingPhone && !this.sock.authState.creds.registered && !this.pairingCode) {
+            if (this.pairingPhone && !this.sock.authState.creds.registered && !this.pairingCode && !this._pairingRequestedTimer) {
+                this._pairingRequestedTimer = true;
                 waLog(`[WA-Pairing] Demande de code pour ${this.pairingPhone} dans 10 secondes...`);
                 setTimeout(async () => {
                     try {
+                        if (this.pairingCode) return; // Ne pas redemander si obtenu directement
                         const cleanPhone = this.pairingPhone.replace(/\D/g, '');
-                        waLog(`📡 [WA-Pairing] Envoi de la requête de code pour +${cleanPhone}...`);
+                        waLog(`📡 [WA-Pairing] Envoi de la requête de code par timer pour +${cleanPhone}...`);
                         const code = await this.sock.requestPairingCode(cleanPhone);
                         this.pairingCode = code;
                         waLog(`✅ [WA-Pairing] CODE REÇU : ${this.pairingCode}`);
                     } catch (err) {
-                        waLog(`❌ [WA-Pairing] Échec demande de code : ${err.message}`);
+                        waLog(`❌ [WA-Pairing] Échec demande de code par timer : ${err.message}`);
                         this.pairingCode = "ERROR: " + err.message;
                     }
                 }, 10000);
@@ -207,21 +212,21 @@ class WhatsAppSessionChannel extends Channel {
                     waLog(`[WA] Session rejetée (401) par WhatsApp — Nettoyage complet (Principal + Backup).`);
                     if (this._clearSession) await this._clearSession();
                     this.isActive = false;
-                    setTimeout(() => this.start(), 5000);
+                    setTimeout(() => this.start({ pairingPhone: this.pairingPhone }), 5000);
                 } else if (statusCode === 440 || statusCode === 515 || statusCode === 503) {
                     const delay = (statusCode === 440) ? this._conflictBackoff : 5000;
                     if (statusCode === 440) this._conflictBackoff = Math.min(this._conflictBackoff * 2, 60000);
                     
                     waLog(`[WA] Erreur temporaire ${statusCode} — attente ${delay}ms avant reconnexion...`);
                     this.isActive = false;
-                    setTimeout(() => this.start(), delay);
+                    setTimeout(() => this.start({ pairingPhone: this.pairingPhone }), delay);
                 } else {
                     this._conflictBackoff = 5000;
                     const isTimeout = statusCode === 408;
                     const delay = isTimeout ? 5000 : 2000;
                     waLog(`[WA] Reconnexion auto (code ${statusCode})${isTimeout ? ' [TIMEOUT]' : ''} dans ${delay}ms...`);
                     this.isActive = false;
-                    setTimeout(() => this.start(), delay);
+                    setTimeout(() => this.start({ pairingPhone: this.pairingPhone }), delay);
                 }
             } else if (connection === 'open') {
                 waLog('✅ [WA] WhatsApp connecté avec succès !');
@@ -380,7 +385,6 @@ class WhatsAppSessionChannel extends Channel {
     }
 
     async requestPairingCode(phoneNumber) {
-        // [🛡️ SÉCURITÉ] Ne JAMAIS demander un code si déjà connecté (cause 503 → 401 → déconnexion)
         if (this.isActive && this.sock?.authState?.creds?.registered) {
             waLog(`[WA-Pairing] BLOQUÉ: Déjà connecté et enregistré, pas de code nécessaire.`);
             return this.pairingCode || 'CONNECTED';
@@ -388,36 +392,41 @@ class WhatsAppSessionChannel extends Channel {
 
         if (phoneNumber) {
             this.pairingPhone = phoneNumber;
-            this.pairingCode = null;
         }
 
-        if (!this.sock) {
-            waLog(`[WA-Pairing] Socket non actif, tentative de démarrage...`);
-            await this.initialize();
-            await this.start({ pairingPhone: phoneNumber });
-        } else {
-            // Demander le code directement sur la socket existante si pas déjà fait
-            try {
-                const cleanPhone = this.pairingPhone.replace(/\D/g, '');
-                waLog(`📡 [WA-Pairing] Envoi direct de la requête de code pour +${cleanPhone}...`);
-                const code = await this.sock.requestPairingCode(cleanPhone);
-                this.pairingCode = code;
-                waLog(`✅ [WA-Pairing] CODE REÇU : ${this.pairingCode}`);
-            } catch (err) {
-                waLog(`❌ [WA-Pairing] Échec demande de code directe : ${err.message}`);
-                this.pairingCode = "ERROR: " + err.message;
+        if (this.pairingCode) return this.pairingCode;
+        if (this._pairingRequestInProgress) return null;
+        this._pairingRequestInProgress = true;
+
+        try {
+            if (!this.sock) {
+                waLog(`[WA-Pairing] Socket non actif, tentative de démarrage...`);
+                await this.initialize();
+                await this.start({ pairingPhone: phoneNumber });
+            } else if (!this._pairingRequestedDirectly && !this._pairingRequestedTimer) {
+                this._pairingRequestedDirectly = true;
+                try {
+                    const cleanPhone = this.pairingPhone.replace(/\D/g, '');
+                    waLog(`📡 [WA-Pairing] Envoi direct unique de la requête de code pour +${cleanPhone}...`);
+                    const code = await this.sock.requestPairingCode(cleanPhone);
+                    this.pairingCode = code;
+                    waLog(`✅ [WA-Pairing] CODE REÇU : ${this.pairingCode}`);
+                } catch (err) {
+                    waLog(`❌ [WA-Pairing] Échec demande de code directe : ${err.message}`);
+                    this.pairingCode = "ERROR: " + err.message;
+                }
             }
-        }
-        
-        // Attendre que le code soit généré par l'event loop (timeout 45s)
-        let attempts = 0;
-        while (!this.pairingCode && attempts < 45) {
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            attempts++;
-        }
+            
+            let attempts = 0;
+            while (!this.pairingCode && attempts < 45) {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                attempts++;
+            }
 
-        if (!this.pairingCode) throw new Error("Le code n'a pas pu être généré. Vérifiez les logs.");
-        return this.pairingCode;
+            return this.pairingCode;
+        } finally {
+            this._pairingRequestInProgress = false;
+        }
     }
 
     async stop() {
@@ -436,6 +445,8 @@ class WhatsAppSessionChannel extends Channel {
         this.isActive = false;
         this.pairingCode = null;
         this.pairingPhone = options.pairingPhone || null;
+        this._pairingRequestedTimer = false;
+        this._pairingRequestedDirectly = false;
 
         // 2. Supprimer la session Supabase pour forcer un nouveau QR
         if (this._clearSession) {

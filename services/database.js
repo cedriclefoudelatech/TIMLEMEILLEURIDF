@@ -2595,14 +2595,14 @@ async function useSupabaseAuthState(sessionId) {
 
     async function clearAllData() {
         try {
-            // Supprimer uniquement les entrées de la session PRIMAIRE
-            // On SPARE le namespace 'wa_backup' pour permettre une restauration de secours
+            // Supprimer toutes les entrées de cette session (Primaire ET Backup)
+            // On nettoie tout pour éviter la boucle infinie de restauration d'identifiants rejetés (401)
             const { error } = await supabase.from(TABLE).delete()
-                .eq('namespace', NAMESPACE)
+                .or(`namespace.eq.${NAMESPACE},namespace.eq.wa_backup`)
                 .filter('id', 'like', `%::${sessionId}::%`);
             
             if (error) throw error;
-            console.log(`[WA-DB] Session ${sessionId} cleared (Backups preserved)`);
+            console.log(`[WA-DB] Session ${sessionId} (and backup) cleared from Supabase`);
         } catch (e) {
             console.error('[WA-DB] clearAllData error:', e.message);
         }
