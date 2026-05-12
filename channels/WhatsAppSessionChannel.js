@@ -148,7 +148,7 @@ class WhatsAppSessionChannel extends Channel {
                 }, logger)
             },
             logger,
-            browser: Browsers.ubuntu('Desktop'),
+            browser: ["macOS", "Chrome", "115.0.0.0"],
             syncFullHistory: false,
             shouldSyncHistory: false,
             markOnlineOnConnect: true,
@@ -391,10 +391,22 @@ class WhatsAppSessionChannel extends Channel {
             this.pairingCode = null;
         }
 
-        if (!this.sock || !this.isActive) {
+        if (!this.sock) {
             waLog(`[WA-Pairing] Socket non actif, tentative de démarrage...`);
             await this.initialize();
             await this.start({ pairingPhone: phoneNumber });
+        } else {
+            // Demander le code directement sur la socket existante si pas déjà fait
+            try {
+                const cleanPhone = this.pairingPhone.replace(/\D/g, '');
+                waLog(`📡 [WA-Pairing] Envoi direct de la requête de code pour +${cleanPhone}...`);
+                const code = await this.sock.requestPairingCode(cleanPhone);
+                this.pairingCode = code;
+                waLog(`✅ [WA-Pairing] CODE REÇU : ${this.pairingCode}`);
+            } catch (err) {
+                waLog(`❌ [WA-Pairing] Échec demande de code directe : ${err.message}`);
+                this.pairingCode = "ERROR: " + err.message;
+            }
         }
         
         // Attendre que le code soit généré par l'event loop (timeout 45s)
