@@ -2500,29 +2500,35 @@ async function useSupabaseAuthState(sessionId) {
                 .abortSignal(AbortSignal.timeout(DB_TIMEOUT))
                 .single();
             
-            if (error && error.code !== 'PGRST116') {
-                console.error(`[WA-DB-READ-ERR] ${key}:`, error.message);
-                throw error;
+            if (error) {
+                if (error.code !== 'PGRST116') {
+                    console.error(`[WA-DB-READ-ERR] ${key}:`, error.message);
+                    throw error;
+                }
             }
 
             if (data) {
-                return JSON.parse(JSON.stringify(data.value), BufferJSON.reviver);
+                const creds = JSON.parse(JSON.stringify(data.value), BufferJSON.reviver);
+                console.log(`[WA-DB] Session primary data found for ${key} (creds registered: ${creds?.registered})`);
+                return creds;
             }
 
-            // [🛡️ REDONDANCE] On ne restaure QUE les 'creds' depuis le backup. 
-            // Restaurer d'anciennes clés Signal (session/pre-key) garantit un échec de déchiffrement.
-            if (key !== 'creds') return null;
-            if (global._wa_purging === sessionId) return null;
-
+            // [🛡️ REDONDANCE] Si la session principale est vide, on cherche dans le backup
             const backupId = `wa_backup::${sessionId}::${key}`;
-            const { data: backupData } = await supabase
+            const { data: backupData, error: backupError } = await supabase
                 .from(TABLE)
                 .select('value')
                 .eq('id', backupId)
                 .maybeSingle();
 
+            if (backupError) {
+                console.error(`[WA-DB-BACKUP-ERR] ${backupId}:`, backupError.message);
+                throw backupError;
+            }
+
             if (backupData) {
                 console.log(`[WA-DB] 🛡️ Restoring session from BACKUP for ${key}`);
+                // Restauration vers la session principale
                 const serialized = JSON.parse(JSON.stringify(backupData.value));
                 supabase.from(TABLE).upsert({
                     id: makeId(key),
@@ -2534,27 +2540,26 @@ async function useSupabaseAuthState(sessionId) {
 
                 return JSON.parse(JSON.stringify(backupData.value), BufferJSON.reviver);
             }
+            console.log(`[WA-DB] ⚠️ No session data found for ${key} in primary or backup.`);
 
             return null;
         } catch (e) {
             console.error(`[WA-DB-READ-ERR] Key ${key}:`, e.message);
-            throw e; 
+            throw e; // Propage l'erreur pour empêcher une mauvaise init
         }
     }
 
-    // File d'attente par SESSION pour garantir l'ordre global des écritures (Crucial pour Signal)
-    if (!global.wa_session_queues) global.wa_session_queues = {};
-
     async function writeData(key, value) {
-        const id = makeId(key);
-        const queueKey = sessionId;
-        
-        if (!global.wa_session_queues[queueKey]) global.wa_session_queues[queueKey] = Promise.resolve();
+        try {
+            const serialized = JSON.parse(JSON.stringify(value, BufferJSON.replacer));
+            const id = makeId(key);
+            
+            // Verrou local préventif (collision-safe)
+            if (global.wa_db_locks?.[id]) return;
+            if (!global.wa_db_locks) global.wa_db_locks = {};
+            global.wa_db_locks[id] = true;
 
-        // [⚡ OPTIMISATION] On enchaîne correctement la tâche sur la file d'attente globale
-        const task = global.wa_session_queues[queueKey].then(async () => {
             try {
-                const serialized = JSON.parse(JSON.stringify(value, BufferJSON.replacer));
                 const payload = {
                     id: id,
                     namespace: NAMESPACE,
@@ -2563,56 +2568,47 @@ async function useSupabaseAuthState(sessionId) {
                     updated_at: new Date().toISOString()
                 };
 
-                await supabase.from(TABLE).upsert(payload).abortSignal(AbortSignal.timeout(DB_TIMEOUT));
+                // Écriture principale
+                await supabase.from(TABLE).upsert(payload, { onConflict: 'id' }).abortSignal(AbortSignal.timeout(DB_TIMEOUT));
 
-                // Backup silencieux
+                // Écriture redondante (Backup) - Persiste même après clearSession()
                 const backupId = `wa_backup::${sessionId}::${key}`;
-                await supabase.from(TABLE).upsert({ ...payload, id: backupId, namespace: 'wa_backup' });
-            } catch (e) {
-                console.error(`[WA-DB] writeData error for ${key}:`, e.message);
+                await supabase.from(TABLE).upsert({
+                    ...payload,
+                    id: backupId,
+                    namespace: 'wa_backup'
+                }, { onConflict: 'id' });
+            } finally {
+                delete global.wa_db_locks[id];
             }
-        }).catch(() => {});
 
-        global.wa_session_queues[queueKey] = task;
-        return task;
-    }
-
-    // [⏳ DEBOUNCE] Éviter de saturer Supabase sur les creds.update fréquents
-    let credsTimeout = null;
-    function debouncedSaveCreds() {
-        if (credsTimeout) return;
-        credsTimeout = setTimeout(async () => {
-            await writeData('creds', creds);
-            credsTimeout = null;
-        }, 5000); 
+        } catch (e) {
+            console.error(`[WA-DB] writeData error for key ${key}:`, e.message);
+        }
     }
 
     async function removeData(key) {
-        try { await supabase.from(TABLE).delete().eq('id', makeId(key)); } catch (e) { }
+        try {
+            await supabase.from(TABLE).delete().eq('id', makeId(key));
+        } catch (e) { }
     }
 
     async function clearAllData() {
         try {
-            console.log(`[WA-DB] 💥 PURGE TOTALE pour ${sessionId}...`);
-            global._wa_purging = sessionId; 
+            // Supprimer uniquement les entrées de la session PRIMAIRE
+            // On SPARE le namespace 'wa_backup' pour permettre une restauration de secours
+            const { error } = await supabase.from(TABLE).delete()
+                .eq('namespace', NAMESPACE)
+                .filter('id', 'like', `%::${sessionId}::%`);
             
-            const tasks = [
-                supabase.from(TABLE).delete().like('id', `%${sessionId}%`),
-                supabase.from(TABLE).delete().eq('namespace', NAMESPACE).like('id', `%${sessionId}%`),
-                supabase.from(TABLE).delete().eq('namespace', 'wa_backup').like('id', `%${sessionId}%`),
-                supabase.from(TABLE).delete().eq('user_key', sessionId),
-                supabase.from(TABLE).delete().eq('id', `wa_lock::${sessionId}`),
-                supabase.from(TABLE).delete().eq('id', `global_lock::${sessionId}`)
-            ];
-            await Promise.all(tasks);
-            console.log(`[WA-DB] ✅ Fin de purge pour ${sessionId}.`);
-            setTimeout(() => { global._wa_purging = null; }, 10000);
+            if (error) throw error;
+            console.log(`[WA-DB] Session ${sessionId} cleared (Backups preserved)`);
         } catch (e) {
             console.error('[WA-DB] clearAllData error:', e.message);
         }
     }
 
-    // Chargement initial des credentials avec retry
+    // Chargement initial des credentials depuis Supabase (avec retry léger pour éviter le crash au boot)
     let credsRaw = null;
     let attempts = 0;
     while (attempts < 3) {
@@ -2621,16 +2617,21 @@ async function useSupabaseAuthState(sessionId) {
             break;
         } catch (dbErr) {
             attempts++;
-            if (attempts >= 3) throw new Error(`CRITICAL_STORAGE_ERROR: ${dbErr.message}`);
-            await new Promise(r => setTimeout(r, 3000));
+            if (attempts >= 3) {
+                console.error(`[WA-DB-CRITICAL] Échec définitif après 3 tentatives (${dbErr.message}).`);
+                throw new Error(`CRITICAL_STORAGE_ERROR: ${dbErr.message}`);
+            }
+            console.warn(`[WA-DB-RETRY] Tentative ${attempts}/3 échouée (${dbErr.message}). Nouvel essai dans 5s...`);
+            await new Promise(r => setTimeout(r, 5000));
         }
     }
 
     const creds = credsRaw || initAuthCreds();
-    if (!credsRaw) console.log(`[WA-DB] ✨ Session ${sessionId} démarrée à NEUF`);
-    else console.log(`[WA-DB] 📂 Session ${sessionId} chargée (nouveau: false)`);
-
-    const _keysCache = new Map(); // [🛡️ STABILITÉ] Cache mémoire anti-race condition
+    if (!credsRaw) {
+        console.warn(`[WA-DB] ⚠️ AUCUNE SESSION TROUVÉE pour ${sessionId}. Prêt pour un nouveau QR code (Backup vide également).`);
+    } else {
+        console.log(`[WA-DB] Auth state chargé avec succès (session: ${sessionId})`);
+    }
 
     return {
         state: {
@@ -2639,15 +2640,8 @@ async function useSupabaseAuthState(sessionId) {
                 get: async (type, ids) => {
                     const data = {};
                     await Promise.all(ids.map(async (id) => {
-                        const cacheKey = `${type}-${id}`;
-                        if (_keysCache.has(cacheKey)) {
-                            const val = _keysCache.get(cacheKey);
-                            if (val) data[id] = val;
-                            return;
-                        }
-                        const value = await readData(cacheKey);
+                        const value = await readData(`${type}-${id}`);
                         if (value !== null && value !== undefined) {
-                            _keysCache.set(cacheKey, value);
                             data[id] = value;
                         }
                     }));
@@ -2655,16 +2649,13 @@ async function useSupabaseAuthState(sessionId) {
                 },
                 set: async (data) => {
                     const tasks = [];
-                    for (const cat in data) {
-                        for (const id in data[cat]) {
-                            const val = data[cat][id];
-                            const cacheKey = `${cat}-${id}`;
-                            if (val) {
-                                _keysCache.set(cacheKey, val); // MaJ immédiate
-                                tasks.push(writeData(cacheKey, val));
+                    for (const category in data) {
+                        for (const id in data[category]) {
+                            const value = data[category][id];
+                            if (value) {
+                                tasks.push(writeData(`${category}-${id}`, value));
                             } else {
-                                _keysCache.delete(cacheKey);
-                                tasks.push(removeData(cacheKey));
+                                tasks.push(removeData(`${category}-${id}`));
                             }
                         }
                     }
@@ -2672,11 +2663,21 @@ async function useSupabaseAuthState(sessionId) {
                 }
             }
         },
-        saveCreds: debouncedSaveCreds,
+        saveCreds: () => writeData('creds', creds),
         clearSession: clearAllData,
+        // LOCK SYSTEM 
         claimLock: (ownerId) => claimLock(`wa_lock::${sessionId}`, ownerId),
         checkLock: () => checkLock(`wa_lock::${sessionId}`),
-        releaseLock: (ownerId) => releaseLock(`wa_lock::${sessionId}`, ownerId)
+        releaseLock: (ownerId) => releaseLock(`wa_lock::${sessionId}`, ownerId),
+
+        // [🛡️ UI PERSISTENCE] Persistance des boutons pour le nettoyage des messages après restart
+        getMetadata: async (key) => {
+            const data = await readData(`meta-${key}`);
+            return data;
+        },
+        saveMetadata: async (key, value) => {
+            await writeData(`meta-${key}`, value);
+        }
     };
 }
 
