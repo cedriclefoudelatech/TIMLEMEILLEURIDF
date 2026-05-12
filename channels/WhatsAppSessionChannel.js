@@ -157,7 +157,7 @@ class WhatsAppSessionChannel extends Channel {
                 }, logger)
             },
             logger,
-            browser: ["macOS", "Chrome", "115.0.0.0"],
+            browser: Browsers.appropriate('Desktop'),
             syncFullHistory: false,
             shouldSyncHistory: false,
             markOnlineOnConnect: true,

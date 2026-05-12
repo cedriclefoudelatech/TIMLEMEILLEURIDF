@@ -2551,7 +2551,7 @@ async function useSupabaseAuthState(sessionId) {
         
         if (!global.wa_session_queues[queueKey]) global.wa_session_queues[queueKey] = Promise.resolve();
 
-        // [⚡ OPTIMISATION] On retourne une promesse qui se résout dès que la MaJ PRINCIPALE est faite
+        // [⚡ OPTIMISATION] On enchaîne correctement la tâche sur la file d'attente globale
         const task = global.wa_session_queues[queueKey].then(async () => {
             try {
                 const serialized = JSON.parse(JSON.stringify(value, BufferJSON.replacer));
@@ -2571,9 +2571,10 @@ async function useSupabaseAuthState(sessionId) {
             } catch (e) {
                 console.error(`[WA-DB] writeData error for ${key}:`, e.message);
             }
-        });
-        
-        return global.wa_session_queues[queueKey];
+        }).catch(() => {});
+
+        global.wa_session_queues[queueKey] = task;
+        return task;
     }
 
     // [⏳ DEBOUNCE] Éviter de saturer Supabase sur les creds.update fréquents
