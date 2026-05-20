@@ -23,9 +23,27 @@ const fs = require('fs');
 const qrcodeTerminal = require('qrcode-terminal');
 const qrcodeImage = require('qrcode');
 
-
-
 const { waLogs, waLog } = require('../services/wa_log_shared');
+
+// [🛡️ STABILITÉ] Enregistrement unique des signaux au niveau module
+// Évite l'accumulation de listeners process.once à chaque reconnexion WA
+let _moduleReleaseLock = null;
+let _moduleInstanceId = null;
+let _signalHandlersRegistered = false;
+
+function _registerSignalHandlersOnce() {
+    if (_signalHandlersRegistered) return;
+    _signalHandlersRegistered = true;
+    const shutdown = async (signal) => {
+        if (_moduleReleaseLock && _moduleInstanceId) {
+            waLog(`[WA-EXIT] Releasing lock for ${_moduleInstanceId}...`);
+            await _moduleReleaseLock(_moduleInstanceId).catch(() => {});
+        }
+        // Ne pas appeler process.exit ici — laisser le gracefulShutdown de index.js prendre la main
+    };
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    process.on('SIGINT',  () => shutdown('SIGINT'));
+}
 
 class WhatsAppSessionChannel extends Channel {
     constructor(config) {
@@ -102,16 +120,10 @@ class WhatsAppSessionChannel extends Channel {
              await claimLock(myInstanceId).catch(() => {});
         }, 15000);
 
-        // Graceful shutdown: release lock on SIGTERM/SIGINT
-        const shutdown = async () => {
-            if (this._releaseLock) {
-                waLog(`[WA-EXIT] Releasing lock for ${myInstanceId}...`);
-                await this._releaseLock(myInstanceId).catch(() => {});
-            }
-            process.exit(0);
-        };
-        process.once('SIGTERM', shutdown);
-        process.once('SIGINT', shutdown);
+        // [🛡️ STABILITÉ] Mise à jour de la référence globale du lock (handler enregistré une seule fois au module)
+        _moduleReleaseLock = releaseLock;
+        _moduleInstanceId = myInstanceId;
+        _registerSignalHandlersOnce();
 
         let version = [2, 3000, 1015901307]; // Fallback 
         let isLatest = false;
